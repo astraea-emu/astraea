@@ -37,6 +37,11 @@ trace_raw_graphics_packet_v0(
     const astraea::graphics::RawPacket& packet);
 
 [[nodiscard]] GraphicsTraceEventResultV0
+trace_graphics_packet_error_v0(
+    std::uint64_t event_id,
+    const astraea::graphics::PacketError& error);
+
+[[nodiscard]] GraphicsTraceEventResultV0
 trace_graphics_ir_v0(
     std::uint64_t event_id,
     const astraea::graphics::GraphicsIrEmission& emission);
@@ -45,6 +50,11 @@ trace_graphics_ir_v0(
 trace_rdna2_decode_v0(
     std::uint64_t event_id,
     const astraea::graphics::Rdna2Instruction& instruction);
+
+[[nodiscard]] GraphicsTraceEventResultV0
+trace_rdna2_decode_error_v0(
+    std::uint64_t event_id,
+    const astraea::graphics::Rdna2DecodeError& error);
 
 [[nodiscard]] GraphicsTraceEventResultV0
 trace_shader_ir_v0(
