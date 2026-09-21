@@ -2,7 +2,7 @@
 
 A verification-first PlayStation 5 compatibility research and emulation project.
 
-> **Status:** M2 controlled execution complete for trusted Astraea-owned x86-64 probes on Linux and Windows. Astraea does not currently run PlayStation 5 software.
+> **Status:** M3 behavioral evidence and differential tooling is active. M2 controlled execution is complete for trusted Astraea-owned x86-64 probes on Linux and Windows. Astraea does not currently run PlayStation 5 software.
 
 ## Principles
 
@@ -34,9 +34,11 @@ See:
 
 ## Current milestone
 
-**M2 — Controlled execution**
+**M3 — Behavioral evidence and differential tooling**
 
-The validated ELF/guest-image pipeline, guarded native x86-64 execution backends, bounded synthetic HLE path, and `probe_hello.elf` end-to-end proof are complete on Linux and Windows. The next frontier is evidence-driven PS5 executable/module research, controlled probe specification, and trace/diff infrastructure before broader platform HLE or graphics work.
+M2's validated ELF/guest-image pipeline, guarded Linux and Windows x86-64 execution backends, bounded synthetic HLE path, and `probe_hello.elf` proof are complete. M3 now includes the public PS5 executable/module ABI evidence map, AstraeaProbe v0, Trace v0 normalization/serialization, deterministic first-divergence tooling, and the RDNA2/PS5 graphics evidence map.
+
+The current implementation frontier is deliberately narrow: typed graphics-frontend parsing with raw provenance, evidence-backed SCE metadata parsing, a generic RDNA2 decoder, minimal Graphics IR / Shader IR contracts, and Trace v0 adapters before any Vulkan backend work.
 
 No compatibility claims should be made until the corresponding behavior is implemented and covered by tests.
 
