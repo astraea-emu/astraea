@@ -1,0 +1,27 @@
+# CMake/build output
+/out/
+/build/
+cmake-build-*/
+CMakeUserPresets.json
+compile_commands.json
+
+# IDE/editor
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+
+# Local tooling
+.cache/
+.ccache/
+
+# Local/private research artifacts — never commit firmware, keys, game dumps, or proprietary SDK material
+/local/
+research-private/
+artifacts-private/
+
+# Coverage/profiling
+*.profraw
+*.profdata
+coverage/
