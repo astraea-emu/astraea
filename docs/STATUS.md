@@ -1,9 +1,9 @@
 # Project Status
 
 **Milestone:** M3 — Behavioral evidence and differential tooling  
-**State:** M2 complete; M3 evidence/trace foundations plus raw graphics, SCE metadata, and minimal RDNA2 decode complete; minimal Graphics IR in progress  
+**State:** M2 complete; M3 evidence/trace foundations plus raw graphics, SCE metadata, RDNA2 decode, and Graphics IR complete; minimal Shader IR in progress  
 **Repository:** astraea-emu/astraea  
-**Active branch:** `feat/m3-minimal-graphics-ir`
+**Active branch:** `feat/m3-minimal-shader-ir`
 
 ## Complete
 
@@ -19,6 +19,7 @@
 - Raw graphics packet/header preservation slice with synthetic fixtures (#29).
 - Evidence-backed SCE dynamic metadata classification/preservation (#30).
 - Minimal generic RDNA2 SOPP decoder from AMD document 70648 (#31).
+- Minimal host-independent Graphics IR semantic/provenance boundary (#32).
 - Public five-gate CI remains the merge requirement:
   - Linux x64
   - Windows x64
@@ -28,9 +29,8 @@
 
 ## Current frontier
 
-1. #32 — minimal Graphics IR semantic/provenance boundary — in progress on this branch.
-2. #33 — freeze the minimal host-independent Shader IR contract.
-3. #34 — add Trace v0 adapters at graphics frontend/IR boundaries after the relevant contracts exist.
+1. #33 — minimal Shader IR for the current SOPP subset — in progress on this branch.
+2. #34 — add Trace v0 adapters at graphics frontend/IR boundaries after the relevant contracts exist.
 
 ## SCE metadata boundary
 
@@ -80,7 +80,6 @@ PS5-specific assumptions require documented evidence.
 
 ## Next action
 
-Validate #32 across the five-gate matrix. The first Graphics IR contract should
-carry unknown packet semantics explicitly while keeping raw packet evidence as
-separate provenance. Do not invent draw/bind/barrier semantics before evidence
-justifies them.
+Validate #33 across the five-gate matrix. Keep Shader IR limited to semantics
+required by the current AMD-documented SOPP subset, preserve raw instruction
+provenance separately, and do not add PS5 stage ABI, SPIR-V, or Vulkan coupling.
