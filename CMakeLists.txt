@@ -61,6 +61,7 @@ add_library(astraea_core STATIC
     src/graphics/packet.cpp
     src/graphics/graphics_ir.cpp
     src/graphics/rdna2_decoder.cpp
+    src/graphics/shader_ir.cpp
     src/trace/v0.cpp
     src/trace/diff_v0.cpp
 )
