@@ -97,11 +97,10 @@ Pm4ParseResult parse_generic_pm4_type3(
                         available_words));
             }
 
-            const auto packet_begin = words.begin() +
-                                      static_cast<std::ptrdiff_t>(word_index);
-            const auto packet_end = packet_begin +
-                                    static_cast<std::ptrdiff_t>(
-                                        total_word_count);
+            const auto packet_words =
+                words.subspan(
+                    word_index,
+                    total_word_count);
 
             Pm4Packet packet{
                 .word_index = word_index,
@@ -118,8 +117,8 @@ Pm4ParseResult parse_generic_pm4_type3(
                     },
                 .raw_words =
                     std::vector<std::uint32_t>(
-                        packet_begin,
-                        packet_end),
+                        packet_words.begin(),
+                        packet_words.end()),
             };
 
             command_buffer.packets.push_back(
