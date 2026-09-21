@@ -140,7 +140,9 @@ GuestImage::materialize_tls() const {
 }
 
 [[nodiscard]] GuestImageResult build_guest_image_impl(GuestImageRequest request) {
-    auto parsed = parse_elf64(request.image_bytes);
+    auto parsed = parse_elf64(
+        request.image_bytes,
+        request.elf_profile);
     if (!parsed.has_value()) {
         return GuestImageResult::failure(
             image_error(
