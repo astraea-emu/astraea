@@ -14,3 +14,7 @@ A useful research note contains:
 - date of last verification
 
 Do not store proprietary dumps, keys, firmware, SDK material, or copyrighted retail content here.
+
+## Evidence maps
+
+- [PS5 executable/module ABI](ps5-executable-module-abi.md) — public evidence for SCE ELF/module metadata, identity, NIDs, and unresolved ABI questions.
