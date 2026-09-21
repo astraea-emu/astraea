@@ -1,9 +1,9 @@
 # Project Status
 
 **Milestone:** M4 — Platform/HLE expansion  
-**State:** First owned PS5/SCE-oriented synthetic prototype complete; evidence-backed SCE program-header classification in progress  
+**State:** First owned PS5/SCE-oriented synthetic prototype complete; multi-import HLE resume proof in progress  
 **Repository:** astraea-emu/astraea  
-**Active branch:** `feat/m4-sce-program-header-vocabulary`
+**Active branch:** `feat/m4-sce-multi-import-proof`
 
 ## Complete
 
@@ -30,6 +30,7 @@
 - Explicit opt-in PS5/SCE ELF parse profile for 0xFE10 / 0xFE18 (#54).
 - Validated synthetic JUMP_SLOT patch application through GuestMemoryAccess (#56).
 - Owned SCE-profile ELF end-to-end import/execution proof through HLE exit 42 (#57).
+- Evidence-backed SCE program-header vocabulary classification/preservation (#61).
 - Public five-gate CI remains the merge requirement:
   - Linux x64
   - Windows x64
@@ -39,8 +40,8 @@
 
 ## Current frontier
 
-1. #61 — classify the evidence-backed SCE program-header vocabulary while preserving complete raw headers — in progress on this branch.
-2. Runtime semantics for dynlib/process-parameter/RELRO headers remain unsupported until stronger evidence justifies them.
+1. #63 — prove two exact SCE imports can be independently resolved/patched and execute write → HLE resume → exit — in progress on this branch.
+2. Keep unsupported relocation/load-bias and SCE program-header runtime semantics explicit; do not guess them.
 
 ## SCE metadata boundary
 
@@ -99,6 +100,6 @@ PS5-specific assumptions require documented evidence.
 
 ## Next action
 
-Validate #61 across the five-gate matrix. Keep the generic ELF parser unchanged
-and treat this as classification/preservation only; no SCE program-header runtime
-semantics belong in this slice.
+Validate #63 across the five-gate matrix. Prefer a test-only proof if existing
+production primitives already compose correctly; do not add new PS5 ABI or relocation
+semantics merely to make the synthetic fixture pass.
