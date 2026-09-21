@@ -1229,9 +1229,7 @@ TEST_CASE(
 
     const astraea::execution::SceJumpSlotPatch patch{
         .relocation_target =
-            GuestAddress{
-                layout.data_base +
-                layout.page},
+            GuestAddress{layout.gate_base},
         .gate_destination =
             GuestAddress{layout.gate_base},
         .gate_slot = 0,
