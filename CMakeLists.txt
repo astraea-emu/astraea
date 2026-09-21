@@ -27,6 +27,11 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND
     enable_language(ASM)
 endif()
 
+if(WIN32 AND MSVC AND
+   CMAKE_SYSTEM_PROCESSOR MATCHES "^(x86_64|AMD64)$")
+    enable_language(ASM_MASM)
+endif()
+
 add_library(astraea_core STATIC
     src/core/version.cpp
     src/loader/elf64.cpp
@@ -47,6 +52,8 @@ add_library(astraea_core STATIC
     src/execution/linux_execution.cpp
     src/execution/hle.cpp
     src/execution/linux_session.cpp
+    src/execution/windows_execution.cpp
+    src/execution/windows_memory.cpp
     src/execution/hle_runtime.cpp
     src/execution/guest_memory.cpp
     src/probe/hello.cpp
@@ -55,6 +62,13 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND
    CMAKE_SYSTEM_PROCESSOR MATCHES "^(x86_64|AMD64)$")
     target_sources(astraea_core PRIVATE
         src/execution/linux_transition.S
+    )
+endif()
+
+if(WIN32 AND MSVC AND
+   CMAKE_SYSTEM_PROCESSOR MATCHES "^(x86_64|AMD64)$")
+    target_sources(astraea_core PRIVATE
+        src/execution/windows_transition.asm
     )
 endif()
 

@@ -1,55 +1,55 @@
 # Project Status
 
 **Milestone:** M2 — Controlled execution  
-**State:** Linux end-to-end controlled execution proof complete; Windows parity remains  
+**State:** Linux end-to-end controlled execution complete; Windows x86-64 parity in review  
 **Repository:** astraea-emu/astraea  
-**Active branch:** `main`
+**Active branch:** `feat/m2-windows-native-backend`
 
 ## Complete
 
 - M0 engineering foundation.
 - M1 validated `GuestImage`.
-- M2 guarded native x86-64 execution architecture.
-- M2 portable `GuestCpuContext`, backend stop/fault model, and execution-memory planner.
+- M2 portable execution context/backend/memory-planning contracts.
 - Linux exact-address guest memory preparation and teardown (#2).
-- Synthetic host-gate / HLE dispatch ABI specification (#3).
+- Synthetic host-gate / HLE dispatch ABI (#3).
 - Synthetic HLE registry and gate-region model (#13).
 - Linux native register transition and scoped fault recovery (#4).
-- Bounded guest-memory access and synthetic `test.write` / `test.exit` services (#14).
-- Full Linux x86-64 register re-entry, including HLE return values in RAX.
-- First Astraea-owned ELF64 probe executed end to end (#15):
-  - strict M1 ELF / `GuestImage` validation
+- Bounded guest-memory access and synthetic `test.write` / `test.exit` (#14).
+- Astraea-owned `probe_hello.elf` end-to-end proof (#15):
+  - strict ELF / `GuestImage` validation
   - exact-address Linux memory preparation
-  - guarded native x86-64 entry
-  - `astraea.test.write`
-  - guest-side RAX verification after resume
+  - native x86-64 entry
+  - host gate -> `test.write`
+  - guest-side RAX validation after resume
   - exact output `Hello from guest`
-  - `astraea.test.exit(42)`
+  - host gate -> `test.exit(42)`
   - deterministic repeated execution
-  - structured guest-entry, gate-stop, HLE-resume, and HLE-exit events
-- Public five-gate CI:
-  - Linux x64
-  - Windows x64
-  - macOS ARM64
-  - Linux ASan + UBSan
-  - Linux Clang fuzz smoke
+  - structured execution events
+- Public five-gate CI remains the merge requirement.
 
 ## Current frontier
 
-1. #5 — implement the equivalent guarded Windows x86-64 native backend.
-2. Run the same controlled synthetic entry, gate, GPR, fault, and teardown cases on Windows.
-3. After Linux/Windows controlled execution parity, expand synthetic probes and begin evidence-driven platform HLE.
-4. Build the later trace/diff/replay layer on top of the structured execution evidence rather than adding ad hoc logging.
+1. #5 — guarded Windows x86-64 native backend — in review on this branch.
+2. Prove Windows exact-address preparation, W^X, gate entry/recovery, GPR capture, access/illegal faults, and deterministic teardown under the public Windows runner.
+3. After Windows parity, close M2 controlled-execution foundation and begin the evidence-driven PS5-facing layer:
+   - #8 executable/module ABI evidence
+   - #10 AstraeaProbe v0 format
+   - #6/#7 trace schema and divergence tooling
+   - platform import/HLE work only from evidence
 
-## Controlled execution proof
+## Windows #5 scope
 
-The current Linux proof is a complete:
-
-`ELF bytes -> strict loader -> GuestImage -> exact guest memory -> native guest entry -> host gate -> HLE -> validated resume -> host gate -> exit`
-
-The owned probe deliberately executes `UD2` if `test.write` returns the wrong
-value in RAX or if `test.exit` incorrectly resumes, preventing a false-positive
-end-to-end result.
+- exact guest-address reservation using Win32 virtual memory primitives
+- allocation-granularity-aware reservations without replacing existing mappings
+- staged RW population followed by final W^X protections
+- instruction-cache synchronization
+- Windows x64 transition thunk preserving required host ABI state
+- portable `GuestCpuContext` installation/capture
+- vectored exception recovery for guest access, illegal-instruction, and arithmetic faults
+- exact synthetic gate recognition
+- unrelated process exceptions are not consumed
+- deterministic memory/gate/handler teardown
+- trusted Astraea-owned synthetic probes only
 
 ## Execution boundary
 
@@ -66,5 +66,6 @@ PS5-specific assumptions require documented evidence.
 
 ## Next action
 
-Implement #5 using the same portable context, memory-safety, host-gate, and
-fault-normalization contracts already proven on Linux.
+Run #5 through the public five-gate matrix. Fix Windows-specific compiler/runtime
+issues without weakening the Linux/macOS portability gates, then merge only when
+the controlled Windows cases are green.
