@@ -1,9 +1,9 @@
 # Project Status
 
 **Milestone:** M4 — Platform/HLE expansion  
-**State:** M2 controlled execution complete; M3 trace/graphics boundaries integrated; SCE ELF profile/import resolution/JUMP_SLOT construction complete; validated guest-memory patch application in progress  
+**State:** M2 controlled execution complete; M3 trace/graphics boundaries integrated; SCE ELF/import/JUMP_SLOT/guest-memory plumbing complete; owned end-to-end PS5/SCE-shaped prototype proof in progress  
 **Repository:** astraea-emu/astraea  
-**Active branch:** `feat/m4-apply-jump-slot-patch`
+**Active branch:** `feat/m4-sce-prototype-proof`
 
 ## Complete
 
@@ -28,6 +28,7 @@
 - Validated relocation + exact SCE identity + exact HLE binding resolution plan (#50).
 - Portable x86-64 R_X86_64_JUMP_SLOT synthetic gate patch builder (#52).
 - Explicit opt-in PS5/SCE ELF parse profile for 0xFE10 / 0xFE18 (#54).
+- Validated synthetic JUMP_SLOT patch application through GuestMemoryAccess (#56).
 - Public five-gate CI remains the merge requirement:
   - Linux x64
   - Windows x64
@@ -37,8 +38,8 @@
 
 ## Current frontier
 
-1. #56 — apply an already-validated synthetic JUMP_SLOT patch through GuestMemoryAccess — in progress on this branch.
-2. #57 — execute the owned SCE-shaped import fixture end to end; completion of #57 is the current first PS5-oriented prototype milestone.
+1. #57 — execute the owned SCE-shaped import fixture end to end — in progress on this branch.
+2. Completion of #57 is the current first PS5-oriented prototype milestone. Commercial compatibility remains a later milestone.
 
 ## SCE metadata boundary
 
@@ -88,6 +89,6 @@ PS5-specific assumptions require documented evidence.
 
 ## Next action
 
-Validate #56 across the five-gate matrix. Patch application must go only through
-GuestMemoryAccess::write() and preserve typed memory failures. Then complete #57's
-owned SCE-shaped end-to-end import/execution proof without broadening to retail input.
+Validate #57 across the five-gate matrix. The owned fixture must traverse the real
+GuestImage -> SCE identity -> exact HLE binding -> PLT RELA JUMP_SLOT -> guest-memory
+patch -> native Linux execution -> HLE exit path. Do not broaden to retail input.
