@@ -327,3 +327,83 @@ TEST_CASE(
             diagnostics[1].name ==
         "source_raw_encoding");
 }
+
+
+TEST_CASE(
+    "typed graphics frontend errors remain observable without making ranges semantic",
+    "[trace][graphics][v0]") {
+    const astraea::graphics::PacketError left_error{
+        .code =
+            astraea::graphics::PacketErrorCode::
+                packet_range_out_of_bounds,
+        .word_offset = 2,
+        .word_count = 4,
+    };
+    const astraea::graphics::PacketError right_error{
+        .code =
+            astraea::graphics::PacketErrorCode::
+                packet_range_out_of_bounds,
+        .word_offset = 7,
+        .word_count = 9,
+    };
+
+    auto left =
+        astraea::trace::trace_graphics_packet_error_v0(
+            70,
+            left_error);
+    auto right =
+        astraea::trace::trace_graphics_packet_error_v0(
+            70,
+            right_error);
+
+    REQUIRE(left.has_value());
+    REQUIRE(right.has_value());
+    REQUIRE(left->type == "error");
+    REQUIRE(left->stable.size() == 1);
+    REQUIRE(left->stable[0].name == "code");
+    REQUIRE(left->diagnostics.size() == 2);
+
+    require_equivalent(
+        std::move(left).value(),
+        std::move(right).value());
+}
+
+TEST_CASE(
+    "typed RDNA2 decode errors remain observable without making host ranges semantic",
+    "[trace][graphics][v0]") {
+    const astraea::graphics::Rdna2DecodeError left_error{
+        .code =
+            astraea::graphics::Rdna2DecodeErrorCode::
+                instruction_out_of_bounds,
+        .word_index = 3,
+        .available_words = 2,
+    };
+    const astraea::graphics::Rdna2DecodeError right_error{
+        .code =
+            astraea::graphics::Rdna2DecodeErrorCode::
+                instruction_out_of_bounds,
+        .word_index = 8,
+        .available_words = 5,
+    };
+
+    auto left =
+        astraea::trace::trace_rdna2_decode_error_v0(
+            80,
+            left_error);
+    auto right =
+        astraea::trace::trace_rdna2_decode_error_v0(
+            80,
+            right_error);
+
+    REQUIRE(left.has_value());
+    REQUIRE(right.has_value());
+    REQUIRE(left->subsystem == "shader.decode");
+    REQUIRE(left->type == "error");
+    REQUIRE(left->stable.size() == 1);
+    REQUIRE(left->stable[0].name == "code");
+    REQUIRE(left->diagnostics.size() == 2);
+
+    require_equivalent(
+        std::move(left).value(),
+        std::move(right).value());
+}
