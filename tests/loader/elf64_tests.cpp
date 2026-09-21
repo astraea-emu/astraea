@@ -375,3 +375,73 @@ TEST_CASE("PT_LOAD entries must be ordered by virtual address", "[loader][elf64]
     REQUIRE(result.error().code == astraea::loader::ElfErrorCode::load_segments_out_of_order);
     REQUIRE(result.error().program_header_index == 1);
 }
+
+
+TEST_CASE(
+    "SCE ELF file types require the explicit PS5/SCE parse profile",
+    "[loader][elf64][sce]") {
+    constexpr std::array<std::uint16_t, 2> supported{
+        0xfe10,
+        0xfe18,
+    };
+
+    for (const auto type : supported) {
+        DYNAMIC_SECTION("type 0x" << std::hex << type) {
+            auto bytes = make_elf();
+            write_u16(bytes, 16, type);
+
+            const auto generic =
+                astraea::loader::parse_elf64(bytes);
+            REQUIRE_FALSE(generic.has_value());
+            REQUIRE(
+                generic.error().code ==
+                astraea::loader::ElfErrorCode::
+                    unsupported_file_type);
+
+            const auto sce =
+                astraea::loader::parse_elf64(
+                    bytes,
+                    astraea::loader::
+                        ElfParseProfile::ps5_sce);
+            REQUIRE(sce.has_value());
+            REQUIRE(sce->header.type == type);
+        }
+    }
+}
+
+TEST_CASE(
+    "PS5/SCE ELF profile rejects undocumented neighboring file type",
+    "[loader][elf64][sce]") {
+    auto bytes = make_elf();
+    write_u16(bytes, 16, 0xfe11);
+
+    const auto result =
+        astraea::loader::parse_elf64(
+            bytes,
+            astraea::loader::
+                ElfParseProfile::ps5_sce);
+
+    REQUIRE_FALSE(result.has_value());
+    REQUIRE(
+        result.error().code ==
+        astraea::loader::ElfErrorCode::
+            unsupported_file_type);
+}
+
+TEST_CASE(
+    "PS5/SCE ELF profile does not silently accept generic ELF file types",
+    "[loader][elf64][sce]") {
+    auto bytes = make_elf();
+
+    const auto result =
+        astraea::loader::parse_elf64(
+            bytes,
+            astraea::loader::
+                ElfParseProfile::ps5_sce);
+
+    REQUIRE_FALSE(result.has_value());
+    REQUIRE(
+        result.error().code ==
+        astraea::loader::ElfErrorCode::
+            unsupported_file_type);
+}
