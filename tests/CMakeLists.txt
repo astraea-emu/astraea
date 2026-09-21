@@ -37,6 +37,7 @@ add_executable(astraea_core_tests
     probe/hello_tests.cpp
     probe/reference_tests.cpp
     graphics/packet_tests.cpp
+    graphics/graphics_ir_tests.cpp
     graphics/rdna2_decoder_tests.cpp
     trace/v0_tests.cpp
     trace/diff_v0_tests.cpp

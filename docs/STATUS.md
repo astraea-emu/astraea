@@ -1,9 +1,9 @@
 # Project Status
 
 **Milestone:** M3 — Behavioral evidence and differential tooling  
-**State:** M2 complete; M3 evidence/trace foundations plus raw graphics and SCE metadata slices complete; minimal RDNA2 decoder in progress  
+**State:** M2 complete; M3 evidence/trace foundations plus raw graphics, SCE metadata, and minimal RDNA2 decode complete; minimal Graphics IR in progress  
 **Repository:** astraea-emu/astraea  
-**Active branch:** `feat/m3-rdna2-sopp-decoder`
+**Active branch:** `feat/m3-minimal-graphics-ir`
 
 ## Complete
 
@@ -18,6 +18,7 @@
 - RDNA2/PS5 graphics evidence map (#9).
 - Raw graphics packet/header preservation slice with synthetic fixtures (#29).
 - Evidence-backed SCE dynamic metadata classification/preservation (#30).
+- Minimal generic RDNA2 SOPP decoder from AMD document 70648 (#31).
 - Public five-gate CI remains the merge requirement:
   - Linux x64
   - Windows x64
@@ -27,10 +28,9 @@
 
 ## Current frontier
 
-1. #31 — minimal generic RDNA2 SOPP decoder — in progress on this branch using AMD document 70648 only.
-2. #32 — freeze the minimal host-independent Graphics IR contract.
-3. #33 — freeze the minimal host-independent Shader IR contract.
-4. #34 — add Trace v0 adapters at graphics frontend/IR boundaries after the relevant contracts exist.
+1. #32 — minimal Graphics IR semantic/provenance boundary — in progress on this branch.
+2. #33 — freeze the minimal host-independent Shader IR contract.
+3. #34 — add Trace v0 adapters at graphics frontend/IR boundaries after the relevant contracts exist.
 
 ## SCE metadata boundary
 
@@ -80,6 +80,7 @@ PS5-specific assumptions require documented evidence.
 
 ## Next action
 
-Validate #31 across the five-gate matrix. If green, merge the minimal SOPP
-subset and continue the IR contracts without broadening into PS5 shader launch
-ABI, Sony shader-container assumptions, SPIR-V, or Vulkan work.
+Validate #32 across the five-gate matrix. The first Graphics IR contract should
+carry unknown packet semantics explicitly while keeping raw packet evidence as
+separate provenance. Do not invent draw/bind/barrier semantics before evidence
+justifies them.
