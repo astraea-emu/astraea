@@ -1,41 +1,17 @@
 # Project Status
 
-**Milestone:** M2 — Controlled execution  
-**State:** complete on Linux x86-64 and Windows x86-64 for trusted Astraea-owned synthetic probes  
+**Milestone:** M3 — Behavioral evidence and differential tooling  
+**State:** M2 controlled execution complete; AstraeaProbe v0 specification in review  
 **Repository:** astraea-emu/astraea  
-**Active branch:** `main`
+**Active branch:** `spec/astraea-probe-v0`
 
-## M2 complete
+## Complete
 
 - M0 engineering foundation.
 - M1 validated `GuestImage`.
-- Portable `GuestCpuContext`, backend stop/fault model, and execution-memory planner.
-- Exact-address guest-memory preparation on Linux and Windows.
-- Strict W^X staging/final protection on both native x86-64 hosts.
-- Guarded native x86-64 register transition and fault/exception recovery on Linux and Windows.
-- Synthetic host-gate / HLE dispatch ABI.
-- Synthetic HLE registry and deterministic gate-region model.
-- Bounded guest-memory reads/writes and synthetic `test.write` / `test.exit`.
-- Linux `probe_hello.elf` end-to-end proof:
-  - strict ELF / `GuestImage` validation
-  - exact-address memory preparation
-  - native x86-64 entry
-  - host gate -> `test.write`
-  - guest-side RAX validation after resume
-  - exact output `Hello from guest`
-  - host gate -> `test.exit(42)`
-  - deterministic repeated execution
-  - structured execution events
-- Windows x86-64 parity:
-  - allocation-granularity-aware reservations
-  - no-clobber collision handling
-  - staged RW population -> final W^X
-  - MASM transition/recovery thunk
-  - vectored exception recovery
-  - gate-stop capture
-  - illegal/access fault normalization
-  - guest GPR capture and host-state restoration
-  - deterministic teardown/re-entry
+- M2 controlled execution on Linux x86-64 and Windows x86-64 for trusted Astraea-owned synthetic probes.
+- Astraea-owned `probe_hello.elf` end-to-end proof with deterministic HLE write/resume/exit behavior.
+- Public PS5 executable/module ABI evidence map (#8), with provenance/confidence separation and unresolved questions retained explicitly.
 - Public five-gate CI remains the merge requirement:
   - Linux x64
   - Windows x64
@@ -45,15 +21,30 @@
 
 ## Current frontier
 
-The next work is evidence-first. Do not encode guessed PS5 behavior merely because
-the generic execution substrate now works.
+1. #10 — AstraeaProbe v0 controlled behavioral probe format — in review on this branch.
+2. #6 — stable Astraea trace schema v0.
+3. #7 — trace diff / first-divergence locator built on #6.
+4. #9 — RDNA2/PS5 graphics evidence map before serious GPU implementation.
+5. Platform import/module resolution and HLE only where #8 or later controlled evidence justifies behavior.
 
-1. #8 — build the public PS5 executable/module ABI evidence map.
-2. #10 — specify AstraeaProbe v0 for controlled behavioral experiments.
-3. #6 — define stable Astraea trace schema v0.
-4. #7 — implement trace diff / first-divergence location on top of #6.
-5. #9 — continue the RDNA2/PS5 graphics evidence map before serious GPU implementation.
-6. Only then expand platform import/module resolution and HLE from documented evidence.
+## #10 scope
+
+- stable probe identity and independent probe version
+- explicit typed input/observation values
+- transport-neutral request/result JSON contracts
+- case identity independent of runner
+- full-request identity including semantic environment/provenance
+- deterministic canonicalization rules and committed SHA-256 test vectors
+- behavioral projection excluding host/transport noise
+- reproducibility, timeout, fault-normalization, and provenance rules
+- clean boundary around optional lawful reference-hardware adapters
+- deterministic host-only `astraea.reference.echo` reference runner
+- no jailbreak, authentication-bypass, firmware-key, or proprietary-module dependency in core
+
+The current implementation slice does **not** yet implement a general v0 JSON
+parser, canonical serializer, or digest engine. The committed vectors specify
+their required future behavior; the host echo runner tests only deterministic
+reference-probe semantics.
 
 ## Execution boundary
 
@@ -72,7 +63,6 @@ PS5-specific assumptions require documented evidence.
 
 ## Next action
 
-Start #8 by collecting and classifying public evidence for PS5 executable/module
-identity, import/export representation, module/library naming, and unresolved
-questions. Keep implementation changes out of that research slice unless the
-evidence justifies them.
+Validate #10 as a specification/reference-runner slice, then define #6's stable
+trace schema independently. Do not make Probe v0 depend on an unfinished trace
+serialization format.

@@ -1,0 +1,31 @@
+{
+  "schema": "astraea.probe.request/v0",
+  "probe": {
+    "id": "astraea.reference.echo",
+    "version": 0
+  },
+  "inputs": {
+    "exit_code": {
+      "type": "u64",
+      "value": "0x000000000000002a"
+    },
+    "message": {
+      "encoding": "hex",
+      "type": "bytes",
+      "value": "48656c6c6f2066726f6d2070726f6265"
+    }
+  },
+  "environment": {
+    "architecture": "portable",
+    "capabilities": [
+      "reference_echo_v0"
+    ],
+    "platform_family": "astraea",
+    "target_kind": "host_reference"
+  },
+  "provenance": {
+    "artifact_digests": [],
+    "execution_scope": "host_only",
+    "source_kind": "astraea_owned_synthetic"
+  }
+}
