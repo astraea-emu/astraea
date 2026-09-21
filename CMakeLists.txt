@@ -59,6 +59,7 @@ add_library(astraea_core STATIC
     src/probe/hello.cpp
     src/probe/reference.cpp
     src/graphics/packet.cpp
+    src/graphics/rdna2_decoder.cpp
     src/trace/v0.cpp
     src/trace/diff_v0.cpp
 )
