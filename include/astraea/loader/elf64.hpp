@@ -10,6 +10,11 @@
 
 namespace astraea::loader {
 
+enum class ElfParseProfile {
+    generic,
+    ps5_sce,
+};
+
 enum class ElfErrorCode {
     file_too_small,
     bad_magic,
@@ -74,6 +79,8 @@ struct ElfImage {
 
 using ElfParseResult = astraea::core::Result<ElfImage, ElfError>;
 
-[[nodiscard]] ElfParseResult parse_elf64(std::span<const std::byte> bytes);
+[[nodiscard]] ElfParseResult parse_elf64(
+    std::span<const std::byte> bytes,
+    ElfParseProfile profile = ElfParseProfile::generic);
 
 }  // namespace astraea::loader
