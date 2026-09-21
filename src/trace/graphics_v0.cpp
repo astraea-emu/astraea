@@ -95,6 +95,42 @@ namespace {
         instruction.raw_encoding.end()};
 }
 
+[[nodiscard]] std::string packet_error_code_text(
+    astraea::graphics::PacketErrorCode code) {
+    switch (code) {
+    case astraea::graphics::PacketErrorCode::
+        command_buffer_not_word_aligned:
+        return "command_buffer_not_word_aligned";
+    case astraea::graphics::PacketErrorCode::empty_packet:
+        return "empty_packet";
+    case astraea::graphics::PacketErrorCode::
+        packet_range_overflow:
+        return "packet_range_overflow";
+    case astraea::graphics::PacketErrorCode::
+        packet_range_out_of_bounds:
+        return "packet_range_out_of_bounds";
+    case astraea::graphics::PacketErrorCode::
+        host_allocation_failure:
+        return "host_allocation_failure";
+    }
+
+    return "host_allocation_failure";
+}
+
+[[nodiscard]] std::string rdna2_error_code_text(
+    astraea::graphics::Rdna2DecodeErrorCode code) {
+    switch (code) {
+    case astraea::graphics::Rdna2DecodeErrorCode::
+        source_offset_overflow:
+        return "source_offset_overflow";
+    case astraea::graphics::Rdna2DecodeErrorCode::
+        instruction_out_of_bounds:
+        return "instruction_out_of_bounds";
+    }
+
+    return "instruction_out_of_bounds";
+}
+
 [[nodiscard]] std::string packet_kind_text(
     astraea::graphics::PacketKind kind) {
     switch (kind) {
@@ -240,6 +276,58 @@ trace_raw_graphics_packet_v0(
 }
 
 GraphicsTraceEventResultV0
+trace_graphics_packet_error_v0(
+    std::uint64_t event_id,
+    const astraea::graphics::PacketError& error) {
+    try {
+        std::uint64_t word_offset = 0;
+        std::uint64_t word_count = 0;
+        if (!size_to_u64(
+                error.word_offset,
+                word_offset) ||
+            !size_to_u64(
+                error.word_count,
+                word_count)) {
+            return size_failure();
+        }
+
+        return GraphicsTraceEventResultV0::success(
+            TraceEventV0{
+                .id = event_id,
+                .subsystem = "graphics.frontend",
+                .type = "error",
+                .guest = std::nullopt,
+                .stable =
+                    std::vector<TraceFieldV0>{
+                        text_field(
+                            "code",
+                            packet_error_code_text(
+                                error.code)),
+                    },
+                .diagnostics =
+                    std::vector<TraceFieldV0>{
+                        u64_field(
+                            "word_count",
+                            word_count),
+                        u64_field(
+                            "word_offset",
+                            word_offset),
+                    },
+            });
+    } catch (const std::bad_alloc&) {
+        return GraphicsTraceEventResultV0::failure(
+            adapter_error(
+                GraphicsTraceAdapterErrorCodeV0::
+                    host_allocation_failure));
+    } catch (const std::length_error&) {
+        return GraphicsTraceEventResultV0::failure(
+            adapter_error(
+                GraphicsTraceAdapterErrorCodeV0::
+                    host_allocation_failure));
+    }
+}
+
+GraphicsTraceEventResultV0
 trace_graphics_ir_v0(
     std::uint64_t event_id,
     const astraea::graphics::GraphicsIrEmission&
@@ -356,6 +444,58 @@ trace_rdna2_decode_v0(
                             "source_raw_encoding",
                             instruction_bytes(
                                 instruction)),
+                    },
+            });
+    } catch (const std::bad_alloc&) {
+        return GraphicsTraceEventResultV0::failure(
+            adapter_error(
+                GraphicsTraceAdapterErrorCodeV0::
+                    host_allocation_failure));
+    } catch (const std::length_error&) {
+        return GraphicsTraceEventResultV0::failure(
+            adapter_error(
+                GraphicsTraceAdapterErrorCodeV0::
+                    host_allocation_failure));
+    }
+}
+
+GraphicsTraceEventResultV0
+trace_rdna2_decode_error_v0(
+    std::uint64_t event_id,
+    const astraea::graphics::Rdna2DecodeError& error) {
+    try {
+        std::uint64_t word_index = 0;
+        std::uint64_t available_words = 0;
+        if (!size_to_u64(
+                error.word_index,
+                word_index) ||
+            !size_to_u64(
+                error.available_words,
+                available_words)) {
+            return size_failure();
+        }
+
+        return GraphicsTraceEventResultV0::success(
+            TraceEventV0{
+                .id = event_id,
+                .subsystem = "shader.decode",
+                .type = "error",
+                .guest = std::nullopt,
+                .stable =
+                    std::vector<TraceFieldV0>{
+                        text_field(
+                            "code",
+                            rdna2_error_code_text(
+                                error.code)),
+                    },
+                .diagnostics =
+                    std::vector<TraceFieldV0>{
+                        u64_field(
+                            "available_words",
+                            available_words),
+                        u64_field(
+                            "word_index",
+                            word_index),
                     },
             });
     } catch (const std::bad_alloc&) {
