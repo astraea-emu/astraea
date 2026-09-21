@@ -36,6 +36,7 @@ add_executable(astraea_core_tests
     probe/hello_tests.cpp
     probe/reference_tests.cpp
     trace/v0_tests.cpp
+    trace/diff_v0_tests.cpp
 )
 target_link_libraries(astraea_core_tests PRIVATE
     Astraea::core
