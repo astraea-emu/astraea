@@ -42,6 +42,7 @@ add_executable(astraea_core_tests
     graphics/shader_ir_tests.cpp
     trace/v0_tests.cpp
     trace/diff_v0_tests.cpp
+    trace/graphics_v0_tests.cpp
 )
 target_link_libraries(astraea_core_tests PRIVATE
     Astraea::core
