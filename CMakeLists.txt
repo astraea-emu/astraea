@@ -58,6 +58,7 @@ add_library(astraea_core STATIC
     src/execution/guest_memory.cpp
     src/probe/hello.cpp
     src/probe/reference.cpp
+    src/graphics/packet.cpp
     src/trace/v0.cpp
     src/trace/diff_v0.cpp
 )
