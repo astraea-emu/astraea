@@ -1,9 +1,9 @@
 # Project Status
 
 **Milestone:** M4 — Platform/HLE expansion  
-**State:** M2 controlled execution complete; M3 trace/graphics boundaries integrated; SCE identity/binding/materialization bridges complete; import relocation planning in progress  
+**State:** M2 controlled execution complete; M3 trace/graphics boundaries integrated; SCE import resolution planning complete; synthetic x86-64 JUMP_SLOT gate patching in progress  
 **Repository:** astraea-emu/astraea  
-**Active branch:** `feat/m4-sce-import-relocation-plan`
+**Active branch:** `feat/m4-x86-64-jump-slot-patch`
 
 ## Complete
 
@@ -25,6 +25,7 @@
 - Opaque SCE long-form dynamic-symbol identity parser (#43).
 - Exact opaque SCE identity -> HLE function binding registry (#45).
 - Validated dynamic symbol -> exact raw spelling / optional SCE identity materialization (#47).
+- Validated relocation + exact SCE identity + exact HLE binding resolution plan (#50).
 - Public five-gate CI remains the merge requirement:
   - Linux x64
   - Windows x64
@@ -34,8 +35,8 @@
 
 ## Current frontier
 
-1. #50 — compose validated relocation + materialized SCE symbol + exact HLE binding into a data-only import-resolution plan — in progress on this branch.
-2. After #50, add the smallest synthetic gate/patch application slice for an explicitly supported relocation type.
+1. #52 — build a portable synthetic x86-64 R_X86_64_JUMP_SLOT patch for an explicitly selected matching HLE gate — in progress on this branch.
+2. After #52, apply that validated patch through the existing guest-memory write boundary and prove an owned SCE-shaped import path end to end.
 
 ## SCE metadata boundary
 
@@ -85,6 +86,6 @@ PS5-specific assumptions require documented evidence.
 
 ## Next action
 
-Validate #50 across the five-gate matrix. Preserve relocation type/addend as raw
-evidence only; do not apply relocation semantics or write guest memory in this
-slice. Unresolved imports must remain typed and exact-identity based.
+Validate #52 across the five-gate matrix. Only PLT RELA relocation type 7 is
+supported in this slice, using the generic x86-64 psABI JUMP_SLOT = S rule.
+The caller selects the exact synthetic gate slot; no guest-memory write occurs yet.
