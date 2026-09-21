@@ -1,9 +1,9 @@
 # Project Status
 
 **Milestone:** M4 — Platform/HLE expansion  
-**State:** M2 controlled execution complete; M3 trace/graphics boundaries integrated; SCE ELF/import/JUMP_SLOT/guest-memory plumbing complete; owned end-to-end PS5/SCE-shaped prototype proof in progress  
+**State:** First owned PS5/SCE-oriented synthetic prototype complete; M4 platform/HLE expansion continues from this validated baseline  
 **Repository:** astraea-emu/astraea  
-**Active branch:** `feat/m4-sce-prototype-proof`
+**Active branch:** `main`
 
 ## Complete
 
@@ -29,6 +29,7 @@
 - Portable x86-64 R_X86_64_JUMP_SLOT synthetic gate patch builder (#52).
 - Explicit opt-in PS5/SCE ELF parse profile for 0xFE10 / 0xFE18 (#54).
 - Validated synthetic JUMP_SLOT patch application through GuestMemoryAccess (#56).
+- Owned SCE-profile ELF end-to-end import/execution proof through HLE exit 42 (#57).
 - Public five-gate CI remains the merge requirement:
   - Linux x64
   - Windows x64
@@ -38,8 +39,8 @@
 
 ## Current frontier
 
-1. #57 — execute the owned SCE-shaped import fixture end to end — in progress on this branch.
-2. Completion of #57 is the current first PS5-oriented prototype milestone. Commercial compatibility remains a later milestone.
+1. The first PS5/SCE-oriented synthetic prototype milestone is complete on `main` via #57 / PR #59.
+2. The next milestone must be scoped from evidence-backed platform/HLE and graphics gaps; commercial compatibility remains a later goal.
 
 ## SCE metadata boundary
 
@@ -89,6 +90,6 @@ PS5-specific assumptions require documented evidence.
 
 ## Next action
 
-Validate #57 across the five-gate matrix. The owned fixture must traverse the real
-GuestImage -> SCE identity -> exact HLE binding -> PLT RELA JUMP_SLOT -> guest-memory
-patch -> native Linux execution -> HLE exit path. Do not broaden to retail input.
+Define the post-prototype milestone from the first unsupported, evidence-backed
+platform/HLE or graphics dependency. Preserve the clean-room boundary and do not
+interpret completion of the synthetic prototype as retail PS5 software compatibility.
