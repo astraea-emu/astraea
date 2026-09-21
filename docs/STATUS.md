@@ -1,9 +1,9 @@
 # Project Status
 
 **Milestone:** M3 — Behavioral evidence and differential tooling  
-**State:** M2 controlled execution complete; M3 evidence, probe, trace, and graphics research foundations complete; narrow implementation slices open  
+**State:** M2 complete; M3 evidence/trace foundations complete; #29 generic PM4 Type-3 frontend slice in progress  
 **Repository:** astraea-emu/astraea  
-**Active branch:** `docs/m3-status-after-graphics-evidence`
+**Active branch:** `feat/m3-graphics-pm4-frontend`
 
 ## Complete
 
@@ -25,7 +25,7 @@
 
 ## Current frontier
 
-1. #29 — first graphics frontend slice: typed packet/header parsing with raw-word preservation and synthetic fixtures only.
+1. #29 — in progress: generic AMD PM4 Type-3 structural parsing, typed headers, raw-word preservation, unknown opcode retention, and deterministic unsupported/truncated failures.
 2. #30 — continue evidence-backed, data-only SCE metadata parsing derived from #8.
 3. #31 — minimal generic RDNA2 instruction decoder using AMD-published ISA fixtures only.
 4. #32 — freeze the minimal host-independent Graphics IR contract.
@@ -65,6 +65,6 @@ PS5-specific assumptions require documented evidence.
 
 ## Next action
 
-Start #29 as the first graphics implementation slice while #30 can continue independently.
-Keep both narrow, typed, deterministic, and synthetic. Do not begin a Vulkan backend
-until the frontend and minimal IR contracts are proven.
+Validate #29 across the five-gate matrix. If green, merge it as the first graphics
+frontend substrate. Then continue #30/#31 as independent evidence-backed slices;
+do not begin a Vulkan backend until the frontend and minimal IR contracts are proven.
