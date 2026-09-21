@@ -28,6 +28,7 @@ add_executable(astraea_core_tests
     execution/context_tests.cpp
     execution/memory_plan_tests.cpp
     execution/linux_memory_tests.cpp
+    execution/linux_execution_tests.cpp
     execution/hle_tests.cpp
 )
 target_link_libraries(astraea_core_tests PRIVATE

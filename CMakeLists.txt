@@ -20,6 +20,8 @@ include(AstraeaWarnings)
 include(AstraeaSanitizers)
 include(AstraeaFuzzing)
 
+find_package(Threads REQUIRED)
+
 add_library(astraea_core STATIC
     src/core/version.cpp
     src/loader/elf64.cpp
@@ -37,6 +39,7 @@ add_library(astraea_core STATIC
     src/execution/context.cpp
     src/execution/memory_plan.cpp
     src/execution/linux_memory.cpp
+    src/execution/linux_execution.cpp
     src/execution/hle.cpp
 )
 add_library(Astraea::core ALIAS astraea_core)
@@ -47,6 +50,7 @@ target_include_directories(astraea_core
 )
 
 target_compile_features(astraea_core PUBLIC cxx_std_23)
+target_link_libraries(astraea_core PRIVATE Threads::Threads)
 astraea_set_project_warnings(astraea_core)
 astraea_enable_sanitizers(astraea_core)
 
