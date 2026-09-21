@@ -19,6 +19,8 @@ constexpr std::uint8_t kElfCurrentVersion = 1;
 
 constexpr std::uint16_t kEtExec = 2;
 constexpr std::uint16_t kEtDyn = 3;
+constexpr std::uint16_t kEtSceDynExec = 0xfe10;
+constexpr std::uint16_t kEtSceDynModule = 0xfe18;
 constexpr std::uint16_t kEmX86_64 = 62;
 constexpr std::uint16_t kPnXnum = 0xffff;
 
@@ -89,9 +91,25 @@ template <typename T>
     return value != 0 && (value & (value - 1U)) == 0;
 }
 
+[[nodiscard]] bool supported_file_type(
+    std::uint16_t type,
+    ElfParseProfile profile) noexcept {
+    switch (profile) {
+    case ElfParseProfile::generic:
+        return type == kEtExec || type == kEtDyn;
+    case ElfParseProfile::ps5_sce:
+        return type == kEtSceDynExec ||
+               type == kEtSceDynModule;
+    }
+
+    return false;
+}
+
 }  // namespace
 
-ElfParseResult parse_elf64(std::span<const std::byte> bytes) {
+ElfParseResult parse_elf64(
+    std::span<const std::byte> bytes,
+    ElfParseProfile profile) {
     if (bytes.size() < kIdentSize) {
         return ElfParseResult::failure(header_error(ElfErrorCode::file_too_small, 0));
     }
@@ -140,7 +158,7 @@ ElfParseResult parse_elf64(std::span<const std::byte> bytes) {
     if (header.machine != kEmX86_64) {
         return ElfParseResult::failure(header_error(ElfErrorCode::unsupported_machine, 18));
     }
-    if (header.type != kEtExec && header.type != kEtDyn) {
+    if (!supported_file_type(header.type, profile)) {
         return ElfParseResult::failure(header_error(ElfErrorCode::unsupported_file_type, 16));
     }
     if (header.header_size != kElf64HeaderSize) {
