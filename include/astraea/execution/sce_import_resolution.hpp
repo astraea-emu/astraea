@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <optional>
 #include <string>
+#include <vector>
 
 #include <astraea/core/result.hpp>
 #include <astraea/execution/hle.hpp>
@@ -51,12 +52,48 @@ using SceImportResolutionPlanResult =
         SceImportResolutionPlan,
         SceImportResolutionPlanError>;
 
+enum class ScePltImportPlanErrorCode {
+    relocation_failure,
+    symbol_failure,
+    resolution_failure,
+    host_allocation_failure,
+};
+
+struct ScePltImportPlanError {
+    ScePltImportPlanErrorCode code =
+        ScePltImportPlanErrorCode::host_allocation_failure;
+    std::uint64_t relocation_index = 0;
+    std::optional<astraea::loader::DynamicRelocationError>
+        relocation_error;
+    std::optional<astraea::loader::SceDynamicSymbolError>
+        symbol_error;
+    std::optional<SceImportResolutionPlanError>
+        resolution_error;
+};
+
+using ScePltImportPlansResult =
+    astraea::core::Result<
+        std::vector<SceImportResolutionPlan>,
+        ScePltImportPlanError>;
+
 // Composes already-validated loader/HLE data without applying relocation
 // semantics. Relocation type and addend are preserved as raw evidence only.
 [[nodiscard]] SceImportResolutionPlanResult
 plan_sce_import_resolution(
     const astraea::loader::DynamicRelocation& relocation,
     const astraea::loader::SceDynamicSymbolRecord& symbol,
+    const SceImportBindingRegistry& bindings);
+
+// Plans every already-validated PLT relocation in table order. This composes
+// parsing, exact SCE symbol materialization, and exact HLE binding only.
+// Relocation semantics, gate selection, patch construction, and guest-memory
+// writes remain separate later stages.
+[[nodiscard]] ScePltImportPlansResult
+plan_sce_plt_imports(
+    const astraea::loader::DynamicRelocationTableDescriptor& relocations,
+    const astraea::loader::DynamicSymbolTableDescriptor& symbols,
+    const astraea::loader::DynamicStringTableDescriptor& strings,
+    const astraea::memory::InitializedImageView& image_view,
     const SceImportBindingRegistry& bindings);
 
 }  // namespace astraea::execution
