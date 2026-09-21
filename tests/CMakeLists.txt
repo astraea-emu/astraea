@@ -19,6 +19,7 @@ add_executable(astraea_core_tests
     loader/sysv_hash_tests.cpp
     loader/dynamic_symbols_tests.cpp
     loader/sce_symbol_identity_tests.cpp
+    loader/sce_dynamic_symbol_tests.cpp
     loader/dynamic_relocations_tests.cpp
     loader/dynamic_plt_relocations_tests.cpp
     loader/initial_stack_tests.cpp
