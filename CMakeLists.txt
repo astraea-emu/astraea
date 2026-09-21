@@ -55,6 +55,7 @@ add_library(astraea_core STATIC
     src/execution/hle.cpp
     src/execution/sce_import_binding.cpp
     src/execution/sce_import_resolution.cpp
+    src/execution/sce_jump_slot_patch.cpp
     src/execution/linux_session.cpp
     src/execution/windows_execution.cpp
     src/execution/windows_memory.cpp
