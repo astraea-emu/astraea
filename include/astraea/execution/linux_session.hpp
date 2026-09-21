@@ -20,6 +20,28 @@ enum class LinuxSyntheticSessionErrorKind {
     hle,
     guest_fault,
     unexpected_stop,
+    host_allocation_failure,
+};
+
+enum class SyntheticSessionEventKind {
+    guest_entry,
+    gate_stop,
+    hle_resume,
+    hle_exit,
+};
+
+struct SyntheticSessionEvent {
+    SyntheticSessionEventKind kind =
+        SyntheticSessionEventKind::guest_entry;
+    std::uint64_t rip = 0;
+    std::uint64_t rsp = 0;
+    bool has_gate_slot = false;
+    std::uint32_t gate_slot = 0;
+    bool has_function_id = false;
+    HleFunctionId function_id;
+    std::uint64_t value = 0;
+
+    auto operator<=>(const SyntheticSessionEvent&) const = default;
 };
 
 struct LinuxSyntheticSessionError {
@@ -37,6 +59,9 @@ struct LinuxSyntheticSessionResult {
     std::uint64_t gate_stop_count = 0;
     GuestCpuContext final_context;
     std::vector<std::byte> output;
+    std::vector<SyntheticSessionEvent> events;
+
+    auto operator<=>(const LinuxSyntheticSessionResult&) const = default;
 };
 
 using LinuxSyntheticSessionRunResult =
