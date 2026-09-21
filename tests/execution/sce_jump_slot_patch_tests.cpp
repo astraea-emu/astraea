@@ -520,11 +520,10 @@ TEST_CASE(
     "empty JUMP_SLOT batch succeeds without gate allocation",
     "[execution][sce-jump-slot][batch]") {
     const auto gates = make_gate_region();
-    const std::array<
-        astraea::execution::SceImportResolutionPlan,
-        0>
-        plans{};
-    const std::array<std::uint32_t, 0> slots{};
+    const std::vector<
+        astraea::execution::SceImportResolutionPlan>
+        plans;
+    const std::vector<std::uint32_t> slots;
 
     const auto result =
         astraea::execution::
