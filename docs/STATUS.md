@@ -1,9 +1,9 @@
 # Project Status
 
 **Milestone:** M3 — Behavioral evidence and differential tooling  
-**State:** M2 complete; M3 evidence/trace foundations plus raw graphics, SCE metadata, RDNA2 decode, Graphics IR, and Shader IR complete; graphics Trace adapters in progress  
+**State:** M2 controlled execution complete; M3 trace and first graphics evidence boundaries integrated; M4 SCE symbol-identity bridge in progress  
 **Repository:** astraea-emu/astraea  
-**Active branch:** `feat/m3-graphics-trace-adapters`
+**Active branch:** `feat/m4-sce-symbol-identity`
 
 ## Complete
 
@@ -21,6 +21,7 @@
 - Minimal generic RDNA2 SOPP decoder from AMD document 70648 (#31).
 - Minimal host-independent Graphics IR semantic/provenance boundary (#32).
 - Minimal host-independent Shader IR for the AMD-documented SOPP subset (#33).
+- Graphics/frontend/shader Trace v0 adapters with semantic/provenance separation (#34).
 - Public five-gate CI remains the merge requirement:
   - Linux x64
   - Windows x64
@@ -30,7 +31,8 @@
 
 ## Current frontier
 
-1. #34 — Trace v0 adapters for raw graphics, Graphics IR, RDNA2 decode, and Shader IR — in progress on this branch.
+1. #43 — parse opaque SCE long-form dynamic-symbol identities without resolving imports or guessing names — in progress on this branch.
+2. Define the next narrow M4 resolver/HLE boundary only after #43 is merged and reviewed.
 
 ## SCE metadata boundary
 
@@ -80,6 +82,6 @@ PS5-specific assumptions require documented evidence.
 
 ## Next action
 
-Validate #34 across the five-gate matrix. Stable Trace fields must represent
-implemented semantics; raw packet/instruction encodings and source offsets stay
-diagnostic/provenance-only so #7 localizes behavioral rather than representational divergence.
+Validate #43 across the five-gate matrix. Preserve raw symbol spellings and keep
+NID/library/module components opaque; do not add NID generation, plain-name
+lookup, import-resolution precedence, HLE binding, or system-module loading.
