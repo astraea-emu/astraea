@@ -70,6 +70,8 @@ enum class ExecutionStopReason {
 struct ExecutionStop {
     ExecutionStopReason reason = ExecutionStopReason::backend_error;
     GuestCpuContext context;
+    bool has_gate_slot = false;
+    std::uint32_t gate_slot = 0;
     bool has_fault = false;
     GuestFault fault;
 
