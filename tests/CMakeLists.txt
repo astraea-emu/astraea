@@ -27,6 +27,7 @@ add_executable(astraea_core_tests
     memory/initialized_image_view_tests.cpp
     execution/context_tests.cpp
     execution/memory_plan_tests.cpp
+    execution/linux_memory_tests.cpp
 )
 target_link_libraries(astraea_core_tests PRIVATE
     Astraea::core

@@ -36,6 +36,7 @@ add_library(astraea_core STATIC
     src/memory/initialized_image_view.cpp
     src/execution/context.cpp
     src/execution/memory_plan.cpp
+    src/execution/linux_memory.cpp
 )
 add_library(Astraea::core ALIAS astraea_core)
 
