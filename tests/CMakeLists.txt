@@ -30,6 +30,7 @@ add_executable(astraea_core_tests
     execution/linux_memory_tests.cpp
     execution/linux_execution_tests.cpp
     execution/hle_tests.cpp
+    execution/hle_runtime_tests.cpp
 )
 target_link_libraries(astraea_core_tests PRIVATE
     Astraea::core

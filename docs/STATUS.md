@@ -1,9 +1,9 @@
 # Project Status
 
 **Milestone:** M2 — Controlled execution  
-**State:** public clean-room baseline green; Linux native transition/fault recovery in review  
+**State:** public clean-room baseline green; bounded guest memory and synthetic HLE services in review  
 **Repository:** astraea-emu/astraea  
-**Active branch:** `feat/m2-linux-transition-recovery`
+**Active branch:** `feat/m2-bounded-hle-services`
 
 ## Complete
 
@@ -11,10 +11,10 @@
 - M1 validated `GuestImage`.
 - M2 guarded native x86-64 execution architecture.
 - M2 portable `GuestCpuContext`, backend stop/fault model, and execution-memory planner.
-- Public clean-room baseline migrated without prior Git history.
 - Linux exact-address guest memory preparation and teardown (#2).
 - Synthetic host-gate / HLE dispatch ABI specification (#3).
 - Synthetic HLE registry and gate-region model (#13).
+- Linux native register transition and scoped fault recovery (#4).
 - Public five-gate CI:
   - Linux x64
   - Windows x64
@@ -24,23 +24,23 @@
 
 ## Current frontier
 
-1. #4 — Linux native register transition and scoped fault recovery — in review on this branch.
-2. #14 — bounded guest-memory access plus `astraea.test.write` and `astraea.test.exit`.
-3. #15 — first end-to-end `probe_hello.elf`.
-4. #5 — equivalent guarded Windows x86-64 backend.
+1. #14 — bounded guest-memory access plus `astraea.test.write` and `astraea.test.exit` — in review on this branch.
+2. #15 — first end-to-end `probe_hello.elf`.
+3. #5 — equivalent guarded Windows x86-64 backend.
 
-## #4 scope
+## #14 scope
 
-- dedicated Linux execution thread
-- exact RX mapping of backend-generated synthetic gate bytes
-- guest GPR/RIP/RSP installation through Linux `ucontext`
-- alternate signal stack
-- scoped SIGSEGV/SIGBUS/SIGILL/SIGFPE handling
-- exact guest/gate RIP ownership checks
-- recognized gate-slot capture
-- normalized guest fault capture
-- `sigsetjmp` / `siglongjmp` recovery to a known host stack
-- previous signal dispositions restored after every stop/failure
+- exact checked live guest-memory reads/writes
+- mapping and permission validation before host dereference
+- checked guest-range arithmetic and host-size handling
+- bounded C-string reads
+- synthetic `test.write` transcript capture
+- synthetic `test.exit`
+- HLE call materialization only after safe signal recovery
+- validated guest return-address read
+- exact executable return-RIP validation
+- checked guest RSP advancement
+- host-side Linux synthetic-session resume/exit loop
 
 No HLE handler executes in signal context.
 
@@ -59,5 +59,5 @@ PS5-specific assumptions require documented evidence.
 
 ## Next action
 
-Validate #4 across the public five-gate matrix. After merge, implement #14 and
-then reach #15 `probe_hello.elf`.
+Validate #14 across the public five-gate matrix. After merge, build #15 as an
+Astraea-owned ELF fixture and execute `probe_hello.elf` end to end.

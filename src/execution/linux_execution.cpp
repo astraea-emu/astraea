@@ -47,6 +47,28 @@ namespace {
 
 #if defined(__linux__) && defined(__x86_64__) && defined(MAP_FIXED_NOREPLACE)
 
+extern "C" [[noreturn]] void astraea_linux_enter_guest_context(
+    const GuestCpuContext* context) noexcept;
+
+static_assert(offsetof(GuestCpuContext, rax) == 0);
+static_assert(offsetof(GuestCpuContext, rbx) == 8);
+static_assert(offsetof(GuestCpuContext, rcx) == 16);
+static_assert(offsetof(GuestCpuContext, rdx) == 24);
+static_assert(offsetof(GuestCpuContext, rsi) == 32);
+static_assert(offsetof(GuestCpuContext, rdi) == 40);
+static_assert(offsetof(GuestCpuContext, rbp) == 48);
+static_assert(offsetof(GuestCpuContext, rsp) == 56);
+static_assert(offsetof(GuestCpuContext, r8) == 64);
+static_assert(offsetof(GuestCpuContext, r9) == 72);
+static_assert(offsetof(GuestCpuContext, r10) == 80);
+static_assert(offsetof(GuestCpuContext, r11) == 88);
+static_assert(offsetof(GuestCpuContext, r12) == 96);
+static_assert(offsetof(GuestCpuContext, r13) == 104);
+static_assert(offsetof(GuestCpuContext, r14) == 112);
+static_assert(offsetof(GuestCpuContext, r15) == 120);
+static_assert(offsetof(GuestCpuContext, rip) == 128);
+static_assert(offsetof(GuestCpuContext, rflags) == 136);
+
 constexpr std::array<int, 4> kGuestSignals{
     SIGSEGV,
     SIGBUS,
@@ -56,22 +78,8 @@ constexpr std::array<int, 4> kGuestSignals{
 
 constexpr std::size_t kMinimumAlternateSignalStackSize = 64U * 1024U;
 
-constexpr std::uint64_t kRflagsCarry = 1ULL << 0U;
-constexpr std::uint64_t kRflagsParity = 1ULL << 2U;
-constexpr std::uint64_t kRflagsAuxiliaryCarry = 1ULL << 4U;
-constexpr std::uint64_t kRflagsZero = 1ULL << 6U;
-constexpr std::uint64_t kRflagsSign = 1ULL << 7U;
 constexpr std::uint64_t kRflagsTrap = 1ULL << 8U;
 constexpr std::uint64_t kRflagsDirection = 1ULL << 10U;
-constexpr std::uint64_t kRflagsOverflow = 1ULL << 11U;
-constexpr std::uint64_t kGuestRflagsMask =
-    kRflagsCarry |
-    kRflagsParity |
-    kRflagsAuxiliaryCarry |
-    kRflagsZero |
-    kRflagsSign |
-    kRflagsDirection |
-    kRflagsOverflow;
 
 struct SignalRange {
     std::uint64_t base = 0;
@@ -741,68 +749,8 @@ run_linux_guest_thread(
         ++installed_count;
     }
 
-    ucontext_t guest_host_context{};
-    errno = 0;
-    if (::getcontext(&guest_host_context) != 0) {
-        const int host_error = errno;
-        const auto cleanup_error =
-            restore_signal_environment(
-                previous_stack,
-                installed_count);
-        if (cleanup_error.has_value()) {
-            return LinuxExecutionResult::failure(
-                cleanup_error.value());
-        }
-        return LinuxExecutionResult::failure(
-            backend_error(
-                NativeBackendErrorCode::
-                    internal_transition_failure,
-                false,
-                0,
-                true,
-                static_cast<std::uint64_t>(
-                    host_error)));
-    }
-
-    auto& gregs =
-        guest_host_context.uc_mcontext.gregs;
-
-    gregs[REG_RAX] = static_cast<greg_t>(context.rax);
-    gregs[REG_RBX] = static_cast<greg_t>(context.rbx);
-    gregs[REG_RCX] = static_cast<greg_t>(context.rcx);
-    gregs[REG_RDX] = static_cast<greg_t>(context.rdx);
-    gregs[REG_RSI] = static_cast<greg_t>(context.rsi);
-    gregs[REG_RDI] = static_cast<greg_t>(context.rdi);
-    gregs[REG_RBP] = static_cast<greg_t>(context.rbp);
-    gregs[REG_RSP] = static_cast<greg_t>(context.rsp);
-    gregs[REG_R8] = static_cast<greg_t>(context.r8);
-    gregs[REG_R9] = static_cast<greg_t>(context.r9);
-    gregs[REG_R10] = static_cast<greg_t>(context.r10);
-    gregs[REG_R11] = static_cast<greg_t>(context.r11);
-    gregs[REG_R12] = static_cast<greg_t>(context.r12);
-    gregs[REG_R13] = static_cast<greg_t>(context.r13);
-    gregs[REG_R14] = static_cast<greg_t>(context.r14);
-    gregs[REG_R15] = static_cast<greg_t>(context.r15);
-    gregs[REG_RIP] = static_cast<greg_t>(context.rip);
-
-    const std::uint64_t host_rflags =
-        static_cast<std::uint64_t>(
-            gregs[REG_EFL]);
-    const std::uint64_t guest_rflags =
-        (host_rflags & ~kGuestRflagsMask) |
-        (context.rflags & kGuestRflagsMask) |
-        0x2U;
-    gregs[REG_EFL] =
-        static_cast<greg_t>(guest_rflags);
-
-    for (const int signal_number : kGuestSignals) {
-        static_cast<void>(
-            ::sigdelset(
-                &guest_host_context.uc_sigmask,
-                signal_number));
-    }
-
     SignalFrame frame{};
+
     frame.executable_ranges =
         executable_ranges.data();
     frame.executable_range_count =
@@ -816,31 +764,8 @@ run_linux_guest_thread(
         sigsetjmp(frame.jump_buffer, 1);
     if (jump_result == 0) {
         g_active_frame = &frame;
-        errno = 0;
-        if (::setcontext(
-                &guest_host_context) != 0) {
-            const int host_error = errno;
-            g_active_frame = nullptr;
-            const auto cleanup_error =
-                restore_signal_environment(
-                    previous_stack,
-                    installed_count);
-            if (cleanup_error.has_value()) {
-                return LinuxExecutionResult::failure(
-                    cleanup_error.value());
-            }
-            return LinuxExecutionResult::failure(
-                backend_error(
-                    NativeBackendErrorCode::
-                        internal_transition_failure,
-                    false,
-                    0,
-                    true,
-                    static_cast<std::uint64_t>(
-                        host_error)));
-        }
-
-        ::_exit(127);
+        astraea_linux_enter_guest_context(
+            &context);
     }
 
     g_active_frame = nullptr;
