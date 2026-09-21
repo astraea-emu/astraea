@@ -9,6 +9,7 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <optional>
 #include <string>
 #include <utility>
 #include <vector>
@@ -29,9 +30,9 @@ constexpr std::uint32_t make_sopp(
 
 astraea::graphics::RawPacket make_packet(
     std::array<std::byte, 4> bytes) {
-    const std::vector<std::byte> command_buffer{
+    const std::vector<std::byte> command_buffer(
         bytes.begin(),
-        bytes.end()};
+        bytes.end());
 
     auto result =
         astraea::graphics::parse_raw_packet(
