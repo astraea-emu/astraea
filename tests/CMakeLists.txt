@@ -14,6 +14,7 @@ add_executable(astraea_core_tests
     loader/elf64_tests.cpp
     loader/dynamic_tests.cpp
     loader/dynamic_metadata_tests.cpp
+    loader/sce_dynamic_metadata_tests.cpp
     loader/dynamic_string_tests.cpp
     loader/sysv_hash_tests.cpp
     loader/dynamic_symbols_tests.cpp
