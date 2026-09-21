@@ -1,9 +1,9 @@
 # Project Status
 
 **Milestone:** M3 — Behavioral evidence and differential tooling  
-**State:** M2 controlled execution complete; M3 evidence/probe/trace foundations complete; first graphics frontend slice merged; SCE metadata slice in review  
+**State:** M2 complete; M3 evidence/trace foundations plus raw graphics and SCE metadata slices complete; minimal RDNA2 decoder in progress  
 **Repository:** astraea-emu/astraea  
-**Active branch:** `feat/m3-sce-dynamic-metadata`
+**Active branch:** `feat/m3-rdna2-sopp-decoder`
 
 ## Complete
 
@@ -17,6 +17,7 @@
 - Deterministic Trace v0 diff / first-divergence locator (#7).
 - RDNA2/PS5 graphics evidence map (#9).
 - Raw graphics packet/header preservation slice with synthetic fixtures (#29).
+- Evidence-backed SCE dynamic metadata classification/preservation (#30).
 - Public five-gate CI remains the merge requirement:
   - Linux x64
   - Windows x64
@@ -26,11 +27,10 @@
 
 ## Current frontier
 
-1. #30 — data-only SCE dynamic metadata classification/preservation — in review on this branch.
-2. #31 — minimal generic RDNA2 instruction decoder using AMD-published ISA fixtures only.
-3. #32 — freeze the minimal host-independent Graphics IR contract.
-4. #33 — freeze the minimal host-independent Shader IR contract.
-5. #34 — add Trace v0 adapters at graphics frontend/IR boundaries after the relevant contracts exist.
+1. #31 — minimal generic RDNA2 SOPP decoder — in progress on this branch using AMD document 70648 only.
+2. #32 — freeze the minimal host-independent Graphics IR contract.
+3. #33 — freeze the minimal host-independent Shader IR contract.
+4. #34 — add Trace v0 adapters at graphics frontend/IR boundaries after the relevant contracts exist.
 
 ## SCE metadata boundary
 
@@ -80,5 +80,6 @@ PS5-specific assumptions require documented evidence.
 
 ## Next action
 
-Validate #30 across the five-gate matrix. If green, merge it and continue #31
-without broadening into PS5 shader launch ABI or Vulkan work.
+Validate #31 across the five-gate matrix. If green, merge the minimal SOPP
+subset and continue the IR contracts without broadening into PS5 shader launch
+ABI, Sony shader-container assumptions, SPIR-V, or Vulkan work.
