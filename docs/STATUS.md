@@ -1,9 +1,9 @@
 # Project Status
 
-**Milestone:** M3 — Behavioral evidence and differential tooling  
-**State:** M2 controlled execution complete; M3 trace and first graphics evidence boundaries integrated; M4 SCE symbol-identity bridge in progress  
+**Milestone:** M4 — Platform/HLE expansion  
+**State:** M2 controlled execution complete; M3 trace/graphics boundaries integrated; exact opaque SCE import binding registry in progress  
 **Repository:** astraea-emu/astraea  
-**Active branch:** `feat/m4-sce-symbol-identity`
+**Active branch:** `feat/m4-sce-import-bindings`
 
 ## Complete
 
@@ -22,6 +22,7 @@
 - Minimal host-independent Graphics IR semantic/provenance boundary (#32).
 - Minimal host-independent Shader IR for the AMD-documented SOPP subset (#33).
 - Graphics/frontend/shader Trace v0 adapters with semantic/provenance separation (#34).
+- Opaque SCE long-form dynamic-symbol identity parser (#43).
 - Public five-gate CI remains the merge requirement:
   - Linux x64
   - Windows x64
@@ -31,8 +32,8 @@
 
 ## Current frontier
 
-1. #43 — parse opaque SCE long-form dynamic-symbol identities without resolving imports or guessing names — in progress on this branch.
-2. Define the next narrow M4 resolver/HLE boundary only after #43 is merged and reviewed.
+1. #45 — exact opaque SCE import identity -> existing HLE function binding registry — in progress on this branch.
+2. After #45, define the smallest synthetic relocation/gate integration needed to prove an SCE-shaped unresolved/resolved import path end to end.
 
 ## SCE metadata boundary
 
@@ -82,6 +83,7 @@ PS5-specific assumptions require documented evidence.
 
 ## Next action
 
-Validate #43 across the five-gate matrix. Preserve raw symbol spellings and keep
-NID/library/module components opaque; do not add NID generation, plain-name
-lookup, import-resolution precedence, HLE binding, or system-module loading.
+Validate #45 across the five-gate matrix. Resolution must require the exact
+opaque NID/library/module triple and an explicitly supplied existing HLE
+function ID. No NID/name lookup, fallback resolution, relocation patching, or
+system-module loading belongs in this slice.
