@@ -90,9 +90,9 @@ namespace {
 [[nodiscard]] std::vector<std::byte> instruction_bytes(
     const astraea::graphics::Rdna2Instruction&
         instruction) {
-    return std::vector<std::byte>{
+    return std::vector<std::byte>(
         instruction.raw_encoding.begin(),
-        instruction.raw_encoding.end()};
+        instruction.raw_encoding.end());
 }
 
 [[nodiscard]] std::string packet_error_code_text(
