@@ -1,9 +1,9 @@
 # Project Status
 
 **Milestone:** M3 — Behavioral evidence and differential tooling  
-**State:** M2 complete; M3 evidence/trace foundations plus raw graphics, SCE metadata, RDNA2 decode, and Graphics IR complete; minimal Shader IR in progress  
+**State:** M2 complete; M3 evidence/trace foundations plus raw graphics, SCE metadata, RDNA2 decode, Graphics IR, and Shader IR complete; graphics Trace adapters in progress  
 **Repository:** astraea-emu/astraea  
-**Active branch:** `feat/m3-minimal-shader-ir`
+**Active branch:** `feat/m3-graphics-trace-adapters`
 
 ## Complete
 
@@ -20,6 +20,7 @@
 - Evidence-backed SCE dynamic metadata classification/preservation (#30).
 - Minimal generic RDNA2 SOPP decoder from AMD document 70648 (#31).
 - Minimal host-independent Graphics IR semantic/provenance boundary (#32).
+- Minimal host-independent Shader IR for the AMD-documented SOPP subset (#33).
 - Public five-gate CI remains the merge requirement:
   - Linux x64
   - Windows x64
@@ -29,8 +30,7 @@
 
 ## Current frontier
 
-1. #33 — minimal Shader IR for the current SOPP subset — in progress on this branch.
-2. #34 — add Trace v0 adapters at graphics frontend/IR boundaries after the relevant contracts exist.
+1. #34 — Trace v0 adapters for raw graphics, Graphics IR, RDNA2 decode, and Shader IR — in progress on this branch.
 
 ## SCE metadata boundary
 
@@ -80,6 +80,6 @@ PS5-specific assumptions require documented evidence.
 
 ## Next action
 
-Validate #33 across the five-gate matrix. Keep Shader IR limited to semantics
-required by the current AMD-documented SOPP subset, preserve raw instruction
-provenance separately, and do not add PS5 stage ABI, SPIR-V, or Vulkan coupling.
+Validate #34 across the five-gate matrix. Stable Trace fields must represent
+implemented semantics; raw packet/instruction encodings and source offsets stay
+diagnostic/provenance-only so #7 localizes behavioral rather than representational divergence.

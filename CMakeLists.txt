@@ -64,6 +64,7 @@ add_library(astraea_core STATIC
     src/graphics/shader_ir.cpp
     src/trace/v0.cpp
     src/trace/diff_v0.cpp
+    src/trace/graphics_v0.cpp
 )
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND
    CMAKE_SYSTEM_PROCESSOR MATCHES "^(x86_64|AMD64)$")
