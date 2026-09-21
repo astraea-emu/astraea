@@ -35,6 +35,7 @@ add_executable(astraea_core_tests
     execution/hle_runtime_tests.cpp
     probe/hello_tests.cpp
     probe/reference_tests.cpp
+    graphics/packet_tests.cpp
     trace/v0_tests.cpp
     trace/diff_v0_tests.cpp
 )
