@@ -57,6 +57,7 @@ add_library(astraea_core STATIC
     src/execution/hle_runtime.cpp
     src/execution/guest_memory.cpp
     src/probe/hello.cpp
+    src/probe/reference.cpp
 )
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND
    CMAKE_SYSTEM_PROCESSOR MATCHES "^(x86_64|AMD64)$")
