@@ -40,6 +40,7 @@ add_executable(astraea_core_tests
     execution/sce_import_resolution_tests.cpp
     execution/sce_jump_slot_patch_tests.cpp
     execution/sce_prototype_tests.cpp
+    execution/sce_multi_import_prototype_tests.cpp
     execution/hle_runtime_tests.cpp
     probe/hello_tests.cpp
     probe/reference_tests.cpp
