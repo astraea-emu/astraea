@@ -386,7 +386,7 @@ TEST_CASE(
     };
 
     for (const auto type : supported) {
-        DYNAMIC_SECTION("type 0x" << std::hex << type) {
+        DYNAMIC_SECTION("type " << type) {
             auto bytes = make_elf();
             write_u16(bytes, 16, type);
 
