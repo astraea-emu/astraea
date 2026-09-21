@@ -152,6 +152,32 @@ make_plan(
         };
 }
 
+astraea::execution::SceImportResolutionPlan
+make_second_plan(
+    std::uint32_t relocation_type =
+        astraea::execution::
+            kX86_64JumpSlotRelocationType) {
+    auto plan = make_plan(
+        astraea::loader::RelocationTableKind::plt_rela,
+        relocation_type,
+        std::int64_t{123});
+    plan.table_index = 5;
+    plan.relocation_target =
+        astraea::memory::GuestAddress{0x500010};
+    plan.symbol_index = 4;
+    plan.raw_symbol_name =
+        "LMNOPQRSTUV#library-b#module-b";
+    plan.identity =
+        astraea::loader::SceSymbolIdentity{
+            .nid = "LMNOPQRSTUV",
+            .library_id = "library-b",
+            .module_id = "module-b",
+        };
+    plan.function_id =
+        astraea::execution::HleFunctionId{2};
+    return plan;
+}
+
 }  // namespace
 
 TEST_CASE(
@@ -324,4 +350,189 @@ TEST_CASE(
     REQUIRE(first->gate_destination ==
             second->gate_destination);
     REQUIRE(first->raw_addend != second->raw_addend);
+}
+
+
+TEST_CASE(
+    "batch JUMP_SLOT builder preserves plan order and explicit gate slots",
+    "[execution][sce-jump-slot][batch]") {
+    const auto gates = make_gate_region();
+    const std::array plans{
+        make_plan(),
+        make_second_plan(),
+    };
+    const std::array<std::uint32_t, 2> slots{
+        1,
+        2,
+    };
+
+    const auto result =
+        astraea::execution::
+            build_synthetic_x86_64_jump_slot_patches(
+                plans,
+                gates,
+                slots);
+
+    REQUIRE(result.has_value());
+    REQUIRE(result->size() == 2);
+
+    REQUIRE(
+        result->at(0).relocation_target ==
+        astraea::memory::GuestAddress{0x500000});
+    REQUIRE(
+        result->at(0).gate_destination ==
+        astraea::memory::GuestAddress{0x600010});
+    REQUIRE(result->at(0).gate_slot == 1);
+    REQUIRE(
+        result->at(0).function_id ==
+        astraea::execution::HleFunctionId{1});
+    REQUIRE(
+        result->at(0).raw_addend ==
+        std::optional<std::int64_t>{-9});
+
+    REQUIRE(
+        result->at(1).relocation_target ==
+        astraea::memory::GuestAddress{0x500010});
+    REQUIRE(
+        result->at(1).gate_destination ==
+        astraea::memory::GuestAddress{0x600020});
+    REQUIRE(result->at(1).gate_slot == 2);
+    REQUIRE(
+        result->at(1).function_id ==
+        astraea::execution::HleFunctionId{2});
+    REQUIRE(
+        result->at(1).raw_addend ==
+        std::optional<std::int64_t>{123});
+}
+
+TEST_CASE(
+    "batch JUMP_SLOT builder requires one explicit slot per plan",
+    "[execution][sce-jump-slot][batch]") {
+    const auto gates = make_gate_region();
+    const std::array plans{
+        make_plan(),
+        make_second_plan(),
+    };
+    const std::array<std::uint32_t, 1> slots{
+        1,
+    };
+
+    const auto result =
+        astraea::execution::
+            build_synthetic_x86_64_jump_slot_patches(
+                plans,
+                gates,
+                slots);
+
+    REQUIRE_FALSE(result.has_value());
+    REQUIRE(
+        result.error().code ==
+        astraea::execution::
+            SceJumpSlotBatchErrorCode::
+                gate_slot_count_mismatch);
+    REQUIRE(result.error().plan_count == 2);
+    REQUIRE(result.error().gate_slot_count == 1);
+    REQUIRE_FALSE(result.error().patch_error.has_value());
+}
+
+TEST_CASE(
+    "batch JUMP_SLOT builder reports first indexed patch failure",
+    "[execution][sce-jump-slot][batch]") {
+    const auto gates = make_gate_region();
+    const std::array plans{
+        make_plan(),
+        make_second_plan(6),
+    };
+    const std::array<std::uint32_t, 2> slots{
+        1,
+        2,
+    };
+
+    const auto result =
+        astraea::execution::
+            build_synthetic_x86_64_jump_slot_patches(
+                plans,
+                gates,
+                slots);
+
+    REQUIRE_FALSE(result.has_value());
+    REQUIRE(
+        result.error().code ==
+        astraea::execution::
+            SceJumpSlotBatchErrorCode::
+                patch_failure);
+    REQUIRE(result.error().plan_index == 1);
+    REQUIRE(result.error().patch_error.has_value());
+    REQUIRE(
+        result.error().patch_error->code ==
+        astraea::execution::
+            SceJumpSlotPatchErrorCode::
+                unsupported_relocation_type);
+    REQUIRE(
+        result.error().patch_error->relocation_type ==
+        6);
+}
+
+TEST_CASE(
+    "batch JUMP_SLOT builder preserves gate-function mismatch at failing index",
+    "[execution][sce-jump-slot][batch]") {
+    const auto gates = make_gate_region();
+    const std::array plans{
+        make_plan(),
+        make_second_plan(),
+    };
+    const std::array<std::uint32_t, 2> slots{
+        1,
+        1,
+    };
+
+    const auto result =
+        astraea::execution::
+            build_synthetic_x86_64_jump_slot_patches(
+                plans,
+                gates,
+                slots);
+
+    REQUIRE_FALSE(result.has_value());
+    REQUIRE(
+        result.error().code ==
+        astraea::execution::
+            SceJumpSlotBatchErrorCode::
+                patch_failure);
+    REQUIRE(result.error().plan_index == 1);
+    REQUIRE(result.error().patch_error.has_value());
+    REQUIRE(
+        result.error().patch_error->code ==
+        astraea::execution::
+            SceJumpSlotPatchErrorCode::
+                gate_function_mismatch);
+    REQUIRE(
+        result.error().patch_error->
+            expected_function_id ==
+        astraea::execution::HleFunctionId{2});
+    REQUIRE(
+        result.error().patch_error->
+            actual_function_id ==
+        astraea::execution::HleFunctionId{1});
+}
+
+TEST_CASE(
+    "empty JUMP_SLOT batch succeeds without gate allocation",
+    "[execution][sce-jump-slot][batch]") {
+    const auto gates = make_gate_region();
+    const std::array<
+        astraea::execution::SceImportResolutionPlan,
+        0>
+        plans{};
+    const std::array<std::uint32_t, 0> slots{};
+
+    const auto result =
+        astraea::execution::
+            build_synthetic_x86_64_jump_slot_patches(
+                plans,
+                gates,
+                slots);
+
+    REQUIRE(result.has_value());
+    REQUIRE(result->empty());
 }
