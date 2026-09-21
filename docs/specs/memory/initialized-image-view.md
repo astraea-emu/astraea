@@ -1,7 +1,7 @@
 # Initialized Guest-Image Byte View — M1
 
 **Status:** Proposed  
-**Issue:** #27  
+**Milestone:** M1 — complete  
 **Scope:** deterministic, host-independent reads of initialized guest-image bytes
 
 ## 1. Purpose
@@ -326,7 +326,7 @@ Do not introduce a complex interval tree before measurements justify it.
 
 ## 16. Relationship to dynamic strings
 
-Issue #29 will use this view to resolve a `DynamicStringRef`.
+The dynamic-string resolution layer uses this view to resolve a `DynamicStringRef`.
 
 That layer will:
 - validate offset against `DT_STRSZ`

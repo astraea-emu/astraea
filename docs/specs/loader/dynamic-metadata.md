@@ -1,7 +1,7 @@
 # Relocation and Module Metadata Model — M1
 
 **Status:** Proposed  
-**Issue:** #6  
+**Milestone:** M1 — complete  
 **Scope:** neutral representation of ELF dynamic-link metadata before PS5-specific resolution semantics
 
 ## 1. Purpose
@@ -358,7 +358,7 @@ The following are explicitly **not defined by this document**:
 - PS5-specific relocation types or deviations
 - firmware/system-library compatibility policy
 
-Those questions belong to #12 and later probe-backed research.
+Those questions belong to public ABI evidence work in #8 and later probe-backed research.
 
 Astraea should preserve unknown data needed to answer them later rather than discarding it now.
 

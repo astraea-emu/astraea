@@ -1,7 +1,7 @@
 # Dynamic Symbol-Table Discovery and Bounds — M1
 
 **Status:** Proposed  
-**Issue:** #33  
+**Milestone:** M1 — complete  
 **Scope:** generic ELF64 dynamic-symbol discovery, bounds, and neutral records
 
 ## 1. Purpose
@@ -127,7 +127,7 @@ Why:
 - a forged huge `nbucket+nchain` must not force work proportional to a claimed hash body
 - full bucket/chain validation belongs to a future SysV hash-lookup implementation
 
-Issue #34 owns this minimal bounded header reader.
+The bounded SysV `DT_HASH` reader provides this minimal header evidence.
 
 ### 6.3 Multiple sources
 
@@ -152,7 +152,7 @@ Until implemented:
 - do not fall back to pointer-distance heuristics
 - if it is the only count mechanism, return `symbol_count_unavailable`/equivalent
 
-PS5/SCE-specific mechanisms remain behind #12.
+PS5/SCE-specific mechanisms remain behind public ABI evidence work in #8.
 
 ## 7. Bounded descriptor
 
@@ -311,7 +311,7 @@ Specifically:
 - symbol strings do not yet define canonical NIDs
 - generic binding/type/visibility do not establish SCE module identity
 
-Those interpretations remain behind #12 and later hardware/public-evidence work.
+Those interpretations remain behind public ABI evidence work in #8 and later hardware/public-evidence work.
 
 ## 15. Error model
 
@@ -377,7 +377,7 @@ No hash-map or tag iteration order may select a winner.
 - zero/non-multiple `DT_SYMTABSZ`
 - symbol-table guest-range overflow
 
-### SysV count header (#34)
+### SysV count header
 
 - minimal readable 8-byte header
 - `nchain == 0` rejection
@@ -387,7 +387,7 @@ No hash-map or tag iteration order may select a winner.
 - huge `nbucket` does not cause proportional scan/allocation
 - large `nchain` is handled only via checked symbol-table range arithmetic
 
-### Symbols (#35)
+### Symbols
 
 - valid reserved index 0
 - malformed reserved index 0
@@ -401,9 +401,9 @@ No hash-map or tag iteration order may select a winner.
 
 ## 19. Implementation sequence
 
-1. **#34** — implement bounded SysV `DT_HASH` header / `nchain` evidence
+1. Implement bounded SysV `DT_HASH` header / `nchain` evidence
 2. build symbol-table metadata with `DT_SYMTAB`, `DT_SYMENT`, optional `DT_SYMTABSZ`, and count-source agreement
-3. **#35** — parse bounded neutral `Elf64_Sym` records
+3. Parse bounded neutral `Elf64_Sym` records
 4. resolve symbol names lazily with the existing dynamic-string resolver
 5. add GNU-hash count derivation only if required by fixtures/evidence
 6. feed bounded symbols into generic relocation metadata later

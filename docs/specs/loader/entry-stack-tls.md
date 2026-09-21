@@ -1,7 +1,7 @@
 # Synthetic x86-64 Entry Stack and Generic TLS Template — M1
 
 **Status:** Proposed  
-**Issue:** #48  
+**Milestone:** M1 — complete  
 **Scope:** portable construction primitives for controlled synthetic guest entry
 
 ## 1. Purpose
@@ -482,7 +482,7 @@ A future provenance-backed platform layer may compose template metadata into a P
 
 ## 27. PS5 boundary
 
-The following remain explicitly unknown unless #12/probes establish them:
+The following remain explicitly unknown unless public ABI evidence work in #8 or probes establish them:
 
 - exact retail PS5 initial stack contents
 - PS5 auxv entries
@@ -499,10 +499,10 @@ Synthetic M1 tests must not be presented as hardware observations.
 
 After acceptance:
 
-1. **#49** — implement deterministic synthetic stack builder
-2. **#50** — implement PT_TLS descriptor/materializer independently
-3. **#51** — compose both into the final validated synthetic `GuestImage`
-4. close M1 #2 only after the integrated synthetic exit fixture passes all gates
+1. Implement deterministic synthetic stack builder
+2. Implement PT_TLS descriptor/materializer independently
+3. Compose both into the final validated synthetic `GuestImage`
+4. Complete M1 only after the integrated synthetic exit fixture passes all gates
 
 # 29. Decision summary
 

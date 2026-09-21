@@ -1,7 +1,7 @@
 # ELF64 Loader Invariants — M1
 
 **Status:** Proposed for M1 implementation  
-**Issue:** #3  
+**Milestone:** M1 — complete  
 **Scope:** structural parsing and validation of synthetic/owned ELF64 guest images
 
 ## 1. Purpose
@@ -164,7 +164,7 @@ If later PS5 evidence demonstrates accepted non-conforming ordering, that should
 
 Structural parsing does **not** reject two `PT_LOAD` entries merely because their virtual ranges overlap or share a page.
 
-ELF loading may involve page-granular relationships between adjacent segments. The exact guest mapping/permission conflict policy belongs to issue #5 and must not be guessed here.
+ELF loading may involve page-granular relationships between adjacent segments. The exact guest mapping/permission conflict policy belongs to the guest-address-space specification and must not be guessed here.
 
 The parser should nevertheless expose enough information for the mapping layer to detect and reason about overlaps deterministically.
 
@@ -211,7 +211,7 @@ Errors should carry the relevant program-header index/offset when available, but
 
 ## 12. Fixture/test matrix
 
-The implementation issue (#4) is not complete without fixtures/tests for at least:
+The implementation is not complete without fixtures/tests for at least:
 
 ### Valid
 

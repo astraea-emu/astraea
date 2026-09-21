@@ -1,9 +1,9 @@
 # Project Status
 
 **Milestone:** M2 — Controlled execution  
-**State:** public clean-room baseline green; Linux memory preparation in review  
+**State:** public clean-room baseline green; Linux memory preparation complete; synthetic HLE gate contract accepted  
 **Repository:** astraea-emu/astraea  
-**Active branch:** `feat/m2-linux-memory-prep-clean`
+**Active branch:** `main`
 
 ## Complete
 
@@ -12,7 +12,9 @@
 - M2 guarded native x86-64 execution architecture.
 - M2 portable `GuestCpuContext`, backend stop/fault model, and execution-memory planner.
 - Public clean-room baseline migrated without prior Git history.
-- Public five-gate CI is green:
+- Linux exact-address guest memory preparation and teardown (#2).
+- Synthetic host-gate / HLE dispatch ABI specification (#3).
+- Public five-gate CI:
   - Linux x64
   - Windows x64
   - macOS ARM64
@@ -21,10 +23,11 @@
 
 ## Current frontier
 
-- #2 Linux exact-address guest memory preparation and teardown — in review on this branch.
-- #3 synthetic host-gate/HLE dispatch ABI — next design branch.
-- #4 Linux native register transition and scoped fault recovery — follows #2 and #3.
-- First end-to-end target: `probe_hello.elf`.
+1. #13 — implement the synthetic HLE registry and backend-owned gate region.
+2. #4 — implement Linux native register transition and scoped fault recovery, including recognized gate-stop capture.
+3. #14 — add bounded guest-memory access plus `astraea.test.write` and `astraea.test.exit`.
+4. #15 — execute the first end-to-end `probe_hello.elf`.
+5. #5 — implement the equivalent guarded Windows x86-64 backend.
 
 ## Execution boundary
 
@@ -49,10 +52,16 @@ DRM-bypass material, or unrelated employer/proprietary material.
 
 PS5-specific assumptions require documented evidence.
 
+## Research / verification backlog
+
+- #6 stable Astraea trace schema v0.
+- #7 trace diff and first-divergence locator.
+- #8 public PS5 executable/module ABI evidence map.
+- #9 RDNA2/PS5 graphics evidence map.
+- #10 AstraeaProbe v0 controlled behavioral probe format.
+
 ## Next action
 
-1. Validate and merge #2 after public CI/review.
-2. Recreate and validate #3.
-3. Implement #4.
-4. Add bounded guest-memory access and synthetic `test.write` / `test.exit`.
-5. Reach the first controlled `probe_hello.elf` execution.
+Implement #13 as the portable/runtime foundation required by #4, then complete
+Linux transition/fault recovery, bounded guest-memory services, and #15
+`probe_hello.elf`.

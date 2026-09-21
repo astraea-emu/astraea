@@ -1,7 +1,7 @@
 # Guest Virtual-Address and Mapping Model — M1
 
 **Status:** Proposed  
-**Issue:** #5  
+**Milestone:** M1 — complete  
 **Scope:** platform-neutral representation of guest addresses, ranges, permissions, and mapping intent
 
 ## 1. Purpose
@@ -352,11 +352,11 @@ Portable M1 code owns none of those mechanisms.
 
 ## 19. Relationship to other issues
 
-- #3 defines structural ELF64 parsing invariants.
-- #4 will parse ELF64 into validated records.
-- #5 (this document) defines address/mapping semantics.
-- #7 will use the validated model when constructing initial stack/TLS state.
-- #8 later defines x86-64 guest/host execution transitions.
+- The ELF64 specification defines structural parsing invariants.
+- The loader parses ELF64 into validated records.
+- This document defines address/mapping semantics.
+- Guest-image construction uses the validated model when constructing initial stack/TLS state.
+- The native x86-64 transition specification defines guest/host execution transitions.
 
 ## 20. Decision summary
 

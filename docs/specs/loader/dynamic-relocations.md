@@ -1,7 +1,7 @@
 # Bounded Dynamic Relocation Metadata — M1
 
 **Status:** Proposed  
-**Issue:** #42  
+**Milestone:** M1 — complete  
 **Scope:** generic ELF64 REL / RELA / PLT relocation metadata before relocation application
 
 ## 1. Purpose
@@ -232,7 +232,7 @@ A zero-size PLT relocation table is representable as empty.
 
 The table range uses `DT_JMPREL` as its guest base.
 
-Issue #44 implements this layer after the common REL/RELA decoder exists.
+The PLT relocation layer builds on the common REL/RELA decoder.
 
 ## 9. RELR boundary
 
@@ -246,7 +246,7 @@ The current gABI requires:
 
 as a companion group, and specifies that RELR is processed before REL/RELA during dynamic linking.
 
-M1 relocation metadata in #43/#44 does not expand RELR.
+M1 relocation metadata does not expand RELR.
 
 A future issue must define its own bounded decoder.
 
@@ -513,7 +513,7 @@ Human-readable strings are not the stable API.
 - RELA negative addend
 - RELA `INT64_MIN` bit pattern
 
-### PLT (#44)
+### PLT
 
 - REL-selected PLT table
 - RELA-selected PLT table
@@ -525,11 +525,11 @@ Human-readable strings are not the stable API.
 
 ## 23. Implementation sequence
 
-1. **#43** — general REL/RELA descriptor construction + neutral lazy decoder
-2. **#44** — PLT/JMPREL descriptor using the same decoder
+1. General REL/RELA descriptor construction + neutral lazy decoder
+2. PLT/JMPREL descriptor using the same decoder
 3. future bounded RELR decoder if required
 4. x86-64 relocation semantics/application only after neutral metadata is stable
-5. PS5/SCE-specific relocation extensions only after #12/public-probe evidence
+5. PS5/SCE-specific relocation extensions only after public ABI evidence work in #8 and probe-backed evidence
 
 ## 24. Evidence
 

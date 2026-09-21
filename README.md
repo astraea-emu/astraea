@@ -2,7 +2,7 @@
 
 A verification-first PlayStation 5 compatibility research and emulation project.
 
-> **Status:** architecture and research bootstrap. Astraea does not currently run PlayStation 5 software.
+> **Status:** M2 controlled-execution development. Astraea does not currently run PlayStation 5 software.
 
 ## Principles
 
