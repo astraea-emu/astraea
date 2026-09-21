@@ -1,7 +1,7 @@
 # Native x86-64 Guest/Host Transition Contract — M2
 
 **Status:** Proposed  
-**Issue:** #8  
+**Related public issues:** #1, #3, #4, #5  
 **Scope:** portable execution state and guarded Linux/Windows x86-64 backend boundary
 
 ## 1. Objective
@@ -36,7 +36,7 @@ ExecutionResult
    +--> normalized fault
 ```
 
-Issue #9 defines the HLE registry/gate semantics. #8 only reserves a backend stop mechanism capable of handing a guest-to-host event to that layer.
+Issue #3 defines the HLE registry/gate semantics. This document reserves a backend stop mechanism capable of handing a guest-to-host event to that layer.
 
 ## 3. Portable GuestCpuContext
 
@@ -202,7 +202,7 @@ The backend does not place a raw host return address on guest RSP.
 
 M2 stop/exit paths use a defined gate/fault mechanism.
 
-Issue #9 will define HLE call and synthetic exit semantics above this mechanism.
+Issue #3 defines HLE call and synthetic exit semantics above this mechanism.
 
 ## 12. Execution stop representation
 
@@ -222,7 +222,7 @@ Initial reasons:
 - `guest_fault`
 - `backend_error`
 
-Issue #9 may refine host-gate payloads into HLE/exit events without changing the saved CPU context contract.
+Issue #3 may refine host-gate payloads into HLE/exit events without changing the saved CPU context contract.
 
 ## 13. Normalized GuestFault
 
@@ -245,7 +245,7 @@ Initial normalized kinds:
 
 The original host exception/signal code is preserved diagnostically.
 
-Do not reinterpret every trap as HLE; issue #9 defines which gate encodings are intentional.
+Do not reinterpret every trap as HLE; issue #3 defines which gate encodings are intentional.
 
 ## 14. Linux x86-64 recovery adapter
 
@@ -406,7 +406,7 @@ After this contract is accepted:
 4. Windows x86-64 exact-address synthetic mapper
 5. host-state save/restore transition stub per host ABI
 6. fault recovery tests using deliberately faulting owned code
-7. issue #9 HLE/exit gate contract
+7. issue #3 HLE/exit gate contract
 8. `probe_hello.elf` end-to-end
 
 No broad PS5 API work starts before the synthetic transition is mechanically reliable.
@@ -444,4 +444,4 @@ macOS ARM64:
 
 ## 24. Decision summary
 
-> Astraea M2 begins with trusted synthetic native x86-64 execution on Linux and Windows. Guest memory is identity-mapped without replacing host mappings, populated under non-executable permissions, then protected under strict W^X. A portable integer CPU context is separated from host signal/SEH structures. Fault recovery is scoped to a dedicated execution frame, preserves host state, and never unwinds C++ through guest frames. HLE/exit gate semantics are layered separately in issue #9.
+> Astraea M2 begins with trusted synthetic native x86-64 execution on Linux and Windows. Guest memory is identity-mapped without replacing host mappings, populated under non-executable permissions, then protected under strict W^X. A portable integer CPU context is separated from host signal/SEH structures. Fault recovery is scoped to a dedicated execution frame, preserves host state, and never unwinds C++ through guest frames. HLE/exit gate semantics are layered separately in issue #3.
