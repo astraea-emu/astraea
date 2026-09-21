@@ -105,9 +105,9 @@ TEST_CASE(
     REQUIRE(packet.header.total_word_count == 3);
     REQUIRE(
         packet.raw_words ==
-        std::vector<std::uint32_t>{
+        std::vector<std::uint32_t>(
             words.begin(),
-            words.end()});
+            words.end()));
 }
 
 TEST_CASE(
