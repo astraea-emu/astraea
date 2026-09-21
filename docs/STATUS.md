@@ -1,9 +1,9 @@
 # Project Status
 
 **Milestone:** M4 — Platform/HLE expansion  
-**State:** First owned PS5/SCE-oriented synthetic prototype complete; multi-import HLE resume proof in progress  
+**State:** First owned PS5/SCE-oriented synthetic prototype and multi-import HLE-resume composition proof complete; M4 expansion continues from this baseline  
 **Repository:** astraea-emu/astraea  
-**Active branch:** `feat/m4-sce-multi-import-proof`
+**Active branch:** `main`
 
 ## Complete
 
@@ -31,6 +31,7 @@
 - Validated synthetic JUMP_SLOT patch application through GuestMemoryAccess (#56).
 - Owned SCE-profile ELF end-to-end import/execution proof through HLE exit 42 (#57).
 - Evidence-backed SCE program-header vocabulary classification/preservation (#61).
+- Two exact SCE imports executed end to end through write → HLE resume → exit (#63).
 - Public five-gate CI remains the merge requirement:
   - Linux x64
   - Windows x64
@@ -40,8 +41,9 @@
 
 ## Current frontier
 
-1. #63 — prove two exact SCE imports can be independently resolved/patched and execute write → HLE resume → exit — in progress on this branch.
-2. Keep unsupported relocation/load-bias and SCE program-header runtime semantics explicit; do not guess them.
+1. The multi-import composition proof is complete on `main` via #63 / PR #64.
+2. The next production-facing slice should batch already-supported exact SCE PLT import planning without adding new relocation or PS5 ABI semantics.
+3. `R_X86_64_RELATIVE` remains deferred until Astraea has an explicit, evidence-backed image load-base / load-bias contract.
 
 ## SCE metadata boundary
 
@@ -100,6 +102,7 @@ PS5-specific assumptions require documented evidence.
 
 ## Next action
 
-Validate #63 across the five-gate matrix. Prefer a test-only proof if existing
-production primitives already compose correctly; do not add new PS5 ABI or relocation
-semantics merely to make the synthetic fixture pass.
+Define a batch exact-SCE PLT import planning API over the already-validated loader
+metadata and binding registry. It should produce deterministic per-relocation plans,
+preserve exact identity/provenance, fail with indexed typed errors, and stop before
+gate selection or guest-memory writes. Do not broaden relocation semantics.
