@@ -38,6 +38,7 @@ add_executable(astraea_core_tests
     execution/hle_tests.cpp
     execution/sce_import_binding_tests.cpp
     execution/sce_import_resolution_tests.cpp
+    execution/sce_plt_import_batch_tests.cpp
     execution/sce_jump_slot_patch_tests.cpp
     execution/sce_prototype_tests.cpp
     execution/sce_multi_import_prototype_tests.cpp
