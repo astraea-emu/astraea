@@ -1,6 +1,9 @@
 #include <astraea/loader/dynamic_metadata.hpp>
 
+#include <array>
+#include <new>
 #include <optional>
+#include <stdexcept>
 #include <utility>
 
 namespace astraea::loader {
@@ -10,6 +13,17 @@ constexpr std::int64_t kDtNeeded = 1;
 constexpr std::int64_t kDtStrtab = 5;
 constexpr std::int64_t kDtStrsz = 10;
 constexpr std::int64_t kDtSoname = 14;
+
+constexpr std::int64_t kDtSceModuleAttributes = 0x61000011;
+constexpr std::int64_t kDtSceExportLibraryAttributes = 0x61000017;
+constexpr std::int64_t kDtSceImportLibraryAttributes = 0x61000019;
+constexpr std::int64_t kDtSceHashTableSize = 0x6100003d;
+constexpr std::int64_t kDtSceSymbolTableSize = 0x6100003f;
+constexpr std::int64_t kDtSceOriginalFilename = 0x61000041;
+constexpr std::int64_t kDtSceModuleInformation = 0x61000043;
+constexpr std::int64_t kDtSceNeededModule = 0x61000045;
+constexpr std::int64_t kDtSceExportLibrary = 0x61000047;
+constexpr std::int64_t kDtSceImportLibrary = 0x61000049;
 
 struct SingletonValue {
     std::uint64_t value;
@@ -50,6 +64,73 @@ struct SingletonValue {
     }
 
     return astraea::core::Result<SingletonValue, DynamicMetadataError>::success(*slot);
+}
+
+[[nodiscard]] SceDynamicTagKind classify_sce_dynamic_tag(
+    std::int64_t tag) noexcept {
+    switch (tag) {
+    case kDtSceModuleAttributes:
+        return SceDynamicTagKind::module_attributes;
+    case kDtSceExportLibraryAttributes:
+        return SceDynamicTagKind::export_library_attributes;
+    case kDtSceImportLibraryAttributes:
+        return SceDynamicTagKind::import_library_attributes;
+    case kDtSceHashTableSize:
+        return SceDynamicTagKind::hash_table_size;
+    case kDtSceSymbolTableSize:
+        return SceDynamicTagKind::symbol_table_size;
+    case kDtSceOriginalFilename:
+        return SceDynamicTagKind::original_filename;
+    case kDtSceModuleInformation:
+        return SceDynamicTagKind::module_information;
+    case kDtSceNeededModule:
+        return SceDynamicTagKind::needed_module;
+    case kDtSceExportLibrary:
+        return SceDynamicTagKind::export_library;
+    case kDtSceImportLibrary:
+        return SceDynamicTagKind::import_library;
+    default:
+        return SceDynamicTagKind::unknown;
+    }
+}
+
+[[nodiscard]] std::optional<std::size_t>
+sce_singleton_slot(SceDynamicTagKind kind) noexcept {
+    switch (kind) {
+    case SceDynamicTagKind::module_attributes:
+        return 0;
+    case SceDynamicTagKind::hash_table_size:
+        return 1;
+    case SceDynamicTagKind::symbol_table_size:
+        return 2;
+    case SceDynamicTagKind::original_filename:
+        return 3;
+    case SceDynamicTagKind::module_information:
+        return 4;
+
+    case SceDynamicTagKind::export_library_attributes:
+    case SceDynamicTagKind::import_library_attributes:
+    case SceDynamicTagKind::needed_module:
+    case SceDynamicTagKind::export_library:
+    case SceDynamicTagKind::import_library:
+    case SceDynamicTagKind::unknown:
+        return std::nullopt;
+    }
+
+    return std::nullopt;
+}
+
+[[nodiscard]] SceDynamicMetadataError sce_metadata_error(
+    SceDynamicMetadataErrorCode code,
+    std::int64_t tag = 0,
+    std::optional<std::size_t> source_entry_index = std::nullopt,
+    std::optional<std::size_t> conflicting_entry_index = std::nullopt) noexcept {
+    return SceDynamicMetadataError{
+        .code = code,
+        .tag = tag,
+        .source_entry_index = source_entry_index,
+        .conflicting_entry_index = conflicting_entry_index,
+    };
 }
 
 }  // namespace
@@ -156,6 +237,70 @@ DynamicMetadataResult build_dynamic_string_metadata(const DynamicTable& table) {
     }
 
     return DynamicMetadataResult::success(std::move(metadata));
+}
+
+SceDynamicMetadataResult
+build_sce_dynamic_metadata(const DynamicTable& table) {
+    try {
+        SceDynamicMetadata metadata;
+        metadata.records.reserve(table.entries.size());
+
+        std::array<std::optional<SingletonValue>, 5>
+            singleton_values{};
+
+        for (const auto& entry : table.entries) {
+            const auto kind =
+                classify_sce_dynamic_tag(entry.tag);
+
+            if (const auto slot =
+                    sce_singleton_slot(kind);
+                slot.has_value()) {
+                auto& existing =
+                    singleton_values[slot.value()];
+
+                if (!existing.has_value()) {
+                    existing = SingletonValue{
+                        .value = entry.value,
+                        .source_entry_index =
+                            entry.index,
+                    };
+                } else if (
+                    existing->value != entry.value) {
+                    return SceDynamicMetadataResult::
+                        failure(
+                            sce_metadata_error(
+                                SceDynamicMetadataErrorCode::
+                                    conflicting_singleton_tag,
+                                entry.tag,
+                                entry.index,
+                                existing->
+                                    source_entry_index));
+                }
+            }
+
+            metadata.records.push_back(
+                SceDynamicRecord{
+                    .kind = kind,
+                    .raw_tag = entry.tag,
+                    .raw_value = entry.value,
+                    .source_entry_index =
+                        entry.index,
+                });
+        }
+
+        return SceDynamicMetadataResult::success(
+            std::move(metadata));
+    } catch (const std::bad_alloc&) {
+        return SceDynamicMetadataResult::failure(
+            sce_metadata_error(
+                SceDynamicMetadataErrorCode::
+                    host_allocation_failure));
+    } catch (const std::length_error&) {
+        return SceDynamicMetadataResult::failure(
+            sce_metadata_error(
+                SceDynamicMetadataErrorCode::
+                    host_allocation_failure));
+    }
 }
 
 }  // namespace astraea::loader
