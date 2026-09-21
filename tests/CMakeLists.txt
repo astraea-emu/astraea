@@ -29,6 +29,8 @@ add_executable(astraea_core_tests
     execution/memory_plan_tests.cpp
     execution/linux_memory_tests.cpp
     execution/linux_execution_tests.cpp
+    execution/windows_execution_tests.cpp
+    execution/windows_memory_tests.cpp
     execution/hle_tests.cpp
     execution/hle_runtime_tests.cpp
     probe/hello_tests.cpp
