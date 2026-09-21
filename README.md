@@ -2,7 +2,7 @@
 
 A verification-first PlayStation 5 compatibility research and emulation project.
 
-> **Status:** M2 controlled-execution development. Astraea does not currently run PlayStation 5 software.
+> **Status:** M2 controlled execution complete for trusted Astraea-owned x86-64 probes on Linux and Windows. Astraea does not currently run PlayStation 5 software.
 
 ## Principles
 
@@ -36,7 +36,7 @@ See:
 
 **M2 — Controlled execution**
 
-The validated ELF/guest-image pipeline and portable native-execution planning layer are complete. The current frontier is guarded Linux x86-64 guest-memory preparation, register transition/fault recovery, and the synthetic HLE gate needed for the first controlled `probe_hello.elf`.
+The validated ELF/guest-image pipeline, guarded native x86-64 execution backends, bounded synthetic HLE path, and `probe_hello.elf` end-to-end proof are complete on Linux and Windows. The next frontier is evidence-driven PS5 executable/module research, controlled probe specification, and trace/diff infrastructure before broader platform HLE or graphics work.
 
 No compatibility claims should be made until the corresponding behavior is implemented and covered by tests.
 
