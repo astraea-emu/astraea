@@ -586,3 +586,43 @@ TEST_CASE(
     REQUIRE(result.error().source_program_header_index.has_value());
     REQUIRE(result.error().conflicting_program_header_index.has_value());
 }
+
+
+TEST_CASE(
+    "GuestImage requires explicit PS5/SCE profile for SCE file type",
+    "[loader][guest-image][sce]") {
+    auto generic_request = make_request();
+    write_u16(
+        generic_request.image_bytes,
+        16,
+        0xfe10);
+
+    const auto generic =
+        astraea::loader::build_guest_image(
+            std::move(generic_request));
+    REQUIRE_FALSE(generic.has_value());
+    REQUIRE(
+        generic.error().code ==
+        astraea::loader::GuestImageErrorCode::
+            elf_parse_failure);
+    REQUIRE(
+        std::get<astraea::loader::ElfError>(
+            generic.error().cause)
+            .code ==
+        astraea::loader::ElfErrorCode::
+            unsupported_file_type);
+
+    auto sce_request = make_request();
+    write_u16(
+        sce_request.image_bytes,
+        16,
+        0xfe10);
+    sce_request.elf_profile =
+        astraea::loader::ElfParseProfile::ps5_sce;
+
+    const auto sce =
+        astraea::loader::build_guest_image(
+            std::move(sce_request));
+    REQUIRE(sce.has_value());
+    REQUIRE(sce->elf.header.type == 0xfe10);
+}
