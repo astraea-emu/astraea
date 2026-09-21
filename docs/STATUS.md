@@ -26,6 +26,8 @@
 - Exact opaque SCE identity -> HLE function binding registry (#45).
 - Validated dynamic symbol -> exact raw spelling / optional SCE identity materialization (#47).
 - Validated relocation + exact SCE identity + exact HLE binding resolution plan (#50).
+- Portable x86-64 R_X86_64_JUMP_SLOT synthetic gate patch builder (#52).
+- Explicit opt-in PS5/SCE ELF parse profile for 0xFE10 / 0xFE18 (#54).
 - Portable synthetic x86-64 R_X86_64_JUMP_SLOT gate patch builder (#52).
 - Public five-gate CI remains the merge requirement:
   - Linux x64
