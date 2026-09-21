@@ -58,6 +58,7 @@ struct GuestImageRequest {
     // Ownership is transferred into GuestImage on success.
     std::vector<std::byte> image_bytes;
     InitialStackRequest initial_stack;
+    ElfParseProfile elf_profile = ElfParseProfile::generic;
 };
 
 class GuestImage {
