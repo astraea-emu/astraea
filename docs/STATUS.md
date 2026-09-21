@@ -1,9 +1,9 @@
 # Project Status
 
 **Milestone:** M4 — Platform/HLE expansion  
-**State:** M2 controlled execution complete; M3 trace/graphics boundaries integrated; SCE import resolution and synthetic JUMP_SLOT patch construction complete; explicit PS5/SCE ELF profile in progress  
+**State:** M2 controlled execution complete; M3 trace/graphics boundaries integrated; SCE ELF profile/import resolution/JUMP_SLOT construction complete; validated guest-memory patch application in progress  
 **Repository:** astraea-emu/astraea  
-**Active branch:** `feat/m4-sce-elf-profile-v2`
+**Active branch:** `feat/m4-apply-jump-slot-patch`
 
 ## Complete
 
@@ -26,7 +26,8 @@
 - Exact opaque SCE identity -> HLE function binding registry (#45).
 - Validated dynamic symbol -> exact raw spelling / optional SCE identity materialization (#47).
 - Validated relocation + exact SCE identity + exact HLE binding resolution plan (#50).
-- Portable synthetic x86-64 R_X86_64_JUMP_SLOT gate patch builder (#52).
+- Portable x86-64 R_X86_64_JUMP_SLOT synthetic gate patch builder (#52).
+- Explicit opt-in PS5/SCE ELF parse profile for 0xFE10 / 0xFE18 (#54).
 - Public five-gate CI remains the merge requirement:
   - Linux x64
   - Windows x64
@@ -36,8 +37,8 @@
 
 ## Current frontier
 
-1. #54 — explicit opt-in PS5/SCE ELF parse profile for the documented 0xFE10 and 0xFE18 file types — in progress on this branch.
-2. After #54, apply the validated JUMP_SLOT patch through the Linux guest-memory write boundary and prove an owned SCE-shaped import path end to end.
+1. #56 — apply an already-validated synthetic JUMP_SLOT patch through GuestMemoryAccess — in progress on this branch.
+2. #57 — execute the owned SCE-shaped import fixture end to end; completion of #57 is the current first PS5-oriented prototype milestone.
 
 ## SCE metadata boundary
 
@@ -87,6 +88,6 @@ PS5-specific assumptions require documented evidence.
 
 ## Next action
 
-Validate #54 across the five-gate matrix. Generic ELF parsing must remain
-unchanged; SCE file types 0xFE10 and 0xFE18 are accepted only with explicit
-PS5/SCE opt-in. Do not add SCE program-header, OS/ABI, entry-ABI, or container semantics.
+Validate #56 across the five-gate matrix. Patch application must go only through
+GuestMemoryAccess::write() and preserve typed memory failures. Then complete #57's
+owned SCE-shaped end-to-end import/execution proof without broadening to retail input.
