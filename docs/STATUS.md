@@ -1,9 +1,9 @@
 # Project Status
 
 **Milestone:** M4 — Platform/HLE expansion  
-**State:** First owned PS5/SCE-oriented synthetic prototype complete; M4 platform/HLE expansion continues from this validated baseline  
+**State:** First owned PS5/SCE-oriented synthetic prototype complete; evidence-backed SCE program-header classification in progress  
 **Repository:** astraea-emu/astraea  
-**Active branch:** `main`
+**Active branch:** `feat/m4-sce-program-header-vocabulary`
 
 ## Complete
 
@@ -39,8 +39,8 @@
 
 ## Current frontier
 
-1. The first PS5/SCE-oriented synthetic prototype milestone is complete on `main` via #57 / PR #59.
-2. The next milestone must be scoped from evidence-backed platform/HLE and graphics gaps; commercial compatibility remains a later goal.
+1. #61 — classify the evidence-backed SCE program-header vocabulary while preserving complete raw headers — in progress on this branch.
+2. Runtime semantics for dynlib/process-parameter/RELRO headers remain unsupported until stronger evidence justifies them.
 
 ## SCE metadata boundary
 
@@ -56,6 +56,15 @@ The #30 slice is additive to the generic dynamic parser:
 
 The existing strict dynamic parser remains responsible for segment bounds, entry
 size, arithmetic, and terminator validation.
+
+## SCE program-header boundary
+
+The #61 slice is data-only:
+
+- classify only `0x61000000`, `0x61000001`, and `0x61000010` from the #8 evidence map;
+- preserve the complete parsed `ProgramHeader` and source index;
+- keep generic and unsupported values typed as `unknown`;
+- do not infer mapping permissions, process-parameter layout, loader ordering, RELRO transition timing, entry ABI, or dependency behavior.
 
 ## Graphics architecture guardrails
 
@@ -90,6 +99,6 @@ PS5-specific assumptions require documented evidence.
 
 ## Next action
 
-Define the post-prototype milestone from the first unsupported, evidence-backed
-platform/HLE or graphics dependency. Preserve the clean-room boundary and do not
-interpret completion of the synthetic prototype as retail PS5 software compatibility.
+Validate #61 across the five-gate matrix. Keep the generic ELF parser unchanged
+and treat this as classification/preservation only; no SCE program-header runtime
+semantics belong in this slice.
