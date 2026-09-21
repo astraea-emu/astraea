@@ -1,9 +1,9 @@
 # Project Status
 
 **Milestone:** M3 — Behavioral evidence and differential tooling  
-**State:** Trace v0 and deterministic first-divergence tooling complete; RDNA2/PS5 graphics evidence map in review  
+**State:** M2 controlled execution complete; M3 evidence, probe, trace, and graphics research foundations complete; narrow implementation slices open  
 **Repository:** astraea-emu/astraea  
-**Active branch:** `research/rdna2-ps5-graphics-evidence`
+**Active branch:** `docs/m3-status-after-graphics-evidence`
 
 ## Complete
 
@@ -15,6 +15,7 @@
 - AstraeaProbe v0 request/result contract and deterministic host reference probe (#10).
 - Stable Astraea Trace v0 schema, normalization, and canonical serializer (#6).
 - Deterministic Trace v0 diff / first-divergence locator (#7).
+- RDNA2/PS5 graphics evidence map (#9).
 - Public five-gate CI remains the merge requirement:
   - Linux x64
   - Windows x64
@@ -24,29 +25,28 @@
 
 ## Current frontier
 
-1. #9 — RDNA2/PS5 graphics evidence map — in review on this branch.
-2. Create a narrow graphics-frontend issue from #9: typed packet/header/raw-preservation infrastructure using synthetic fixtures only.
-3. Continue the data-only SCE metadata parser implied by #8.
-4. Create a generic RDNA2 instruction-decoder issue using only AMD-published ISA fixtures.
-5. Freeze minimal Graphics IR and Shader IR contracts before a Vulkan backend.
-6. Add Trace v0 adapters at frontend/IR boundaries before compatibility-driven graphics work.
+1. #29 — first graphics frontend slice: typed packet/header parsing with raw-word preservation and synthetic fixtures only.
+2. #30 — continue evidence-backed, data-only SCE metadata parsing derived from #8.
+3. #31 — minimal generic RDNA2 instruction decoder using AMD-published ISA fixtures only.
+4. #32 — freeze the minimal host-independent Graphics IR contract.
+5. #33 — freeze the minimal host-independent Shader IR contract.
+6. #34 — add Trace v0 adapters at graphics frontend/IR boundaries after the relevant contracts exist.
 
-## #9 scope
+## Graphics architecture guardrails
 
-- official PS5 hardware baseline versus unsupported desktop-Radeon assumptions
-- public generic RDNA2 ISA facts
-- host SPIR-V/Vulkan/compiler constraints and precedents
-- pinned public PS5-oriented community observations with explicit confidence limits
-- command/state frontend questions
-- shader-container versus shader-microcode separation
-- resource descriptor and surface-layout unknowns
-- synchronization/coherency unknowns
-- candidate Graphics IR and Shader IR boundaries
-- controlled synthetic experiments that can falsify assumptions
-- explicit architecture rule: guest semantics first, Vulkan lowering later
+The completed #9 evidence map supports separating:
 
-The evidence map does not copy another emulator's GPU implementation and does
-not claim that PS5 is exactly equivalent to a desktop `gfx1030` device.
+- PS5 command/state frontend
+- Graphics IR
+- shader-container parsing
+- generic RDNA2 instruction decoding
+- Shader IR
+- SPIR-V lowering
+- Vulkan host backend
+
+Guest semantics come first. Raw guest packets are not Vulkan objects, Sony shader-container bytes are not generic RDNA2 instruction semantics, and PS5 must not be assumed to equal desktop `gfx1030`.
+
+Unknown packet/register, shader-ABI, descriptor, surface-layout, synchronization, queue, presentation, and ray-tracing behavior remains explicitly unsupported until stronger evidence or controlled observations justify it.
 
 ## Execution boundary
 
@@ -65,6 +65,6 @@ PS5-specific assumptions require documented evidence.
 
 ## Next action
 
-Validate #9 as a documentation-only evidence slice. After merge, turn its
-architecture conclusions into separate narrow issues rather than starting a
-monolithic GPU implementation.
+Start #29 as the first graphics implementation slice while #30 can continue independently.
+Keep both narrow, typed, deterministic, and synthetic. Do not begin a Vulkan backend
+until the frontend and minimal IR contracts are proven.
