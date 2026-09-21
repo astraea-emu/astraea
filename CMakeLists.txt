@@ -40,6 +40,7 @@ add_library(astraea_core STATIC
     src/loader/dynamic_string.cpp
     src/loader/sysv_hash.cpp
     src/loader/dynamic_symbols.cpp
+    src/loader/sce_symbol_identity.cpp
     src/loader/dynamic_relocations.cpp
     src/loader/initial_stack.cpp
     src/loader/tls_template.cpp
