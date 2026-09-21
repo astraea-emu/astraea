@@ -1,9 +1,9 @@
 # Project Status
 
 **Milestone:** M4 — Platform/HLE expansion  
-**State:** First owned PS5/SCE-oriented synthetic prototype and multi-import HLE-resume composition proof complete; M4 expansion continues from this baseline  
+**State:** First owned PS5/SCE-oriented synthetic prototype and multi-import proof complete; batch exact SCE PLT import planning in progress  
 **Repository:** astraea-emu/astraea  
-**Active branch:** `main`
+**Active branch:** `feat/m4-sce-plt-batch-plan`
 
 ## Complete
 
@@ -41,8 +41,8 @@
 
 ## Current frontier
 
-1. The multi-import composition proof is complete on `main` via #63 / PR #64.
-2. The next production-facing slice should batch already-supported exact SCE PLT import planning without adding new relocation or PS5 ABI semantics.
+1. #66 — batch already-supported exact SCE PLT import planning in table order — in progress on this branch.
+2. The batch layer stops before relocation semantics, gate selection, patch construction, or guest-memory writes.
 3. `R_X86_64_RELATIVE` remains deferred until Astraea has an explicit, evidence-backed image load-base / load-bias contract.
 
 ## SCE metadata boundary
@@ -102,7 +102,7 @@ PS5-specific assumptions require documented evidence.
 
 ## Next action
 
-Define a batch exact-SCE PLT import planning API over the already-validated loader
-metadata and binding registry. It should produce deterministic per-relocation plans,
-preserve exact identity/provenance, fail with indexed typed errors, and stop before
-gate selection or guest-memory writes. Do not broaden relocation semantics.
+Validate #66 across the five-gate matrix. The batch planner must preserve table
+order and raw relocation evidence, stop deterministically at the first indexed typed
+failure, and remain free of gate selection, patching, guest-memory writes, or new
+relocation semantics.

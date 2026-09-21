@@ -2,6 +2,7 @@
 
 #include <new>
 #include <stdexcept>
+#include <utility>
 
 namespace astraea::execution {
 namespace {
@@ -102,5 +103,115 @@ plan_sce_import_resolution(
                 symbol.symbol.index));
     }
 }
+
+ScePltImportPlansResult
+plan_sce_plt_imports(
+    const astraea::loader::DynamicRelocationTableDescriptor& relocations,
+    const astraea::loader::DynamicSymbolTableDescriptor& symbols,
+    const astraea::loader::DynamicStringTableDescriptor& strings,
+    const astraea::memory::InitializedImageView& image_view,
+    const SceImportBindingRegistry& bindings) {
+    std::vector<SceImportResolutionPlan> plans;
+
+    for (std::uint64_t index = 0;
+         index < relocations.count;
+         ++index) {
+        try {
+            auto relocation =
+                astraea::loader::parse_dynamic_relocation(
+                    relocations,
+                    index,
+                    symbols,
+                    image_view);
+            if (!relocation.has_value()) {
+                return ScePltImportPlansResult::failure(
+                    ScePltImportPlanError{
+                        .code =
+                            ScePltImportPlanErrorCode::
+                                relocation_failure,
+                        .relocation_index = index,
+                        .relocation_error =
+                            relocation.error(),
+                        .symbol_error = std::nullopt,
+                        .resolution_error =
+                            std::nullopt,
+                    });
+            }
+
+            auto symbol =
+                astraea::loader::
+                    materialize_sce_dynamic_symbol(
+                        symbols,
+                        strings,
+                        relocation->symbol_index,
+                        image_view);
+            if (!symbol.has_value()) {
+                return ScePltImportPlansResult::failure(
+                    ScePltImportPlanError{
+                        .code =
+                            ScePltImportPlanErrorCode::
+                                symbol_failure,
+                        .relocation_index = index,
+                        .relocation_error =
+                            std::nullopt,
+                        .symbol_error =
+                            symbol.error(),
+                        .resolution_error =
+                            std::nullopt,
+                    });
+            }
+
+            auto plan =
+                plan_sce_import_resolution(
+                    relocation.value(),
+                    symbol.value(),
+                    bindings);
+            if (!plan.has_value()) {
+                return ScePltImportPlansResult::failure(
+                    ScePltImportPlanError{
+                        .code =
+                            ScePltImportPlanErrorCode::
+                                resolution_failure,
+                        .relocation_index = index,
+                        .relocation_error =
+                            std::nullopt,
+                        .symbol_error =
+                            std::nullopt,
+                        .resolution_error =
+                            plan.error(),
+                    });
+            }
+
+            plans.push_back(
+                std::move(plan.value()));
+        } catch (const std::bad_alloc&) {
+            return ScePltImportPlansResult::failure(
+                ScePltImportPlanError{
+                    .code =
+                        ScePltImportPlanErrorCode::
+                            host_allocation_failure,
+                    .relocation_index = index,
+                    .relocation_error = std::nullopt,
+                    .symbol_error = std::nullopt,
+                    .resolution_error = std::nullopt,
+                });
+        } catch (const std::length_error&) {
+            return ScePltImportPlansResult::failure(
+                ScePltImportPlanError{
+                    .code =
+                        ScePltImportPlanErrorCode::
+                            host_allocation_failure,
+                    .relocation_index = index,
+                    .relocation_error = std::nullopt,
+                    .symbol_error = std::nullopt,
+                    .resolution_error = std::nullopt,
+                });
+        }
+    }
+
+    return ScePltImportPlansResult::success(
+        std::move(plans));
+}
+
 
 }  // namespace astraea::execution
