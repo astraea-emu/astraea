@@ -1,0 +1,11 @@
+astraea_add_fuzzer(astraea_elf64_parser_fuzz
+    elf64_parser_fuzz.cpp
+)
+target_link_libraries(astraea_elf64_parser_fuzz PRIVATE Astraea::core)
+astraea_set_project_warnings(astraea_elf64_parser_fuzz)
+
+astraea_add_fuzzer(astraea_dynamic_parser_fuzz
+    dynamic_parser_fuzz.cpp
+)
+target_link_libraries(astraea_dynamic_parser_fuzz PRIVATE Astraea::core)
+astraea_set_project_warnings(astraea_dynamic_parser_fuzz)

@@ -1,0 +1,116 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+      - 'ci/**'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-and-test:
+    name: ${{ matrix.name }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Linux x64
+            os: ubuntu-24.04
+            preset: linux-ci
+          - name: Windows x64
+            os: windows-2025-vs2026
+            preset: windows-ci
+          - name: macOS ARM64
+            os: macos-15
+            preset: macos-ci
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Install Ninja (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes ninja-build
+
+      - name: Ensure Ninja (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          command -v ninja >/dev/null || brew install ninja
+
+      - name: Configure
+        run: cmake --preset ${{ matrix.preset }}
+
+      - name: Build
+        run: cmake --build --preset ${{ matrix.preset }}
+
+      - name: Test
+        run: ctest --preset ${{ matrix.preset }}
+
+  sanitizers:
+    name: Linux ASan + UBSan
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Install Ninja
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes ninja-build
+
+      - name: Configure
+        run: cmake --preset linux-asan
+
+      - name: Build
+        run: cmake --build --preset linux-asan
+
+      - name: Test
+        run: ctest --preset linux-asan
+
+
+  fuzz-smoke:
+    name: Linux Clang fuzz smoke
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Install Ninja and Clang
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes ninja-build clang
+
+      - name: Configure fuzz build
+        run: >
+          cmake -S . -B out/build/linux-fuzz -G Ninja
+          -DCMAKE_BUILD_TYPE=Debug
+          -DCMAKE_CXX_COMPILER=clang++
+          -DBUILD_TESTING=OFF
+          -DASTRAEA_WARNINGS_AS_ERRORS=ON
+          -DASTRAEA_ENABLE_SANITIZERS=ON
+          -DASTRAEA_BUILD_FUZZERS=ON
+
+      - name: Build parser fuzzers
+        run: >
+          cmake --build out/build/linux-fuzz --target
+          astraea_elf64_parser_fuzz
+          astraea_dynamic_parser_fuzz
+
+      - name: ELF64 fuzz smoke
+        run: ./out/build/linux-fuzz/fuzz/astraea_elf64_parser_fuzz -runs=1000
+
+      - name: PT_DYNAMIC fuzz smoke
+        run: ./out/build/linux-fuzz/fuzz/astraea_dynamic_parser_fuzz -runs=1000

@@ -1,0 +1,167 @@
+{
+  "version": 6,
+  "cmakeMinimumRequired": {
+    "major": 3,
+    "minor": 25,
+    "patch": 0
+  },
+  "configurePresets": [
+    {
+      "name": "base-ninja",
+      "hidden": true,
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/out/build/${presetName}",
+      "cacheVariables": {
+        "CMAKE_EXPORT_COMPILE_COMMANDS": "ON",
+        "BUILD_TESTING": "ON"
+      }
+    },
+    {
+      "name": "macos-dev",
+      "inherits": "base-ninja",
+      "displayName": "macOS development",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug"
+      }
+    },
+    {
+      "name": "linux-dev",
+      "inherits": "base-ninja",
+      "displayName": "Linux development",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug"
+      }
+    },
+    {
+      "name": "linux-ci",
+      "inherits": "base-ninja",
+      "displayName": "Linux CI",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "ASTRAEA_WARNINGS_AS_ERRORS": "ON"
+      }
+    },
+    {
+      "name": "linux-asan",
+      "inherits": "base-ninja",
+      "displayName": "Linux sanitizers",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "ASTRAEA_WARNINGS_AS_ERRORS": "ON",
+        "ASTRAEA_ENABLE_SANITIZERS": "ON"
+      }
+    },
+    {
+      "name": "macos-ci",
+      "inherits": "base-ninja",
+      "displayName": "macOS ARM64 CI",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "ASTRAEA_WARNINGS_AS_ERRORS": "ON"
+      }
+    },
+    {
+      "name": "windows-dev",
+      "displayName": "Windows MSVC development",
+      "generator": "Visual Studio 18 2026",
+      "architecture": "x64",
+      "binaryDir": "${sourceDir}/out/build/${presetName}",
+      "cacheVariables": {
+        "BUILD_TESTING": "ON"
+      }
+    },
+    {
+      "name": "windows-ci",
+      "inherits": "windows-dev",
+      "displayName": "Windows MSVC CI",
+      "cacheVariables": {
+        "ASTRAEA_WARNINGS_AS_ERRORS": "ON"
+      }
+    }
+  ],
+  "buildPresets": [
+    {
+      "name": "macos-dev",
+      "configurePreset": "macos-dev"
+    },
+    {
+      "name": "linux-dev",
+      "configurePreset": "linux-dev"
+    },
+    {
+      "name": "linux-ci",
+      "configurePreset": "linux-ci"
+    },
+    {
+      "name": "linux-asan",
+      "configurePreset": "linux-asan"
+    },
+    {
+      "name": "macos-ci",
+      "configurePreset": "macos-ci"
+    },
+    {
+      "name": "windows-dev",
+      "configurePreset": "windows-dev",
+      "configuration": "Debug"
+    },
+    {
+      "name": "windows-ci",
+      "configurePreset": "windows-ci",
+      "configuration": "Release"
+    }
+  ],
+  "testPresets": [
+    {
+      "name": "macos-dev",
+      "configurePreset": "macos-dev",
+      "output": {
+        "outputOnFailure": true
+      }
+    },
+    {
+      "name": "linux-dev",
+      "configurePreset": "linux-dev",
+      "output": {
+        "outputOnFailure": true
+      }
+    },
+    {
+      "name": "linux-ci",
+      "configurePreset": "linux-ci",
+      "output": {
+        "outputOnFailure": true
+      }
+    },
+    {
+      "name": "linux-asan",
+      "configurePreset": "linux-asan",
+      "output": {
+        "outputOnFailure": true
+      }
+    },
+    {
+      "name": "macos-ci",
+      "configurePreset": "macos-ci",
+      "output": {
+        "outputOnFailure": true
+      }
+    },
+    {
+      "name": "windows-dev",
+      "configurePreset": "windows-dev",
+      "configuration": "Debug",
+      "output": {
+        "outputOnFailure": true
+      }
+    },
+    {
+      "name": "windows-ci",
+      "configurePreset": "windows-ci",
+      "configuration": "Release",
+      "output": {
+        "outputOnFailure": true
+      }
+    }
+  ]
+}

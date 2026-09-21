@@ -1,0 +1,65 @@
+cmake_minimum_required(VERSION 3.25)
+
+project(
+    Astraea
+    VERSION 0.0.0
+    DESCRIPTION "Verification-first PlayStation 5 compatibility research and emulation project"
+    LANGUAGES CXX
+)
+
+option(ASTRAEA_WARNINGS_AS_ERRORS "Treat Astraea compiler warnings as errors" OFF)
+option(ASTRAEA_ENABLE_SANITIZERS "Enable AddressSanitizer and UndefinedBehaviorSanitizer" OFF)
+option(ASTRAEA_BUILD_FUZZERS "Build libFuzzer targets when supported" OFF)
+
+set(CMAKE_CXX_STANDARD 23)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_CXX_EXTENSIONS OFF)
+
+list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
+include(AstraeaWarnings)
+include(AstraeaSanitizers)
+include(AstraeaFuzzing)
+
+add_library(astraea_core STATIC
+    src/core/version.cpp
+    src/loader/elf64.cpp
+    src/loader/dynamic.cpp
+    src/loader/dynamic_metadata.cpp
+    src/loader/dynamic_string.cpp
+    src/loader/sysv_hash.cpp
+    src/loader/dynamic_symbols.cpp
+    src/loader/dynamic_relocations.cpp
+    src/loader/initial_stack.cpp
+    src/loader/tls_template.cpp
+    src/loader/guest_image.cpp
+    src/memory/mapping.cpp
+    src/memory/initialized_image_view.cpp
+    src/execution/context.cpp
+    src/execution/memory_plan.cpp
+)
+add_library(Astraea::core ALIAS astraea_core)
+
+target_include_directories(astraea_core
+    PUBLIC
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+)
+
+target_compile_features(astraea_core PUBLIC cxx_std_23)
+astraea_set_project_warnings(astraea_core)
+astraea_enable_sanitizers(astraea_core)
+
+add_executable(astraea
+    src/app/main.cpp
+)
+target_link_libraries(astraea PRIVATE Astraea::core)
+astraea_set_project_warnings(astraea)
+astraea_enable_sanitizers(astraea)
+
+include(CTest)
+if(BUILD_TESTING)
+    add_subdirectory(tests)
+endif()
+
+if(ASTRAEA_BUILD_FUZZERS)
+    add_subdirectory(fuzz)
+endif()
