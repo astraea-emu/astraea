@@ -1,6 +1,8 @@
 #include <astraea/execution/linux_session.hpp>
 
 #include <cstdint>
+#include <new>
+#include <stdexcept>
 #include <utility>
 
 #include <astraea/execution/guest_memory.hpp>
@@ -41,6 +43,30 @@ namespace {
     };
 }
 
+[[nodiscard]] LinuxSyntheticSessionError allocation_session_error() noexcept {
+    return LinuxSyntheticSessionError{
+        .kind =
+            LinuxSyntheticSessionErrorKind::
+                host_allocation_failure,
+        .backend_error = {},
+        .hle_error = {},
+        .guest_fault = {},
+    };
+}
+
+[[nodiscard]] bool append_event(
+    std::vector<SyntheticSessionEvent>& events,
+    SyntheticSessionEvent event) noexcept {
+    try {
+        events.push_back(std::move(event));
+        return true;
+    } catch (const std::bad_alloc&) {
+        return false;
+    } catch (const std::length_error&) {
+        return false;
+    }
+}
+
 }  // namespace
 
 LinuxSyntheticSessionRunResult
@@ -56,8 +82,27 @@ run_linux_synthetic_session(
     SyntheticHleTranscript transcript;
     GuestCpuContext context = initial_context;
     std::uint64_t gate_stop_count = 0;
+    std::vector<SyntheticSessionEvent> events;
 
     for (;;) {
+        if (!append_event(
+                events,
+                SyntheticSessionEvent{
+                    .kind =
+                        SyntheticSessionEventKind::
+                            guest_entry,
+                    .rip = context.rip,
+                    .rsp = context.rsp,
+                    .has_gate_slot = false,
+                    .gate_slot = 0,
+                    .has_function_id = false,
+                    .function_id = {},
+                    .value = 0,
+                })) {
+            return LinuxSyntheticSessionRunResult::failure(
+                allocation_session_error());
+        }
+
         auto stopped =
             enter_linux_guest(
                 image,
@@ -93,6 +138,32 @@ run_linux_synthetic_session(
 
         ++gate_stop_count;
 
+        const auto* binding =
+            gate_region.binding_for_slot(
+                stopped->gate_slot);
+
+        if (!append_event(
+                events,
+                SyntheticSessionEvent{
+                    .kind =
+                        SyntheticSessionEventKind::
+                            gate_stop,
+                    .rip = stopped->context.rip,
+                    .rsp = stopped->context.rsp,
+                    .has_gate_slot = true,
+                    .gate_slot = stopped->gate_slot,
+                    .has_function_id =
+                        binding != nullptr,
+                    .function_id =
+                        binding != nullptr
+                            ? binding->function_id
+                            : HleFunctionId{},
+                    .value = 0,
+                })) {
+            return LinuxSyntheticSessionRunResult::failure(
+                allocation_session_error());
+        }
+
         auto handler =
             dispatch_synthetic_hle(
                 registry,
@@ -108,6 +179,28 @@ run_linux_synthetic_session(
 
         if (handler->action ==
             HleHandlerAction::exit) {
+            if (!append_event(
+                    events,
+                    SyntheticSessionEvent{
+                        .kind =
+                            SyntheticSessionEventKind::
+                                hle_exit,
+                        .rip = stopped->context.rip,
+                        .rsp = stopped->context.rsp,
+                        .has_gate_slot = true,
+                        .gate_slot = stopped->gate_slot,
+                        .has_function_id =
+                            binding != nullptr,
+                        .function_id =
+                            binding != nullptr
+                                ? binding->function_id
+                                : HleFunctionId{},
+                        .value = handler->value,
+                    })) {
+                return LinuxSyntheticSessionRunResult::failure(
+                    allocation_session_error());
+            }
+
             return LinuxSyntheticSessionRunResult::success(
                 LinuxSyntheticSessionResult{
                     .exit_code = handler->value,
@@ -116,6 +209,7 @@ run_linux_synthetic_session(
                     .output =
                         std::move(
                             transcript.output),
+                    .events = std::move(events),
                 });
         }
 
@@ -128,6 +222,28 @@ run_linux_synthetic_session(
             return LinuxSyntheticSessionRunResult::failure(
                 hle_session_error(
                     resumed.error()));
+        }
+
+        if (!append_event(
+                events,
+                SyntheticSessionEvent{
+                    .kind =
+                        SyntheticSessionEventKind::
+                            hle_resume,
+                    .rip = resumed->rip,
+                    .rsp = resumed->rsp,
+                    .has_gate_slot = true,
+                    .gate_slot = stopped->gate_slot,
+                    .has_function_id =
+                        binding != nullptr,
+                    .function_id =
+                        binding != nullptr
+                            ? binding->function_id
+                            : HleFunctionId{},
+                    .value = handler->value,
+                })) {
+            return LinuxSyntheticSessionRunResult::failure(
+                allocation_session_error());
         }
 
         context = resumed.value();
