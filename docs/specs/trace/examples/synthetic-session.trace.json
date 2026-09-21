@@ -1,0 +1,76 @@
+{
+  "diagnostics": {},
+  "events": [
+    {
+      "diagnostics": {},
+      "guest": {
+        "kind": "object_offset",
+        "object": "probe_hello.elf",
+        "offset": "0x0000000000000000"
+      },
+      "id": "0x0000000000000000",
+      "stable": {},
+      "subsystem": "execution",
+      "type": "guest_entry"
+    },
+    {
+      "diagnostics": {
+        "host_code": {
+          "type": "u64",
+          "value": "0x0000000000000000"
+        }
+      },
+      "id": "0x0000000000000001",
+      "stable": {
+        "function": {
+          "type": "utf8",
+          "value": "astraea.test.write"
+        },
+        "gate_slot": {
+          "type": "u64",
+          "value": "0x0000000000000000"
+        }
+      },
+      "subsystem": "execution",
+      "type": "gate_stop"
+    },
+    {
+      "diagnostics": {},
+      "id": "0x0000000000000002",
+      "stable": {
+        "result": {
+          "type": "u64",
+          "value": "0x0000000000000010"
+        }
+      },
+      "subsystem": "hle",
+      "type": "resume"
+    },
+    {
+      "diagnostics": {},
+      "id": "0x0000000000000003",
+      "stable": {
+        "exit_code": {
+          "type": "u64",
+          "value": "0x000000000000002a"
+        }
+      },
+      "subsystem": "hle",
+      "type": "exit"
+    }
+  ],
+  "provenance": {
+    "artifact_digests": [],
+    "producer": {
+      "name": "astraea",
+      "version": "0"
+    },
+    "source_kind": "astraea_owned_synthetic"
+  },
+  "run": {
+    "architecture": "x86_64",
+    "platform_family": "astraea",
+    "target_kind": "astraea"
+  },
+  "schema": "astraea.trace/v0"
+}
