@@ -1,9 +1,9 @@
 # Project Status
 
 **Milestone:** M3 — Behavioral evidence and differential tooling  
-**State:** AstraeaProbe v0 complete; stable Trace v0 schema/serializer in review  
+**State:** Trace v0 merged and green; deterministic first-divergence diff in review  
 **Repository:** astraea-emu/astraea  
-**Active branch:** `spec/m3-trace-v0`
+**Active branch:** `feat/m3-trace-first-divergence`
 
 ## Complete
 
@@ -13,6 +13,7 @@
 - Astraea-owned `probe_hello.elf` end-to-end proof.
 - Public PS5 executable/module ABI evidence map (#8).
 - AstraeaProbe v0 request/result contract and deterministic host reference probe (#10).
+- Stable Astraea Trace v0 schema, normalization, and canonical serializer (#6).
 - Public five-gate CI remains the merge requirement:
   - Linux x64
   - Windows x64
@@ -22,28 +23,27 @@
 
 ## Current frontier
 
-1. #6 — stable Astraea Trace v0 schema, normalization, and canonical serialization — in review on this branch.
-2. #7 — trace diff / first-divergence locator built on the stable #6 contract.
-3. #9 — RDNA2/PS5 graphics evidence map before serious GPU implementation.
-4. Evidence-backed SCE metadata parsing/import work derived from #8 and later controlled observations.
+1. #7 — deterministic Trace v0 diff / first-divergence locator — in review on this branch.
+2. #9 — RDNA2/PS5 graphics evidence map before serious GPU implementation.
+3. Evidence-backed SCE metadata parsing/import work derived from #8 and later controlled observations.
+4. Automatic runtime-event -> Trace v0 adapters only after the stable diff contract is proven.
 
-## #6 scope
+## #7 scope
 
-- schema/versioned compact JSON trace document
-- strictly increasing per-trace event identity
-- subsystem/event-type semantic identifiers
-- normalized guest identity as stable guest object + relative offset
-- explicit stable-field versus diagnostic-field classification
-- run metadata and provenance without host pointers
-- deterministic normalization of field maps and artifact-digest sets
-- canonical u64/bytes lexical forms
-- UTF-8 validation for stable text
-- deterministic serializer with exact reference bytes
-- committed synthetic four-event trace example
-- typed failures for malformed identity, duplicate fields, invalid digests, and non-monotonic events
+- normalize both Trace v0 inputs before comparison
+- compare stable run metadata exactly
+- exclude provenance and diagnostics from default behavioral comparison
+- align events by subsystem, type, and normalized guest location
+- compare event ids by default with an explicit opt-out after semantic alignment
+- compare normalized stable fields and typed values
+- explicit scoped ignore rules for known nondeterministic stable fields
+- deterministic insertion/deletion detection via forward semantic re-alignment
+- typed first-divergence result for regression automation
+- human-readable report generated from the typed result
+- tests for value mismatch, insertion, deletion, identity mismatch, ignored fields, event-id policy, malformed input, and diagnostics/provenance exclusion
 
-This slice is serializer-only. It does not yet parse arbitrary trace JSON,
-automatically adapt M2 events, compute trace digests, or implement #7 diffing.
+This slice does not parse arbitrary trace JSON, globally minimize differences, or
+automatically adapt M2 runtime events into Trace v0.
 
 ## Execution boundary
 
@@ -62,6 +62,6 @@ PS5-specific assumptions require documented evidence.
 
 ## Next action
 
-Validate #6 across the five-gate matrix. After the stable trace envelope is
-merged, implement #7's deterministic first-divergence locator against the
-stable projection rather than raw host/runtime diagnostics.
+Validate #7 across the five-gate matrix. Once the deterministic first-divergence
+contract is merged, continue #9 and then connect controlled probe/trace evidence
+to evidence-backed platform metadata work without guessing PS5 behavior.
