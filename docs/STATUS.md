@@ -1,9 +1,9 @@
 # Project Status
 
 **Milestone:** M3 — Behavioral evidence and differential tooling  
-**State:** Trace v0 merged and green; deterministic first-divergence diff in review  
+**State:** Trace v0 and deterministic first-divergence tooling complete; RDNA2/PS5 graphics evidence map in review  
 **Repository:** astraea-emu/astraea  
-**Active branch:** `feat/m3-trace-first-divergence`
+**Active branch:** `research/rdna2-ps5-graphics-evidence`
 
 ## Complete
 
@@ -14,6 +14,7 @@
 - Public PS5 executable/module ABI evidence map (#8).
 - AstraeaProbe v0 request/result contract and deterministic host reference probe (#10).
 - Stable Astraea Trace v0 schema, normalization, and canonical serializer (#6).
+- Deterministic Trace v0 diff / first-divergence locator (#7).
 - Public five-gate CI remains the merge requirement:
   - Linux x64
   - Windows x64
@@ -23,27 +24,29 @@
 
 ## Current frontier
 
-1. #7 — deterministic Trace v0 diff / first-divergence locator — in review on this branch.
-2. #9 — RDNA2/PS5 graphics evidence map before serious GPU implementation.
-3. Evidence-backed SCE metadata parsing/import work derived from #8 and later controlled observations.
-4. Automatic runtime-event -> Trace v0 adapters only after the stable diff contract is proven.
+1. #9 — RDNA2/PS5 graphics evidence map — in review on this branch.
+2. Create a narrow graphics-frontend issue from #9: typed packet/header/raw-preservation infrastructure using synthetic fixtures only.
+3. Continue the data-only SCE metadata parser implied by #8.
+4. Create a generic RDNA2 instruction-decoder issue using only AMD-published ISA fixtures.
+5. Freeze minimal Graphics IR and Shader IR contracts before a Vulkan backend.
+6. Add Trace v0 adapters at frontend/IR boundaries before compatibility-driven graphics work.
 
-## #7 scope
+## #9 scope
 
-- normalize both Trace v0 inputs before comparison
-- compare stable run metadata exactly
-- exclude provenance and diagnostics from default behavioral comparison
-- align events by subsystem, type, and normalized guest location
-- compare event ids by default with an explicit opt-out after semantic alignment
-- compare normalized stable fields and typed values
-- explicit scoped ignore rules for known nondeterministic stable fields
-- deterministic insertion/deletion detection via forward semantic re-alignment
-- typed first-divergence result for regression automation
-- human-readable report generated from the typed result
-- tests for value mismatch, insertion, deletion, identity mismatch, ignored fields, event-id policy, malformed input, and diagnostics/provenance exclusion
+- official PS5 hardware baseline versus unsupported desktop-Radeon assumptions
+- public generic RDNA2 ISA facts
+- host SPIR-V/Vulkan/compiler constraints and precedents
+- pinned public PS5-oriented community observations with explicit confidence limits
+- command/state frontend questions
+- shader-container versus shader-microcode separation
+- resource descriptor and surface-layout unknowns
+- synchronization/coherency unknowns
+- candidate Graphics IR and Shader IR boundaries
+- controlled synthetic experiments that can falsify assumptions
+- explicit architecture rule: guest semantics first, Vulkan lowering later
 
-This slice does not parse arbitrary trace JSON, globally minimize differences, or
-automatically adapt M2 runtime events into Trace v0.
+The evidence map does not copy another emulator's GPU implementation and does
+not claim that PS5 is exactly equivalent to a desktop `gfx1030` device.
 
 ## Execution boundary
 
@@ -62,6 +65,6 @@ PS5-specific assumptions require documented evidence.
 
 ## Next action
 
-Validate #7 across the five-gate matrix. Once the deterministic first-divergence
-contract is merged, continue #9 and then connect controlled probe/trace evidence
-to evidence-backed platform metadata work without guessing PS5 behavior.
+Validate #9 as a documentation-only evidence slice. After merge, turn its
+architecture conclusions into separate narrow issues rather than starting a
+monolithic GPU implementation.
