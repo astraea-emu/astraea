@@ -22,6 +22,11 @@ include(AstraeaFuzzing)
 
 find_package(Threads REQUIRED)
 
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND
+   CMAKE_SYSTEM_PROCESSOR MATCHES "^(x86_64|AMD64)$")
+    enable_language(ASM)
+endif()
+
 add_library(astraea_core STATIC
     src/core/version.cpp
     src/loader/elf64.cpp
@@ -41,7 +46,17 @@ add_library(astraea_core STATIC
     src/execution/linux_memory.cpp
     src/execution/linux_execution.cpp
     src/execution/hle.cpp
+    src/execution/linux_session.cpp
+    src/execution/hle_runtime.cpp
+    src/execution/guest_memory.cpp
 )
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND
+   CMAKE_SYSTEM_PROCESSOR MATCHES "^(x86_64|AMD64)$")
+    target_sources(astraea_core PRIVATE
+        src/execution/linux_transition.S
+    )
+endif()
+
 add_library(Astraea::core ALIAS astraea_core)
 
 target_include_directories(astraea_core
