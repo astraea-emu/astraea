@@ -232,7 +232,8 @@ TEST_CASE(
     REQUIRE(result.error().word_offset == 2U);
     REQUIRE(
         result.error().header_type ==
-        std::optional<std::uint8_t>{2U});
+        std::optional<std::uint8_t>{
+            std::uint8_t{2U}});
     REQUIRE(result.error().required_words == 1U);
     REQUIRE(result.error().available_words == 2U);
 }
