@@ -20,6 +20,14 @@ namespace {
            instruction.sopp.has_value();
 }
 
+[[nodiscard]] std::int32_t relative_branch_delta(
+    const Rdna2Instruction& instruction) noexcept {
+    return static_cast<std::int32_t>(
+               instruction.sopp->simm16) *
+               4 +
+           4;
+}
+
 }  // namespace
 
 ShaderIrEmission lower_rdna2_to_shader_ir(
@@ -53,14 +61,83 @@ ShaderIrEmission lower_rdna2_to_shader_ir(
 
     case Rdna2InstructionKind::s_branch:
         if (valid_sopp_source(instruction)) {
-            const auto displacement =
-                static_cast<std::int32_t>(
-                    instruction.sopp->simm16) *
-                    4 +
-                4;
             operation =
                 ShaderIrRelativeBranch{
-                    .byte_delta = displacement,
+                    .byte_delta =
+                        relative_branch_delta(
+                            instruction),
+                };
+        }
+        break;
+
+    case Rdna2InstructionKind::s_cbranch_scc0:
+        if (valid_sopp_source(instruction)) {
+            operation =
+                ShaderIrConditionalRelativeBranch{
+                    .condition =
+                        ShaderIrBranchCondition::scc_zero,
+                    .byte_delta =
+                        relative_branch_delta(instruction),
+                };
+        }
+        break;
+
+    case Rdna2InstructionKind::s_cbranch_scc1:
+        if (valid_sopp_source(instruction)) {
+            operation =
+                ShaderIrConditionalRelativeBranch{
+                    .condition =
+                        ShaderIrBranchCondition::scc_one,
+                    .byte_delta =
+                        relative_branch_delta(instruction),
+                };
+        }
+        break;
+
+    case Rdna2InstructionKind::s_cbranch_vccz:
+        if (valid_sopp_source(instruction)) {
+            operation =
+                ShaderIrConditionalRelativeBranch{
+                    .condition =
+                        ShaderIrBranchCondition::vcc_zero,
+                    .byte_delta =
+                        relative_branch_delta(instruction),
+                };
+        }
+        break;
+
+    case Rdna2InstructionKind::s_cbranch_vccnz:
+        if (valid_sopp_source(instruction)) {
+            operation =
+                ShaderIrConditionalRelativeBranch{
+                    .condition =
+                        ShaderIrBranchCondition::vcc_nonzero,
+                    .byte_delta =
+                        relative_branch_delta(instruction),
+                };
+        }
+        break;
+
+    case Rdna2InstructionKind::s_cbranch_execz:
+        if (valid_sopp_source(instruction)) {
+            operation =
+                ShaderIrConditionalRelativeBranch{
+                    .condition =
+                        ShaderIrBranchCondition::exec_zero,
+                    .byte_delta =
+                        relative_branch_delta(instruction),
+                };
+        }
+        break;
+
+    case Rdna2InstructionKind::s_cbranch_execnz:
+        if (valid_sopp_source(instruction)) {
+            operation =
+                ShaderIrConditionalRelativeBranch{
+                    .condition =
+                        ShaderIrBranchCondition::exec_nonzero,
+                    .byte_delta =
+                        relative_branch_delta(instruction),
                 };
         }
         break;

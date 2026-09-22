@@ -210,3 +210,63 @@ TEST_CASE(
         result.error().word_index ==
         std::numeric_limits<std::size_t>::max());
 }
+
+
+TEST_CASE(
+    "RDNA2 SOPP conditional branch opcodes are classified exactly",
+    "[graphics][rdna2][conditional-branch]") {
+    struct Case {
+        std::uint8_t opcode;
+        astraea::graphics::Rdna2InstructionKind kind;
+    };
+
+    constexpr std::array<Case, 6> cases{{
+        {4, astraea::graphics::Rdna2InstructionKind::s_cbranch_scc0},
+        {5, astraea::graphics::Rdna2InstructionKind::s_cbranch_scc1},
+        {6, astraea::graphics::Rdna2InstructionKind::s_cbranch_vccz},
+        {7, astraea::graphics::Rdna2InstructionKind::s_cbranch_vccnz},
+        {8, astraea::graphics::Rdna2InstructionKind::s_cbranch_execz},
+        {9, astraea::graphics::Rdna2InstructionKind::s_cbranch_execnz},
+    }};
+
+    for (const auto& test_case : cases) {
+        const std::array<std::uint32_t, 1> words{
+            make_sopp(test_case.opcode, 0xfffe),
+        };
+
+        const auto result =
+            astraea::graphics::decode_rdna2_instruction(
+                words,
+                0);
+
+        REQUIRE(result.has_value());
+        REQUIRE(result->kind == test_case.kind);
+        REQUIRE(result->format ==
+                astraea::graphics::Rdna2InstructionFormat::sopp);
+        REQUIRE(result->sopp.has_value());
+        REQUIRE(result->sopp->opcode == test_case.opcode);
+        REQUIRE(result->sopp->simm16 == -2);
+        REQUIRE(result->raw_word == words[0]);
+    }
+}
+
+TEST_CASE(
+    "S_WAKEUP remains explicit unknown until wave semantics are scoped",
+    "[graphics][rdna2][conditional-branch]") {
+    const std::array<std::uint32_t, 1> words{
+        make_sopp(3, 0),
+    };
+
+    const auto result =
+        astraea::graphics::decode_rdna2_instruction(
+            words,
+            0);
+
+    REQUIRE(result.has_value());
+    REQUIRE(
+        result->kind ==
+        astraea::graphics::Rdna2InstructionKind::
+            unknown_sopp_opcode);
+    REQUIRE(result->sopp.has_value());
+    REQUIRE(result->sopp->opcode == 3);
+}

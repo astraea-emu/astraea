@@ -13,10 +13,19 @@ namespace {
 //   OP       [22:16]
 //   SIMM16   [15:0]
 //
-// The first three documented opcodes are:
+// This slice classifies the generic RDNA2 SOPP control-flow opcodes:
 //   0 = S_NOP
 //   1 = S_ENDPGM
 //   2 = S_BRANCH
+//   4 = S_CBRANCH_SCC0
+//   5 = S_CBRANCH_SCC1
+//   6 = S_CBRANCH_VCCZ
+//   7 = S_CBRANCH_VCCNZ
+//   8 = S_CBRANCH_EXECZ
+//   9 = S_CBRANCH_EXECNZ
+//
+// Opcode 3 (S_WAKEUP) and later synchronization/control instructions remain
+// intentionally unclassified until their state semantics are separately scoped.
 //
 // This is generic RDNA2 ISA evidence. It is not a PS5 shader launch ABI or
 // evidence that a particular Sony shader container uses any specific form.
@@ -31,6 +40,12 @@ constexpr std::uint32_t kSimm16Mask = 0xffffU;
 constexpr std::uint8_t kSoppNopOpcode = 0;
 constexpr std::uint8_t kSoppEndpgmOpcode = 1;
 constexpr std::uint8_t kSoppBranchOpcode = 2;
+constexpr std::uint8_t kSoppCbranchScc0Opcode = 4;
+constexpr std::uint8_t kSoppCbranchScc1Opcode = 5;
+constexpr std::uint8_t kSoppCbranchVcczOpcode = 6;
+constexpr std::uint8_t kSoppCbranchVccnzOpcode = 7;
+constexpr std::uint8_t kSoppCbranchExeczOpcode = 8;
+constexpr std::uint8_t kSoppCbranchExecnzOpcode = 9;
 
 [[nodiscard]] Rdna2DecodeError decode_error(
     Rdna2DecodeErrorCode code,
@@ -73,6 +88,18 @@ constexpr std::uint8_t kSoppBranchOpcode = 2;
         return Rdna2InstructionKind::s_endpgm;
     case kSoppBranchOpcode:
         return Rdna2InstructionKind::s_branch;
+    case kSoppCbranchScc0Opcode:
+        return Rdna2InstructionKind::s_cbranch_scc0;
+    case kSoppCbranchScc1Opcode:
+        return Rdna2InstructionKind::s_cbranch_scc1;
+    case kSoppCbranchVcczOpcode:
+        return Rdna2InstructionKind::s_cbranch_vccz;
+    case kSoppCbranchVccnzOpcode:
+        return Rdna2InstructionKind::s_cbranch_vccnz;
+    case kSoppCbranchExeczOpcode:
+        return Rdna2InstructionKind::s_cbranch_execz;
+    case kSoppCbranchExecnzOpcode:
+        return Rdna2InstructionKind::s_cbranch_execnz;
     default:
         return Rdna2InstructionKind::unknown_sopp_opcode;
     }

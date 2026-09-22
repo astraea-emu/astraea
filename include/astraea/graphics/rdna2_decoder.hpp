@@ -20,6 +20,12 @@ enum class Rdna2InstructionKind {
     s_nop,
     s_endpgm,
     s_branch,
+    s_cbranch_scc0,
+    s_cbranch_scc1,
+    s_cbranch_vccz,
+    s_cbranch_vccnz,
+    s_cbranch_execz,
+    s_cbranch_execnz,
     unknown_sopp_opcode,
     unsupported_encoding,
 };

@@ -407,3 +407,66 @@ TEST_CASE(
         std::move(left).value(),
         std::move(right).value());
 }
+
+
+TEST_CASE(
+    "conditional Shader IR branch exposes condition and displacement as stable semantics",
+    "[trace][graphics][v0][conditional-branch]") {
+    const auto ir =
+        astraea::graphics::lower_rdna2_to_shader_ir(
+            decode_one(make_sopp(7, 0xfffe)));
+
+    auto event =
+        astraea::trace::trace_shader_ir_v0(
+            90,
+            ir);
+
+    REQUIRE(event.has_value());
+    REQUIRE(event->subsystem == "shader.ir");
+    REQUIRE(event->type == "conditional_relative_branch");
+    REQUIRE(event->stable.size() == 2);
+    REQUIRE(event->stable[0].name == "condition");
+    REQUIRE(
+        std::get<std::string>(
+            event->stable[0].value) ==
+        "vcc_nonzero");
+    REQUIRE(event->stable[1].name == "byte_delta");
+    REQUIRE(
+        std::get<std::string>(
+            event->stable[1].value) ==
+        "-4");
+    REQUIRE(event->diagnostics.size() == 2);
+}
+
+TEST_CASE(
+    "conditional Shader IR branch condition participates in trace divergence",
+    "[trace][graphics][v0][conditional-branch]") {
+    auto left =
+        astraea::trace::trace_shader_ir_v0(
+            91,
+            astraea::graphics::lower_rdna2_to_shader_ir(
+                decode_one(make_sopp(4, 4))));
+    auto right =
+        astraea::trace::trace_shader_ir_v0(
+            91,
+            astraea::graphics::lower_rdna2_to_shader_ir(
+                decode_one(make_sopp(5, 4))));
+
+    REQUIRE(left.has_value());
+    REQUIRE(right.has_value());
+
+    auto diff =
+        astraea::trace::diff_trace_v0(
+            document(std::move(left).value()),
+            document(std::move(right).value()));
+
+    REQUIRE(diff.has_value());
+    REQUIRE_FALSE(diff->equivalent);
+    REQUIRE(
+        diff->first_divergence->kind ==
+        astraea::trace::TraceDivergenceKindV0::
+            stable_field_value_mismatch);
+    REQUIRE(
+        diff->first_divergence->field_name ==
+        std::optional<std::string>{"condition"});
+}

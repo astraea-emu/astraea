@@ -24,6 +24,24 @@ struct ShaderIrRelativeBranch {
     auto operator<=>(const ShaderIrRelativeBranch&) const = default;
 };
 
+enum class ShaderIrBranchCondition {
+    scc_zero,
+    scc_one,
+    vcc_zero,
+    vcc_nonzero,
+    exec_zero,
+    exec_nonzero,
+};
+
+struct ShaderIrConditionalRelativeBranch {
+    ShaderIrBranchCondition condition =
+        ShaderIrBranchCondition::scc_zero;
+    std::int32_t byte_delta = 0;
+
+    auto operator<=>(
+        const ShaderIrConditionalRelativeBranch&) const = default;
+};
+
 enum class ShaderIrUnsupportedReason {
     unknown_sopp_opcode,
     unsupported_encoding,
@@ -42,6 +60,7 @@ using ShaderIrOperation =
         ShaderIrNop,
         ShaderIrEndProgram,
         ShaderIrRelativeBranch,
+        ShaderIrConditionalRelativeBranch,
         ShaderIrUnsupported>;
 
 struct ShaderIrProvenance {

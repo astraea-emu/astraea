@@ -1,9 +1,9 @@
 # Project Status
 
 **Milestone:** M4 — Platform/HLE expansion  
-**State:** JUMP_SLOT and GLOB_DAT owned import paths validated end to end; GLOB_DAT batch application in progress  
+**State:** Imported-function relocation orchestration baseline complete; AMD-documented RDNA2 SOPP conditional-branch slice in progress  
 **Repository:** astraea-emu/astraea  
-**Active branch:** `feat/m4-sce-glob-dat-batch-apply`
+**Active branch:** `feat/m4-rdna2-conditional-sopp`
 
 ## Complete
 
@@ -40,6 +40,7 @@
 - Owned SCE-profile general-RELA GLOB_DAT import/execution proof through HLE exit 42 (#76).
 - Table-kind-neutral ordered exact-SCE batch import planning with PLT compatibility wrapper (#79).
 - Ordered validated x86-64 GLOB_DAT batch patch construction with explicit gate slots (#81).
+- Ordered non-atomic GLOB_DAT batch application with indexed partial-failure reporting (#83).
 - Public five-gate CI remains the merge requirement:
   - Linux x64
   - Windows x64
@@ -49,9 +50,9 @@
 
 ## Current frontier
 
-1. #83 — batch apply already-validated GLOB_DAT patches through GuestMemoryAccess — in progress on this branch.
-2. Batch application is ordered and intentionally non-atomic, with indexed partial-failure reporting and exact GuestMemoryError preservation.
-3. `R_X86_64_RELATIVE` remains deferred until Astraea has an explicit, evidence-backed image load-base / load-bias contract.
+1. #85 — decode AMD-documented RDNA2 SOPP conditional branches 4-9 and lower them to typed conditional Shader IR — in progress on this branch.
+2. Trace v0 must expose branch condition/displacement as stable semantics while raw instruction bytes remain diagnostic provenance.
+3. Sony shader-container/launch semantics and `R_X86_64_RELATIVE` remain explicitly deferred.
 
 ## SCE metadata boundary
 
@@ -110,6 +111,6 @@ PS5-specific assumptions require documented evidence.
 
 ## Next action
 
-Validate #83 across the five-gate matrix. GLOB_DAT batch application must reserve
-result storage before writes, apply in order through GuestMemoryAccess, preserve exact
-memory errors, and report partial progress without rollback.
+Validate #85 across the five-gate matrix. Keep the slice generic-RDNA2 only:
+classify SOPP opcodes 4-9, lower condition plus signed relative byte delta, preserve
+raw provenance, and leave wave execution / Sony shader ABI / SPIR-V behavior out.
