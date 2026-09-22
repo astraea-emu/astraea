@@ -4,6 +4,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <limits>
+#include <optional>
 
 #include <catch2/catch_test_macros.hpp>
 
