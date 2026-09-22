@@ -104,8 +104,8 @@ plan_sce_import_resolution(
     }
 }
 
-ScePltImportPlansResult
-plan_sce_plt_imports(
+SceImportBatchPlansResult
+plan_sce_imports(
     const astraea::loader::DynamicRelocationTableDescriptor& relocations,
     const astraea::loader::DynamicSymbolTableDescriptor& symbols,
     const astraea::loader::DynamicStringTableDescriptor& strings,
@@ -124,10 +124,10 @@ plan_sce_plt_imports(
                     symbols,
                     image_view);
             if (!relocation.has_value()) {
-                return ScePltImportPlansResult::failure(
-                    ScePltImportPlanError{
+                return SceImportBatchPlansResult::failure(
+                    SceImportBatchPlanError{
                         .code =
-                            ScePltImportPlanErrorCode::
+                            SceImportBatchPlanErrorCode::
                                 relocation_failure,
                         .relocation_index = index,
                         .relocation_error =
@@ -146,10 +146,10 @@ plan_sce_plt_imports(
                         relocation->symbol_index,
                         image_view);
             if (!symbol.has_value()) {
-                return ScePltImportPlansResult::failure(
-                    ScePltImportPlanError{
+                return SceImportBatchPlansResult::failure(
+                    SceImportBatchPlanError{
                         .code =
-                            ScePltImportPlanErrorCode::
+                            SceImportBatchPlanErrorCode::
                                 symbol_failure,
                         .relocation_index = index,
                         .relocation_error =
@@ -167,10 +167,10 @@ plan_sce_plt_imports(
                     symbol.value(),
                     bindings);
             if (!plan.has_value()) {
-                return ScePltImportPlansResult::failure(
-                    ScePltImportPlanError{
+                return SceImportBatchPlansResult::failure(
+                    SceImportBatchPlanError{
                         .code =
-                            ScePltImportPlanErrorCode::
+                            SceImportBatchPlanErrorCode::
                                 resolution_failure,
                         .relocation_index = index,
                         .relocation_error =
@@ -185,10 +185,10 @@ plan_sce_plt_imports(
             plans.push_back(
                 std::move(plan.value()));
         } catch (const std::bad_alloc&) {
-            return ScePltImportPlansResult::failure(
-                ScePltImportPlanError{
+            return SceImportBatchPlansResult::failure(
+                SceImportBatchPlanError{
                     .code =
-                        ScePltImportPlanErrorCode::
+                        SceImportBatchPlanErrorCode::
                             host_allocation_failure,
                     .relocation_index = index,
                     .relocation_error = std::nullopt,
@@ -196,10 +196,10 @@ plan_sce_plt_imports(
                     .resolution_error = std::nullopt,
                 });
         } catch (const std::length_error&) {
-            return ScePltImportPlansResult::failure(
-                ScePltImportPlanError{
+            return SceImportBatchPlansResult::failure(
+                SceImportBatchPlanError{
                     .code =
-                        ScePltImportPlanErrorCode::
+                        SceImportBatchPlanErrorCode::
                             host_allocation_failure,
                     .relocation_index = index,
                     .relocation_error = std::nullopt,
@@ -209,9 +209,23 @@ plan_sce_plt_imports(
         }
     }
 
-    return ScePltImportPlansResult::success(
+    return SceImportBatchPlansResult::success(
         std::move(plans));
 }
 
+ScePltImportPlansResult
+plan_sce_plt_imports(
+    const astraea::loader::DynamicRelocationTableDescriptor& relocations,
+    const astraea::loader::DynamicSymbolTableDescriptor& symbols,
+    const astraea::loader::DynamicStringTableDescriptor& strings,
+    const astraea::memory::InitializedImageView& image_view,
+    const SceImportBindingRegistry& bindings) {
+    return plan_sce_imports(
+        relocations,
+        symbols,
+        strings,
+        image_view,
+        bindings);
+}
 
 }  // namespace astraea::execution
