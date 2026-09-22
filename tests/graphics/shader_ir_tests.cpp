@@ -437,3 +437,87 @@ TEST_CASE(
             left,
             different));
 }
+
+
+TEST_CASE(
+    "RDNA2 S_MOV_B64 lowers even SGPR pairs",
+    "[graphics][shader-ir][sop1][mov64]") {
+    const auto emission =
+        astraea::graphics::lower_rdna2_to_shader_ir(
+            decode_one(make_sop1(4, 4, 16)));
+
+    REQUIRE(
+        std::holds_alternative<
+            astraea::graphics::ShaderIrScalarMove64>(
+            emission.operation));
+    const auto& move =
+        std::get<
+            astraea::graphics::ShaderIrScalarMove64>(
+            emission.operation);
+    REQUIRE(move.destination.first_index == 4);
+    REQUIRE(move.source.first_index == 16);
+}
+
+TEST_CASE(
+    "S_MOV_B64 invalid SGPR pairs remain typed unsupported",
+    "[graphics][shader-ir][sop1][mov64]") {
+    struct Case {
+        std::uint8_t destination;
+        std::uint8_t source;
+    };
+
+    constexpr std::array<Case, 6> cases{{
+        {5, 16},
+        {4, 17},
+        {105, 16},
+        {4, 105},
+        {4, 106},
+        {4, 255},
+    }};
+
+    for (const auto& test_case : cases) {
+        const auto emission =
+            astraea::graphics::lower_rdna2_to_shader_ir(
+                decode_one(
+                    make_sop1(
+                        4,
+                        test_case.destination,
+                        test_case.source)));
+
+        REQUIRE(
+            std::holds_alternative<
+                astraea::graphics::ShaderIrUnsupported>(
+                emission.operation));
+        REQUIRE(
+            std::get<
+                astraea::graphics::ShaderIrUnsupported>(
+                emission.operation)
+                .reason ==
+            astraea::graphics::
+                ShaderIrUnsupportedReason::
+                    unsupported_scalar_operand);
+    }
+}
+
+TEST_CASE(
+    "S_MOV_B64 SGPR-pair identity participates in semantic equality",
+    "[graphics][shader-ir][sop1][mov64]") {
+    const auto left =
+        astraea::graphics::lower_rdna2_to_shader_ir(
+            decode_one(make_sop1(4, 4, 16)));
+    const auto same =
+        astraea::graphics::lower_rdna2_to_shader_ir(
+            decode_one(make_sop1(4, 4, 16)));
+    const auto different =
+        astraea::graphics::lower_rdna2_to_shader_ir(
+            decode_one(make_sop1(4, 6, 16)));
+
+    REQUIRE(
+        astraea::graphics::shader_ir_semantically_equal(
+            left,
+            same));
+    REQUIRE_FALSE(
+        astraea::graphics::shader_ir_semantically_equal(
+            left,
+            different));
+}
