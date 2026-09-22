@@ -709,13 +709,10 @@ AgcPrototypeFixture make_fixture() {
             cursor,
             kAgcModuleName);
 
-    const auto library_name_offset = cursor;
-    cursor =
-        write_string(
-            bytes,
-            string_file_offset,
-            cursor,
-            kAgcLibraryName);
+    // libSceAgc publishes a library under the same name as its module.
+    // The public linker string table deduplicates identical strings.
+    const auto library_name_offset =
+        module_name_offset;
 
     const auto symbol_file_offset =
         data_file_offset + kSymbolOffset;
