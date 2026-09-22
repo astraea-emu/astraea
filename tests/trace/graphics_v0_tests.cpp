@@ -1,6 +1,7 @@
 #include <astraea/graphics/graphics_ir.hpp>
 #include <astraea/graphics/packet.hpp>
 #include <astraea/graphics/rdna2_decoder.hpp>
+#include <astraea/graphics/shader_cfg.hpp>
 #include <astraea/graphics/shader_ir.hpp>
 #include <astraea/trace/diff_v0.hpp>
 #include <astraea/trace/graphics_v0.hpp>
@@ -1401,4 +1402,203 @@ TEST_CASE(
         diff->first_divergence->field_name ==
         std::optional<std::string>{
             "source1_vgpr"});
+}
+
+
+TEST_CASE(
+    "Shader CFG block trace exposes stable topology",
+    "[trace][graphics][v0][shader-cfg][block]") {
+    const astraea::graphics::ShaderCfgBasicBlock block{
+        .first_emission_index = 2,
+        .emission_count = 3,
+        .successors =
+            std::vector<astraea::graphics::ShaderCfgEdge>{
+                astraea::graphics::ShaderCfgEdge{
+                    .kind =
+                        astraea::graphics::ShaderCfgEdgeKind::
+                            conditional_branch_taken,
+                    .target_block_index = 4,
+                },
+                astraea::graphics::ShaderCfgEdge{
+                    .kind =
+                        astraea::graphics::ShaderCfgEdgeKind::
+                            conditional_branch_fallthrough,
+                    .target_block_index = 2,
+                },
+            },
+    };
+
+    auto event =
+        astraea::trace::trace_shader_cfg_block_v0(
+            120,
+            1,
+            block);
+
+    REQUIRE(event.has_value());
+    REQUIRE(event->subsystem == "shader.cfg");
+    REQUIRE(event->type == "block");
+    REQUIRE_FALSE(event->guest.has_value());
+    REQUIRE(event->stable.size() == 4);
+    REQUIRE(event->stable[0].name == "block_index");
+    REQUIRE(
+        std::get<std::uint64_t>(
+            event->stable[0].value) == 1);
+    REQUIRE(
+        event->stable[1].name ==
+        "first_emission_index");
+    REQUIRE(
+        std::get<std::uint64_t>(
+            event->stable[1].value) == 2);
+    REQUIRE(event->stable[2].name == "emission_count");
+    REQUIRE(
+        std::get<std::uint64_t>(
+            event->stable[2].value) == 3);
+    REQUIRE(event->stable[3].name == "successor_count");
+    REQUIRE(
+        std::get<std::uint64_t>(
+            event->stable[3].value) == 2);
+    REQUIRE(event->diagnostics.empty());
+}
+
+TEST_CASE(
+    "Shader CFG edge trace exposes typed topology",
+    "[trace][graphics][v0][shader-cfg][edge]") {
+    const astraea::graphics::ShaderCfgEdge edge{
+        .kind =
+            astraea::graphics::ShaderCfgEdgeKind::
+                conditional_branch_taken,
+        .target_block_index = 5,
+    };
+
+    auto event =
+        astraea::trace::trace_shader_cfg_edge_v0(
+            121,
+            2,
+            0,
+            edge);
+
+    REQUIRE(event.has_value());
+    REQUIRE(event->subsystem == "shader.cfg");
+    REQUIRE(event->type == "edge");
+    REQUIRE_FALSE(event->guest.has_value());
+    REQUIRE(event->stable.size() == 4);
+    REQUIRE(
+        event->stable[0].name ==
+        "source_block_index");
+    REQUIRE(
+        std::get<std::uint64_t>(
+            event->stable[0].value) == 2);
+    REQUIRE(event->stable[1].name == "edge_index");
+    REQUIRE(
+        std::get<std::uint64_t>(
+            event->stable[1].value) == 0);
+    REQUIRE(event->stable[2].name == "kind");
+    REQUIRE(
+        std::get<std::string>(
+            event->stable[2].value) ==
+        "conditional_branch_taken");
+    REQUIRE(
+        event->stable[3].name ==
+        "target_block_index");
+    REQUIRE(
+        std::get<std::uint64_t>(
+            event->stable[3].value) == 5);
+    REQUIRE(event->diagnostics.empty());
+}
+
+TEST_CASE(
+    "Shader CFG target change participates in trace divergence",
+    "[trace][graphics][v0][shader-cfg][diff]") {
+    const astraea::graphics::ShaderCfgEdge left_edge{
+        .kind =
+            astraea::graphics::ShaderCfgEdgeKind::
+                unconditional_branch,
+        .target_block_index = 3,
+    };
+    const astraea::graphics::ShaderCfgEdge right_edge{
+        .kind =
+            astraea::graphics::ShaderCfgEdgeKind::
+                unconditional_branch,
+        .target_block_index = 4,
+    };
+
+    auto left =
+        astraea::trace::trace_shader_cfg_edge_v0(
+            122,
+            1,
+            0,
+            left_edge);
+    auto right =
+        astraea::trace::trace_shader_cfg_edge_v0(
+            122,
+            1,
+            0,
+            right_edge);
+
+    REQUIRE(left.has_value());
+    REQUIRE(right.has_value());
+
+    auto diff =
+        astraea::trace::diff_trace_v0(
+            document(std::move(left).value()),
+            document(std::move(right).value()));
+
+    REQUIRE(diff.has_value());
+    REQUIRE_FALSE(diff->equivalent);
+    REQUIRE(
+        diff->first_divergence->kind ==
+        astraea::trace::TraceDivergenceKindV0::
+            stable_field_value_mismatch);
+    REQUIRE(
+        diff->first_divergence->field_name ==
+        std::optional<std::string>{
+            "target_block_index"});
+}
+
+TEST_CASE(
+    "Shader CFG edge kind change participates in trace divergence",
+    "[trace][graphics][v0][shader-cfg][diff]") {
+    const astraea::graphics::ShaderCfgEdge left_edge{
+        .kind =
+            astraea::graphics::ShaderCfgEdgeKind::
+                conditional_branch_taken,
+        .target_block_index = 3,
+    };
+    const astraea::graphics::ShaderCfgEdge right_edge{
+        .kind =
+            astraea::graphics::ShaderCfgEdgeKind::
+                conditional_branch_fallthrough,
+        .target_block_index = 3,
+    };
+
+    auto left =
+        astraea::trace::trace_shader_cfg_edge_v0(
+            123,
+            1,
+            0,
+            left_edge);
+    auto right =
+        astraea::trace::trace_shader_cfg_edge_v0(
+            123,
+            1,
+            0,
+            right_edge);
+
+    REQUIRE(left.has_value());
+    REQUIRE(right.has_value());
+
+    auto diff =
+        astraea::trace::diff_trace_v0(
+            document(std::move(left).value()),
+            document(std::move(right).value()));
+
+    REQUIRE(diff.has_value());
+    REQUIRE_FALSE(diff->equivalent);
+    REQUIRE(
+        diff->first_divergence->kind ==
+        astraea::trace::TraceDivergenceKindV0::
+            stable_field_value_mismatch);
+    REQUIRE(
+        diff->first_divergence->field_name ==
+        std::optional<std::string>{"kind"});
 }
