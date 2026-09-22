@@ -67,7 +67,33 @@ constexpr std::uint32_t make_vop1(
            static_cast<std::uint32_t>(source);
 }
 
+constexpr std::uint32_t make_vop2(
+    std::uint8_t opcode,
+    std::uint8_t destination,
+    std::uint16_t source0,
+    std::uint8_t source1) {
+    return (static_cast<std::uint32_t>(opcode) << 25U) |
+           (static_cast<std::uint32_t>(destination) << 17U) |
+           (static_cast<std::uint32_t>(source1) << 9U) |
+           static_cast<std::uint32_t>(source0);
+}
+
 astraea::graphics::Rdna2Instruction decode_vop1_extension(
+    std::uint32_t word,
+    std::uint32_t extension) {
+    const std::array<std::uint32_t, 2> words{
+        word,
+        extension,
+    };
+    auto result =
+        astraea::graphics::decode_rdna2_instruction(
+            words,
+            0);
+    REQUIRE(result.has_value());
+    return std::move(result).value();
+}
+
+astraea::graphics::Rdna2Instruction decode_vop2_extension(
     std::uint32_t word,
     std::uint32_t extension) {
     const std::array<std::uint32_t, 2> words{
@@ -170,7 +196,7 @@ TEST_CASE(
     "[graphics][shader-ir]") {
     const auto emission =
         astraea::graphics::lower_rdna2_to_shader_ir(
-            decode_one(0x01234567U));
+            decode_one(0x80000000U));
 
     REQUIRE(
         std::get<
@@ -893,4 +919,142 @@ TEST_CASE(
         astraea::graphics::shader_ir_semantically_equal(
             left,
             different));
+}
+
+
+TEST_CASE(
+    "unknown VOP2 opcode remains an explicit unsupported Shader IR operation",
+    "[graphics][shader-ir][vop2]") {
+    const auto emission =
+        astraea::graphics::lower_rdna2_to_shader_ir(
+            decode_one(make_vop2(4, 5, 273, 9)));
+
+    REQUIRE(
+        std::get<
+            astraea::graphics::ShaderIrUnsupported>(
+            emission.operation)
+            .reason ==
+        astraea::graphics::ShaderIrUnsupportedReason::
+            unknown_vop2_opcode);
+}
+
+TEST_CASE(
+    "RDNA2 V_ADD_F32 lowers plain VGPR arithmetic",
+    "[graphics][shader-ir][vop2][add-f32]") {
+    const auto emission =
+        astraea::graphics::lower_rdna2_to_shader_ir(
+            decode_one(make_vop2(3, 5, 273, 9)));
+
+    REQUIRE(
+        std::holds_alternative<
+            astraea::graphics::ShaderIrVectorAddF32>(
+            emission.operation));
+    const auto& add =
+        std::get<
+            astraea::graphics::ShaderIrVectorAddF32>(
+            emission.operation);
+    REQUIRE(add.destination.index == 5);
+    REQUIRE(add.source0.index == 17);
+    REQUIRE(add.source1.index == 9);
+}
+
+TEST_CASE(
+    "V_ADD_F32 VGPR SRC0 boundaries lower exactly",
+    "[graphics][shader-ir][vop2][add-f32]") {
+    const auto first =
+        astraea::graphics::lower_rdna2_to_shader_ir(
+            decode_one(make_vop2(3, 0, 256, 0)));
+    const auto last =
+        astraea::graphics::lower_rdna2_to_shader_ir(
+            decode_one(make_vop2(3, 255, 511, 255)));
+
+    const auto& first_add =
+        std::get<
+            astraea::graphics::ShaderIrVectorAddF32>(
+            first.operation);
+    const auto& last_add =
+        std::get<
+            astraea::graphics::ShaderIrVectorAddF32>(
+            last.operation);
+
+    REQUIRE(first_add.destination.index == 0);
+    REQUIRE(first_add.source0.index == 0);
+    REQUIRE(first_add.source1.index == 0);
+    REQUIRE(last_add.destination.index == 255);
+    REQUIRE(last_add.source0.index == 255);
+    REQUIRE(last_add.source1.index == 255);
+}
+
+TEST_CASE(
+    "V_ADD_F32 non-VGPR SRC0 forms remain typed unsupported",
+    "[graphics][shader-ir][vop2][add-f32]") {
+    const auto scalar =
+        astraea::graphics::lower_rdna2_to_shader_ir(
+            decode_one(make_vop2(3, 5, 17, 9)));
+    const auto dpp =
+        astraea::graphics::lower_rdna2_to_shader_ir(
+            decode_vop2_extension(
+                make_vop2(3, 5, 250, 9),
+                0x12345678U));
+    const auto literal =
+        astraea::graphics::lower_rdna2_to_shader_ir(
+            decode_vop2_extension(
+                make_vop2(3, 5, 255, 9),
+                0xdeadbeefU));
+
+    for (const auto* emission :
+         std::array{
+             &scalar,
+             &dpp,
+             &literal,
+         }) {
+        REQUIRE(
+            std::holds_alternative<
+                astraea::graphics::ShaderIrUnsupported>(
+                emission->operation));
+        REQUIRE(
+            std::get<
+                astraea::graphics::ShaderIrUnsupported>(
+                emission->operation)
+                .reason ==
+            astraea::graphics::ShaderIrUnsupportedReason::
+                unsupported_vector_operand);
+    }
+}
+
+TEST_CASE(
+    "V_ADD_F32 VGPR identities participate in semantic equality",
+    "[graphics][shader-ir][vop2][add-f32]") {
+    const auto left =
+        astraea::graphics::lower_rdna2_to_shader_ir(
+            decode_one(make_vop2(3, 5, 273, 9)));
+    const auto same =
+        astraea::graphics::lower_rdna2_to_shader_ir(
+            decode_one(make_vop2(3, 5, 273, 9)));
+    const auto different_destination =
+        astraea::graphics::lower_rdna2_to_shader_ir(
+            decode_one(make_vop2(3, 6, 273, 9)));
+    const auto different_source0 =
+        astraea::graphics::lower_rdna2_to_shader_ir(
+            decode_one(make_vop2(3, 5, 274, 9)));
+    const auto different_source1 =
+        astraea::graphics::lower_rdna2_to_shader_ir(
+            decode_one(make_vop2(3, 5, 273, 10)));
+
+    REQUIRE(
+        astraea::graphics::shader_ir_semantically_equal(
+            left,
+            same));
+    REQUIRE_FALSE(
+        astraea::graphics::shader_ir_semantically_equal(
+            left,
+            different_destination));
+    REQUIRE_FALSE(
+        astraea::graphics::shader_ir_semantically_equal(
+            left,
+            different_source0));
+    REQUIRE_FALSE(
+        astraea::graphics::shader_ir_semantically_equal(
+            left,
+            different_source1));
 }
