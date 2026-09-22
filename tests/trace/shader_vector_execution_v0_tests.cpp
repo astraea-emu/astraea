@@ -163,3 +163,163 @@ TEST_CASE(
         std::optional<std::string>{
             "written_lane_bits_le"});
 }
+
+
+TEST_CASE(
+    "exact V_ADD_F32 Trace v0 exposes mode-independent lane writes",
+    "[trace][graphics][v0][shader-execution][vector][add-f32]") {
+    astraea::graphics::ShaderScalarState scalar_state{};
+    scalar_state.exec =
+        (std::uint64_t{1} << 0U) |
+        (std::uint64_t{1} << 2U);
+
+    astraea::graphics::ShaderVectorState vector_state{};
+    vector_state.wave_size =
+        astraea::graphics::ShaderWaveSize::wave32;
+    vector_state.vgprs[1][0] = 0x3f800000U;
+    vector_state.vgprs[2][0] = 0x3f800000U;
+    vector_state.vgprs[1][2] = 0xbf800000U;
+    vector_state.vgprs[2][2] = 0xc0000000U;
+
+    const astraea::graphics::ShaderIrOperation operation =
+        astraea::graphics::ShaderIrVectorAddF32{
+            .destination =
+                astraea::graphics::ShaderIrVgpr{
+                    .index = 3,
+                },
+            .source0 =
+                astraea::graphics::ShaderIrVgpr{
+                    .index = 1,
+                },
+            .source1 =
+                astraea::graphics::ShaderIrVgpr{
+                    .index = 2,
+                },
+        };
+
+    const auto execution =
+        astraea::graphics::
+            execute_shader_vector_add_f32_exact_operation(
+                operation,
+                scalar_state,
+                vector_state);
+    REQUIRE(execution.has_value());
+
+    const auto event =
+        astraea::trace::
+            trace_shader_vector_add_f32_execution_v0(
+                131,
+                execution.value());
+
+    REQUIRE(event.has_value());
+    REQUIRE(event->subsystem == "shader.execute");
+    REQUIRE(event->type == "vector_add_f32_exact");
+    REQUIRE_FALSE(event->guest.has_value());
+    REQUIRE(event->stable.size() == 6);
+
+    REQUIRE(event->stable[0].name == "wave_size_lanes");
+    REQUIRE(
+        std::get<std::uint64_t>(
+            event->stable[0].value) == 32);
+    REQUIRE(event->stable[1].name == "destination_vgpr");
+    REQUIRE(
+        std::get<std::uint64_t>(
+            event->stable[1].value) == 3);
+    REQUIRE(event->stable[2].name == "source0_vgpr");
+    REQUIRE(
+        std::get<std::uint64_t>(
+            event->stable[2].value) == 1);
+    REQUIRE(event->stable[3].name == "source1_vgpr");
+    REQUIRE(
+        std::get<std::uint64_t>(
+            event->stable[3].value) == 2);
+    REQUIRE(event->stable[4].name == "active_lane_mask");
+    REQUIRE(
+        std::get<std::uint64_t>(
+            event->stable[4].value) ==
+        ((std::uint64_t{1} << 0U) |
+         (std::uint64_t{1} << 2U)));
+
+    REQUIRE(
+        event->stable[5].name ==
+        "written_lane_bits_le");
+    const auto& bytes =
+        std::get<std::vector<std::byte>>(
+            event->stable[5].value);
+    REQUIRE(bytes.size() == 32U * 4U);
+    // lane 0 result 2.0f = 0x40000000
+    REQUIRE(bytes[0] == std::byte{0x00});
+    REQUIRE(bytes[1] == std::byte{0x00});
+    REQUIRE(bytes[2] == std::byte{0x00});
+    REQUIRE(bytes[3] == std::byte{0x40});
+    // lane 2 result -3.0f = 0xc0400000
+    REQUIRE(bytes[8] == std::byte{0x00});
+    REQUIRE(bytes[9] == std::byte{0x00});
+    REQUIRE(bytes[10] == std::byte{0x40});
+    REQUIRE(bytes[11] == std::byte{0xc0});
+    REQUIRE(event->diagnostics.empty());
+}
+
+TEST_CASE(
+    "exact V_ADD_F32 written result participates in trace divergence",
+    "[trace][graphics][v0][shader-execution][vector][add-f32][diff]") {
+    const auto make_event =
+        [](std::uint32_t right_bits) {
+            astraea::graphics::ShaderScalarState scalar_state{};
+            scalar_state.exec = 1;
+
+            astraea::graphics::ShaderVectorState vector_state{};
+            vector_state.wave_size =
+                astraea::graphics::ShaderWaveSize::wave32;
+            vector_state.vgprs[1][0] = 0x3f800000U;
+            vector_state.vgprs[2][0] = right_bits;
+
+            const astraea::graphics::ShaderIrOperation operation =
+                astraea::graphics::ShaderIrVectorAddF32{
+                    .destination =
+                        astraea::graphics::ShaderIrVgpr{
+                            .index = 3,
+                        },
+                    .source0 =
+                        astraea::graphics::ShaderIrVgpr{
+                            .index = 1,
+                        },
+                    .source1 =
+                        astraea::graphics::ShaderIrVgpr{
+                            .index = 2,
+                        },
+                };
+
+            const auto execution =
+                astraea::graphics::
+                    execute_shader_vector_add_f32_exact_operation(
+                        operation,
+                        scalar_state,
+                        vector_state);
+            REQUIRE(execution.has_value());
+
+            auto event =
+                astraea::trace::
+                    trace_shader_vector_add_f32_execution_v0(
+                        132,
+                        execution.value());
+            REQUIRE(event.has_value());
+            return std::move(event).value();
+        };
+
+    auto diff =
+        astraea::trace::diff_trace_v0(
+            document(make_event(0x3f800000U)),
+            document(make_event(0x40000000U)));
+
+    REQUIRE(diff.has_value());
+    REQUIRE_FALSE(diff->equivalent);
+    REQUIRE(
+        diff->first_divergence->kind ==
+        astraea::trace::TraceDivergenceKindV0::
+            stable_field_value_mismatch);
+    REQUIRE(
+        diff->first_divergence->field_name ==
+        std::optional<std::string>{
+            "written_lane_bits_le"});
+}
