@@ -100,4 +100,9 @@ trace_shader_vector_move_execution_v0(
     std::uint64_t event_id,
     const astraea::graphics::ShaderVectorMove32Effect& effect);
 
+[[nodiscard]] GraphicsTraceEventResultV0
+trace_shader_vector_add_f32_execution_v0(
+    std::uint64_t event_id,
+    const astraea::graphics::ShaderVectorAddF32Effect& effect);
+
 }  // namespace astraea::trace
