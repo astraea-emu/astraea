@@ -13,6 +13,7 @@ namespace astraea::graphics {
 
 enum class Rdna2InstructionFormat {
     sopp,
+    sop1,
     unsupported,
 };
 
@@ -28,7 +29,9 @@ enum class Rdna2InstructionKind {
     s_cbranch_execnz,
     s_barrier,
     s_waitcnt,
+    s_mov_b32,
     unknown_sopp_opcode,
+    unknown_sop1_opcode,
     unsupported_encoding,
 };
 
@@ -53,6 +56,14 @@ struct Rdna2SoppFields {
     auto operator<=>(const Rdna2SoppFields&) const = default;
 };
 
+struct Rdna2Sop1Fields {
+    std::uint8_t opcode = 0;
+    std::uint8_t destination_selector = 0;
+    std::uint8_t source_selector = 0;
+
+    auto operator<=>(const Rdna2Sop1Fields&) const = default;
+};
+
 struct Rdna2Instruction {
     std::size_t word_index = 0;
     std::size_t byte_offset = 0;
@@ -63,6 +74,7 @@ struct Rdna2Instruction {
     Rdna2InstructionKind kind =
         Rdna2InstructionKind::unsupported_encoding;
     std::optional<Rdna2SoppFields> sopp;
+    std::optional<Rdna2Sop1Fields> sop1;
 
     auto operator<=>(const Rdna2Instruction&) const = default;
 };
