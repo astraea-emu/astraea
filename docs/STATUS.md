@@ -1,9 +1,9 @@
 # Project Status
 
 **Integration gate:** PS5 graphics frontend after V3  
-**State:** V1/V2/V3 proof chain complete; real AGC DCB submit capture active  
+**State:** V1/V2/V3 proof chain complete; AGC submit capture complete; generic Type-3 framing active  
 **Repository:** astraea-emu/astraea  
-**Active branch:** `feat/ps5-capture-agc-submit-dcb`
+**Active branch:** `feat/ps5-frame-agc-dcb-type3`
 
 ## Complete
 
@@ -72,6 +72,7 @@
 - Owned SCE-profile guest execution of the real `sceAgcCreateShader` import through generic HLE dispatch, guest shader-object preparation, `RAX=0` resume, and controlled exit is complete and five-gate validated (#148/#149). V1 is complete.
 - Deterministic Shader IR -> Vulkan-valid SPIR-V 1.6 register-state compute-probe lowering for NOP/V_MOV_B32/V_ADD_F32/END is complete and five-gate validated (#150/#151).
 - Headless Vulkan execution of that V2 probe is complete and five-gate validated (#152/#153); Linux CI forces Mesa Lavapipe and proves bit-for-bit readback equality with Astraea's existing interpreter. V3's first actual host-GPU semantic proof is complete.
+- Immutable `sceAgcDriverSubmitDcb` guest-memory capture is complete and five-gate validated (#154/#155): exact 16-byte descriptor plus bounded raw DCB stream, with no guest writes, PM4 decode, fake success, or Vulkan dispatch.
 - Public five-gate CI remains the merge requirement:
   - Linux x64
   - Windows x64
@@ -83,10 +84,10 @@
 
 1. V1 is complete through #148/#149.
 2. V2's first deterministic SPIR-V backend is complete through #150/#151.
-3. V3's first actual host-GPU proof is complete through #152/#153: controlled RDNA2 -> Shader IR -> SPIR-V -> headless Vulkan/Lavapipe -> exact readback matches the interpreter.
-4. #154 is active: capture the real `sceAgcDriverSubmitDcb` guest descriptor and exact submitted command-word stream without mutating guest memory, decoding PM4, or returning fake success.
-5. The first submit profile preserves the exact 16-byte descriptor, decodes only the evidenced pointer/count/flag fields, preserves padding opaquely, and caps the capture at the current public `0xFFFFF`-dword bound.
-6. After capture, establish only the smallest evidence-backed command-framing boundary required by an owned submission fixture. Do not broaden Vulkan/RDNA2/resources speculatively.
+3. V3's first actual host-GPU proof is complete through #152/#153.
+4. #154/#155 are complete: Astraea can safely capture a real `sceAgcDriverSubmitDcb` descriptor and exact submitted DCB bytes without claiming execution.
+5. #156 is active: frame that captured byte stream using only the generic AMD PM4 Type-3 header/count contract, preserving exact RawPacket provenance and leaving opcode/low-control semantics uninterpreted.
+6. The stale pre-architecture PM4 branch is not being revived; current framing uses fresh evidence and the current packet/provenance model.
 
 ## SCE metadata boundary
 
@@ -145,12 +146,14 @@ PS5-specific assumptions require documented evidence.
 
 ## Next action
 
-Finish #154 on `feat/ps5-capture-agc-submit-dcb`.
+Finish #156 on `feat/ps5-frame-agc-dcb-type3`.
 
 The bounded proof is:
 
-`captured HLE call -> 16-byte sceAgcDriverSubmitDcb descriptor -> checked exact guest DCB byte stream`.
+`#154 raw DCB bytes -> deterministic generic AMD PM4 Type-3 extents -> exact RawPacket provenance`.
 
-The planner must preserve raw descriptor/stream provenance and perform no guest writes. It must not enter generic HLE dispatch, return native success, infer PM4 packets/registers, build GPU state, or call Vulkan.
+Only header framing is in scope: type 3, 14-bit count, opcode field preservation, opaque low control bits, checked extent walking, and exact raw bytes.
 
-After merge, use the captured stream to establish the smallest evidence-backed command framing needed by an owned submission fixture. Only after Astraea can validate and consume the submitted work should the real submit HLE service resume guest execution.
+Do not classify opcodes, decode registers, recurse indirect buffers, build GPU state, return submit success, or invoke Vulkan in this slice.
+
+After merge, select the smallest packet semantic actually present in an Astraea-owned submission fixture and implement only that state/effect.

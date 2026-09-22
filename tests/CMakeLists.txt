@@ -55,6 +55,7 @@ add_executable(astraea_core_tests
     graphics/agc_shader_binary_tests.cpp
     graphics/agc_shader_container_tests.cpp
     graphics/packet_tests.cpp
+    graphics/pm4_type3_framing_tests.cpp
     graphics/graphics_ir_tests.cpp
     graphics/rdna2_decoder_tests.cpp
     graphics/shader_ir_tests.cpp
