@@ -380,6 +380,24 @@ namespace {
     return "invalid_decoded_instruction";
 }
 
+[[nodiscard]] std::string shader_cfg_edge_kind_text(
+    astraea::graphics::ShaderCfgEdgeKind kind) {
+    using Kind = astraea::graphics::ShaderCfgEdgeKind;
+
+    switch (kind) {
+    case Kind::linear_fallthrough:
+        return "linear_fallthrough";
+    case Kind::unconditional_branch:
+        return "unconditional_branch";
+    case Kind::conditional_branch_taken:
+        return "conditional_branch_taken";
+    case Kind::conditional_branch_fallthrough:
+        return "conditional_branch_fallthrough";
+    }
+
+    return "linear_fallthrough";
+}
+
 [[nodiscard]] GraphicsTraceEventResultV0
 size_failure() {
     return GraphicsTraceEventResultV0::failure(
@@ -985,6 +1003,126 @@ trace_shader_ir_v0(
                             instruction_bytes(
                                 instruction)),
                     },
+            });
+    } catch (const std::bad_alloc&) {
+        return GraphicsTraceEventResultV0::failure(
+            adapter_error(
+                GraphicsTraceAdapterErrorCodeV0::
+                    host_allocation_failure));
+    } catch (const std::length_error&) {
+        return GraphicsTraceEventResultV0::failure(
+            adapter_error(
+                GraphicsTraceAdapterErrorCodeV0::
+                    host_allocation_failure));
+    }
+}
+
+GraphicsTraceEventResultV0
+trace_shader_cfg_block_v0(
+    std::uint64_t event_id,
+    std::size_t block_index,
+    const astraea::graphics::ShaderCfgBasicBlock& block) {
+    try {
+        std::uint64_t block_index_u64 = 0;
+        std::uint64_t first_emission_index = 0;
+        std::uint64_t emission_count = 0;
+        std::uint64_t successor_count = 0;
+        if (!size_to_u64(
+                block_index,
+                block_index_u64) ||
+            !size_to_u64(
+                block.first_emission_index,
+                first_emission_index) ||
+            !size_to_u64(
+                block.emission_count,
+                emission_count) ||
+            !size_to_u64(
+                block.successors.size(),
+                successor_count)) {
+            return size_failure();
+        }
+
+        return GraphicsTraceEventResultV0::success(
+            TraceEventV0{
+                .id = event_id,
+                .subsystem = "shader.cfg",
+                .type = "block",
+                .guest = std::nullopt,
+                .stable =
+                    std::vector<TraceFieldV0>{
+                        u64_field(
+                            "block_index",
+                            block_index_u64),
+                        u64_field(
+                            "first_emission_index",
+                            first_emission_index),
+                        u64_field(
+                            "emission_count",
+                            emission_count),
+                        u64_field(
+                            "successor_count",
+                            successor_count),
+                    },
+                .diagnostics = {},
+            });
+    } catch (const std::bad_alloc&) {
+        return GraphicsTraceEventResultV0::failure(
+            adapter_error(
+                GraphicsTraceAdapterErrorCodeV0::
+                    host_allocation_failure));
+    } catch (const std::length_error&) {
+        return GraphicsTraceEventResultV0::failure(
+            adapter_error(
+                GraphicsTraceAdapterErrorCodeV0::
+                    host_allocation_failure));
+    }
+}
+
+GraphicsTraceEventResultV0
+trace_shader_cfg_edge_v0(
+    std::uint64_t event_id,
+    std::size_t source_block_index,
+    std::size_t edge_index,
+    const astraea::graphics::ShaderCfgEdge& edge) {
+    try {
+        std::uint64_t source_block_index_u64 = 0;
+        std::uint64_t edge_index_u64 = 0;
+        std::uint64_t target_block_index = 0;
+        if (!size_to_u64(
+                source_block_index,
+                source_block_index_u64) ||
+            !size_to_u64(
+                edge_index,
+                edge_index_u64) ||
+            !size_to_u64(
+                edge.target_block_index,
+                target_block_index)) {
+            return size_failure();
+        }
+
+        return GraphicsTraceEventResultV0::success(
+            TraceEventV0{
+                .id = event_id,
+                .subsystem = "shader.cfg",
+                .type = "edge",
+                .guest = std::nullopt,
+                .stable =
+                    std::vector<TraceFieldV0>{
+                        u64_field(
+                            "source_block_index",
+                            source_block_index_u64),
+                        u64_field(
+                            "edge_index",
+                            edge_index_u64),
+                        text_field(
+                            "kind",
+                            shader_cfg_edge_kind_text(
+                                edge.kind)),
+                        u64_field(
+                            "target_block_index",
+                            target_block_index),
+                    },
+                .diagnostics = {},
             });
     } catch (const std::bad_alloc&) {
         return GraphicsTraceEventResultV0::failure(
