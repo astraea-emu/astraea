@@ -42,6 +42,11 @@ struct ShaderIrConditionalRelativeBranch {
         const ShaderIrConditionalRelativeBranch&) const = default;
 };
 
+struct ShaderIrWorkgroupBarrier {
+    auto operator<=>(
+        const ShaderIrWorkgroupBarrier&) const = default;
+};
+
 enum class ShaderIrUnsupportedReason {
     unknown_sopp_opcode,
     unsupported_encoding,
