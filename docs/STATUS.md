@@ -1,9 +1,9 @@
 # Project Status
 
 **Integration gate:** V1 — Guest-created shader object  
-**State:** Dependency-driven architecture is merged; V1 runtime AGC shader-pair validation is active  
+**State:** V1 guest-call materialization is active after canonical AGC runtime shader validation  
 **Repository:** astraea-emu/astraea  
-**Active branch:** `feat/v1-agc-runtime-shader-pair`
+**Active branch:** `feat/v1-plan-agc-create-shader`
 
 ## Complete
 
@@ -75,11 +75,11 @@
 
 ## Current frontier
 
-1. #138 — canonicalize the raw AGC runtime shader-header + shader-text pair used at the `sceAgcCreateShader` boundary.
-2. The new `AgcShaderBinary` parser validates the publicly evidenced raw header fields, bounded context/shader register lists, current trailer/program extent, and opaque provenance without mutating guest memory.
-3. The existing AGC ELF/container parser delegates header/text semantics to that canonical parser, preventing a second divergent interpretation of the same PS5 shader data.
-4. The next missing V1 dependency after #138 is the real guest HLE boundary for `libSceAgc:sceAgcCreateShader` (NID `f3dg2CSgRKY`): safe guest-memory access, guest-domain shader identity/lifetime, and evidenced preparation semantics. It must still not create Vulkan objects.
-5. SPIR-V/Vulkan remain V2/V3. New RDNA2 opcodes, descriptors/resources, command decoding, and broader HLE are pulled forward only by a concrete vertical-gate workload.
+1. #138/#139 are complete: raw AGC runtime shader-header + shader-text pairs now have one canonical parser and provenance model.
+2. #140 is active: materialize a captured `sceAgcCreateShader` HLE call from guest RDI/RSI/RDX plus validated guest memory into the canonical `AgcShaderBinary`.
+3. #140 is deliberately read/validate/plan only. It must not mutate the guest header, write the output handle, return fake native success, or create SPIR-V/Vulkan objects.
+4. After #140, the next V1 slice is real service dispatch plus only the publicly evidenced AGC header-preparation mutations needed by the owned shader profile, followed by an end-to-end guest return proof.
+5. V2 begins immediately after that V1 proof with the smallest workload-driven Shader IR -> SPIR-V lowering. V3 then connects guest command/state/resource evidence to deterministic headless Vulkan execution; opcode, resource, and HLE breadth are pulled forward only by the active vertical workload.
 
 ## SCE metadata boundary
 
@@ -138,18 +138,10 @@ PS5-specific assumptions require documented evidence.
 
 ## Next action
 
-Finish #138 and merge only after its immutable PR head passes all five public
-CI gates, including a real smoke execution of the new raw AGC shader-binary
-fuzzer.
+Finish #140 from current `main`: make `GuestMemoryAccess` reference the common execution-memory plan across Linux/Windows prepared-memory backends, then add the typed `sceAgcCreateShader` request planner that safely reads the 96-byte evidenced header prefix, derives exact declared header/text extents, copies those ranges from guest memory, and delegates all shader semantics to `parse_agc_shader_binary()`.
 
-Then open the next bounded V1 slice around the real
-`libSceAgc:sceAgcCreateShader` boundary. The owned SCE guest proof should
-reach the exact import/HLE gate with RDI = out pointer, RSI = writable raw
-shader header, and RDX = code address; the handler should validate guest memory
-through the canonical #138 parser and produce a guest-domain shader object.
-Header preparation mutations must be implemented only where public evidence is
-strong enough, with unsupported preparation state reported explicitly rather
-than guessed.
+Merge #140 only after its immutable PR head passes all five public CI gates. Then implement the smallest evidenced apply/dispatch slice needed for the owned V1 proof:
 
-Do not introduce SPIR-V/Vulkan handles into V1. V2 begins only after the
-guest-created shader object boundary is real and tested end to end.
+`owned SCE program -> exact SCE import -> sceAgcCreateShader HLE -> prepared guest shader object -> validated AGC/RDNA2/Shader IR -> return to guest`.
+
+Do not broaden HLE, RDNA2 opcode coverage, descriptors/resources, or command decoding without a concrete blocker from that proof. Do not introduce host rendering into V1. Once V1 is real, move directly to a minimal SPIR-V semantic proof and then the first guest-driven Vulkan command/result path rather than polishing the shader parser horizontally.

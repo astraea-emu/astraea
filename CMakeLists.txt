@@ -64,6 +64,7 @@ add_library(astraea_core STATIC
     src/execution/windows_memory.cpp
     src/execution/hle_runtime.cpp
     src/execution/guest_memory.cpp
+    src/execution/sce_agc_create_shader.cpp
     src/probe/hello.cpp
     src/probe/reference.cpp
     src/graphics/agc_shader_binary.cpp
