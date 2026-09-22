@@ -3,6 +3,8 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <optional>
+#include <utility>
 #include <vector>
 
 #include <astraea/execution/sce_agc_driver_submit_dcb.hpp>
@@ -350,5 +352,7 @@ TEST_CASE(
     REQUIRE(result->frames[1].word_offset == 2U);
     REQUIRE(
         submission.command_buffer_bytes.size() ==
-        submission.word_count * 4U);
+        static_cast<std::size_t>(
+            submission.word_count) *
+            4U);
 }
