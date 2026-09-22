@@ -66,6 +66,7 @@ add_library(astraea_core STATIC
     src/execution/guest_memory.cpp
     src/probe/hello.cpp
     src/probe/reference.cpp
+    src/graphics/agc_shader_binary.cpp
     src/graphics/agc_shader_container.cpp
     src/graphics/packet.cpp
     src/graphics/graphics_ir.cpp
