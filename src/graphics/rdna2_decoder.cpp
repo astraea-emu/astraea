@@ -72,6 +72,15 @@ constexpr std::uint32_t kVop1OpcodeMask = 0xffU;
 constexpr std::uint32_t kVop1SourceMask = 0x1ffU;
 constexpr std::uint8_t kVop1MovB32Opcode = 1;
 
+constexpr unsigned int kVop2OpcodeShift = 25U;
+constexpr std::uint32_t kVop2OpcodeMask = 0x3fU;
+constexpr unsigned int kVop2DestinationShift = 17U;
+constexpr std::uint32_t kVop2DestinationMask = 0xffU;
+constexpr unsigned int kVop2Source1Shift = 9U;
+constexpr std::uint32_t kVop2Source1Mask = 0xffU;
+constexpr std::uint32_t kVop2Source0Mask = 0x1ffU;
+constexpr std::uint8_t kVop2AddF32Opcode = 3;
+
 [[nodiscard]] Rdna2DecodeError decode_error(
     Rdna2DecodeErrorCode code,
     std::size_t word_index,
@@ -153,6 +162,25 @@ constexpr std::uint8_t kVop1MovB32Opcode = 1;
     }
 }
 
+[[nodiscard]] bool vop2_source0_has_extension(
+    std::uint16_t selector) noexcept {
+    return selector == 233U ||
+           selector == 234U ||
+           selector == 249U ||
+           selector == 250U ||
+           selector == 255U;
+}
+
+[[nodiscard]] Rdna2InstructionKind classify_vop2_opcode(
+    std::uint8_t opcode) noexcept {
+    switch (opcode) {
+    case kVop2AddF32Opcode:
+        return Rdna2InstructionKind::v_add_f32;
+    default:
+        return Rdna2InstructionKind::unknown_vop2_opcode;
+    }
+}
+
 [[nodiscard]] Rdna2InstructionKind classify_sop1_opcode(
     std::uint8_t opcode) noexcept {
     switch (opcode) {
@@ -214,6 +242,7 @@ Rdna2DecodeResult decode_rdna2_instruction(
                     },
                 .sop1 = std::nullopt,
                 .vop1 = std::nullopt,
+                .vop2 = std::nullopt,
             });
     }
 
@@ -268,6 +297,7 @@ Rdna2DecodeResult decode_rdna2_instruction(
                         .literal_constant = literal_constant,
                     },
                 .vop1 = std::nullopt,
+                .vop2 = std::nullopt,
             });
     }
 
@@ -322,6 +352,64 @@ Rdna2DecodeResult decode_rdna2_instruction(
                         .source_selector = source,
                         .source_extension = source_extension,
                     },
+                .vop2 = std::nullopt,
+            });
+    }
+
+    if ((word & 0x80000000U) == 0U) {
+        const auto opcode =
+            static_cast<std::uint8_t>(
+                (word >> kVop2OpcodeShift) &
+                kVop2OpcodeMask);
+        const auto destination =
+            static_cast<std::uint8_t>(
+                (word >> kVop2DestinationShift) &
+                kVop2DestinationMask);
+        const auto source0 =
+            static_cast<std::uint16_t>(
+                word & kVop2Source0Mask);
+        const auto source1 =
+            static_cast<std::uint8_t>(
+                (word >> kVop2Source1Shift) &
+                kVop2Source1Mask);
+
+        std::size_t word_count = 1;
+        std::optional<std::uint32_t> source0_extension;
+        if (vop2_source0_has_extension(source0)) {
+            const auto extension_index = word_index + 1U;
+            if (extension_index >= words.size()) {
+                return Rdna2DecodeResult::failure(
+                    decode_error(
+                        Rdna2DecodeErrorCode::
+                            instruction_out_of_bounds,
+                        extension_index,
+                        words.size()));
+            }
+
+            word_count = 2;
+            source0_extension = words[extension_index];
+        }
+
+        return Rdna2DecodeResult::success(
+            Rdna2Instruction{
+                .word_index = word_index,
+                .word_count = word_count,
+                .byte_offset = byte_offset,
+                .raw_word = word,
+                .raw_encoding = raw_encoding(word),
+                .format = Rdna2InstructionFormat::vop2,
+                .kind = classify_vop2_opcode(opcode),
+                .sopp = std::nullopt,
+                .sop1 = std::nullopt,
+                .vop1 = std::nullopt,
+                .vop2 =
+                    Rdna2Vop2Fields{
+                        .opcode = opcode,
+                        .destination_selector = destination,
+                        .source0_selector = source0,
+                        .source1_selector = source1,
+                        .source0_extension = source0_extension,
+                    },
             });
     }
 
@@ -338,6 +426,7 @@ Rdna2DecodeResult decode_rdna2_instruction(
             .sopp = std::nullopt,
             .sop1 = std::nullopt,
             .vop1 = std::nullopt,
+            .vop2 = std::nullopt,
         });
 }
 

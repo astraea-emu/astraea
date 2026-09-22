@@ -68,6 +68,14 @@ struct ShaderIrVectorMove32 {
     auto operator<=>(const ShaderIrVectorMove32&) const = default;
 };
 
+struct ShaderIrVectorAddF32 {
+    ShaderIrVgpr destination;
+    ShaderIrVgpr source0;
+    ShaderIrVgpr source1;
+
+    auto operator<=>(const ShaderIrVectorAddF32&) const = default;
+};
+
 struct ShaderIrSgpr {
     std::uint8_t index = 0;
 
@@ -134,6 +142,7 @@ enum class ShaderIrUnsupportedReason {
     unknown_sopp_opcode,
     unknown_sop1_opcode,
     unknown_vop1_opcode,
+    unknown_vop2_opcode,
     unsupported_scalar_operand,
     unsupported_vector_operand,
     unsupported_encoding,
@@ -158,6 +167,7 @@ using ShaderIrOperation =
         ShaderIrScalarMove32,
         ShaderIrScalarMove64,
         ShaderIrVectorMove32,
+        ShaderIrVectorAddF32,
         ShaderIrUnsupported>;
 
 struct ShaderIrProvenance {

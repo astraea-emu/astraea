@@ -20,7 +20,8 @@ namespace {
                Rdna2InstructionFormat::sopp &&
            instruction.sopp.has_value() &&
            !instruction.sop1.has_value() &&
-           !instruction.vop1.has_value();
+           !instruction.vop1.has_value() &&
+           !instruction.vop2.has_value();
 }
 
 [[nodiscard]] bool valid_vop1_source(
@@ -29,7 +30,18 @@ namespace {
                Rdna2InstructionFormat::vop1 &&
            instruction.vop1.has_value() &&
            !instruction.sopp.has_value() &&
-           !instruction.sop1.has_value();
+           !instruction.sop1.has_value() &&
+           !instruction.vop2.has_value();
+}
+
+[[nodiscard]] bool valid_vop2_source(
+    const Rdna2Instruction& instruction) noexcept {
+    return instruction.format ==
+               Rdna2InstructionFormat::vop2 &&
+           instruction.vop2.has_value() &&
+           !instruction.sopp.has_value() &&
+           !instruction.sop1.has_value() &&
+           !instruction.vop1.has_value();
 }
 
 [[nodiscard]] bool valid_sop1_source(
@@ -38,7 +50,8 @@ namespace {
                Rdna2InstructionFormat::sop1 &&
            instruction.sop1.has_value() &&
            !instruction.sopp.has_value() &&
-           !instruction.vop1.has_value();
+           !instruction.vop1.has_value() &&
+           !instruction.vop2.has_value();
 }
 
 [[nodiscard]] bool plain_sgpr_selector(
@@ -379,6 +392,41 @@ ShaderIrEmission lower_rdna2_to_shader_ir(
         }
         break;
 
+    case Rdna2InstructionKind::v_add_f32:
+        if (valid_vop2_source(instruction)) {
+            const auto source0 =
+                instruction.vop2->source0_selector;
+            if (source0 >= 256U && source0 <= 511U) {
+                operation =
+                    ShaderIrVectorAddF32{
+                        .destination =
+                            ShaderIrVgpr{
+                                .index =
+                                    instruction.vop2->
+                                        destination_selector,
+                            },
+                        .source0 =
+                            ShaderIrVgpr{
+                                .index =
+                                    static_cast<std::uint8_t>(
+                                        source0 - 256U),
+                            },
+                        .source1 =
+                            ShaderIrVgpr{
+                                .index =
+                                    instruction.vop2->
+                                        source1_selector,
+                            },
+                    };
+            } else {
+                operation =
+                    unsupported(
+                        ShaderIrUnsupportedReason::
+                            unsupported_vector_operand);
+            }
+        }
+        break;
+
     case Rdna2InstructionKind::unknown_sopp_opcode:
         if (valid_sopp_source(instruction)) {
             operation =
@@ -406,12 +454,22 @@ ShaderIrEmission lower_rdna2_to_shader_ir(
         }
         break;
 
+    case Rdna2InstructionKind::unknown_vop2_opcode:
+        if (valid_vop2_source(instruction)) {
+            operation =
+                unsupported(
+                    ShaderIrUnsupportedReason::
+                        unknown_vop2_opcode);
+        }
+        break;
+
     case Rdna2InstructionKind::unsupported_encoding:
         if (instruction.format ==
                 Rdna2InstructionFormat::unsupported &&
             !instruction.sopp.has_value() &&
             !instruction.sop1.has_value() &&
-            !instruction.vop1.has_value()) {
+            !instruction.vop1.has_value() &&
+            !instruction.vop2.has_value()) {
             operation =
                 unsupported(
                     ShaderIrUnsupportedReason::

@@ -141,7 +141,33 @@ constexpr std::uint32_t make_vop1(
            static_cast<std::uint32_t>(source);
 }
 
+constexpr std::uint32_t make_vop2(
+    std::uint8_t opcode,
+    std::uint8_t destination,
+    std::uint16_t source0,
+    std::uint8_t source1) {
+    return (static_cast<std::uint32_t>(opcode) << 25U) |
+           (static_cast<std::uint32_t>(destination) << 17U) |
+           (static_cast<std::uint32_t>(source1) << 9U) |
+           static_cast<std::uint32_t>(source0);
+}
+
 astraea::graphics::Rdna2Instruction decode_vop1_extension(
+    std::uint32_t word,
+    std::uint32_t extension) {
+    const std::array<std::uint32_t, 2> words{
+        word,
+        extension,
+    };
+    auto result =
+        astraea::graphics::decode_rdna2_instruction(
+            words,
+            0);
+    REQUIRE(result.has_value());
+    return std::move(result).value();
+}
+
+astraea::graphics::Rdna2Instruction decode_vop2_extension(
     std::uint32_t word,
     std::uint32_t extension) {
     const std::array<std::uint32_t, 2> words{
@@ -321,10 +347,10 @@ TEST_CASE(
     "[trace][graphics][v0]") {
     const auto left_ir =
         astraea::graphics::lower_rdna2_to_shader_ir(
-            decode_one(0x01234567U));
+            decode_one(0x80000000U));
     const auto right_ir =
         astraea::graphics::lower_rdna2_to_shader_ir(
-            decode_one(0x07654321U));
+            decode_one(0x87654321U));
 
     auto left =
         astraea::trace::trace_shader_ir_v0(
@@ -1251,4 +1277,128 @@ TEST_CASE(
         diff->first_divergence->field_name ==
         std::optional<std::string>{
             "destination_vgpr"});
+}
+
+
+TEST_CASE(
+    "VOP2 decode trace exposes arithmetic selectors as stable fields",
+    "[trace][graphics][v0][vop2][add-f32]") {
+    const auto instruction =
+        decode_one(make_vop2(3, 5, 273, 9));
+
+    auto event =
+        astraea::trace::trace_rdna2_decode_v0(
+            116,
+            instruction);
+
+    REQUIRE(event.has_value());
+    REQUIRE(event->subsystem == "shader.decode");
+    REQUIRE(event->type == "instruction");
+    REQUIRE(event->stable.size() == 6);
+    REQUIRE(
+        std::get<std::string>(
+            event->stable[0].value) == "vop2");
+    REQUIRE(
+        std::get<std::string>(
+            event->stable[1].value) == "v_add_f32");
+    REQUIRE(
+        std::get<std::uint64_t>(
+            event->stable[2].value) == 3);
+    REQUIRE(
+        std::get<std::uint64_t>(
+            event->stable[3].value) == 5);
+    REQUIRE(event->stable[4].name == "source0_selector");
+    REQUIRE(
+        std::get<std::uint64_t>(
+            event->stable[4].value) == 273);
+    REQUIRE(event->stable[5].name == "source1_selector");
+    REQUIRE(
+        std::get<std::uint64_t>(
+            event->stable[5].value) == 9);
+}
+
+TEST_CASE(
+    "VOP2 SRC0 extension remains diagnostic provenance only",
+    "[trace][graphics][v0][vop2][extension]") {
+    const auto instruction =
+        decode_vop2_extension(
+            make_vop2(3, 5, 255, 9),
+            0xdeadbeefU);
+
+    auto event =
+        astraea::trace::trace_rdna2_decode_v0(
+            117,
+            instruction);
+
+    REQUIRE(event.has_value());
+    REQUIRE(event->stable.size() == 6);
+    REQUIRE(event->diagnostics.size() == 2);
+    REQUIRE(
+        std::get<std::vector<std::byte>>(
+            event->diagnostics[1].value)
+            .size() == 8);
+}
+
+TEST_CASE(
+    "V_ADD_F32 Shader IR trace exposes VGPR arithmetic semantics",
+    "[trace][graphics][v0][vop2][add-f32]") {
+    const auto ir =
+        astraea::graphics::lower_rdna2_to_shader_ir(
+            decode_one(make_vop2(3, 5, 273, 9)));
+
+    auto event =
+        astraea::trace::trace_shader_ir_v0(
+            118,
+            ir);
+
+    REQUIRE(event.has_value());
+    REQUIRE(event->subsystem == "shader.ir");
+    REQUIRE(event->type == "vector_add_f32");
+    REQUIRE(event->stable.size() == 3);
+    REQUIRE(event->stable[0].name == "destination_vgpr");
+    REQUIRE(
+        std::get<std::uint64_t>(
+            event->stable[0].value) == 5);
+    REQUIRE(event->stable[1].name == "source0_vgpr");
+    REQUIRE(
+        std::get<std::uint64_t>(
+            event->stable[1].value) == 17);
+    REQUIRE(event->stable[2].name == "source1_vgpr");
+    REQUIRE(
+        std::get<std::uint64_t>(
+            event->stable[2].value) == 9);
+}
+
+TEST_CASE(
+    "V_ADD_F32 source identity participates in trace divergence",
+    "[trace][graphics][v0][vop2][add-f32]") {
+    auto left =
+        astraea::trace::trace_shader_ir_v0(
+            119,
+            astraea::graphics::lower_rdna2_to_shader_ir(
+                decode_one(make_vop2(3, 5, 273, 9))));
+    auto right =
+        astraea::trace::trace_shader_ir_v0(
+            119,
+            astraea::graphics::lower_rdna2_to_shader_ir(
+                decode_one(make_vop2(3, 5, 273, 10))));
+
+    REQUIRE(left.has_value());
+    REQUIRE(right.has_value());
+
+    auto diff =
+        astraea::trace::diff_trace_v0(
+            document(std::move(left).value()),
+            document(std::move(right).value()));
+
+    REQUIRE(diff.has_value());
+    REQUIRE_FALSE(diff->equivalent);
+    REQUIRE(
+        diff->first_divergence->kind ==
+        astraea::trace::TraceDivergenceKindV0::
+            stable_field_value_mismatch);
+    REQUIRE(
+        diff->first_divergence->field_name ==
+        std::optional<std::string>{
+            "source1_vgpr"});
 }
