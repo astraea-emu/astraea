@@ -165,6 +165,32 @@ make_plan(
         };
 }
 
+astraea::execution::SceImportResolutionPlan
+make_second_plan(
+    std::uint32_t relocation_type =
+        astraea::execution::
+            kX86_64GlobDatRelocationType) {
+    auto plan = make_plan(
+        astraea::loader::RelocationTableKind::rela,
+        relocation_type,
+        std::int64_t{123});
+    plan.table_index = 5;
+    plan.relocation_target =
+        astraea::memory::GuestAddress{0x500010};
+    plan.symbol_index = 4;
+    plan.raw_symbol_name =
+        "LMNOPQRSTUV#library-b#module-b";
+    plan.identity =
+        astraea::loader::SceSymbolIdentity{
+            .nid = "LMNOPQRSTUV",
+            .library_id = "library-b",
+            .module_id = "module-b",
+        };
+    plan.function_id =
+        astraea::execution::HleFunctionId{2};
+    return plan;
+}
+
 }  // namespace
 
 TEST_CASE(
@@ -346,4 +372,189 @@ TEST_CASE(
     REQUIRE(
         first->raw_addend !=
         second->raw_addend);
+}
+
+
+TEST_CASE(
+    "batch GLOB_DAT builder preserves plan order and explicit gate slots",
+    "[execution][sce-glob-dat][batch]") {
+    const auto gates = make_gate_region();
+    const std::array plans{
+        make_plan(),
+        make_second_plan(),
+    };
+    const std::array<std::uint32_t, 2> slots{
+        1,
+        2,
+    };
+
+    const auto result =
+        astraea::execution::
+            build_synthetic_x86_64_glob_dat_gate_patches(
+                plans,
+                gates,
+                slots);
+
+    REQUIRE(result.has_value());
+    REQUIRE(result->size() == 2);
+
+    REQUIRE(
+        result->at(0).relocation_target ==
+        astraea::memory::GuestAddress{0x500000});
+    REQUIRE(
+        result->at(0).gate_destination ==
+        astraea::memory::GuestAddress{0x600010});
+    REQUIRE(result->at(0).gate_slot == 1);
+    REQUIRE(
+        result->at(0).function_id ==
+        astraea::execution::HleFunctionId{1});
+    REQUIRE(
+        result->at(0).raw_addend ==
+        std::optional<std::int64_t>{-9});
+
+    REQUIRE(
+        result->at(1).relocation_target ==
+        astraea::memory::GuestAddress{0x500010});
+    REQUIRE(
+        result->at(1).gate_destination ==
+        astraea::memory::GuestAddress{0x600020});
+    REQUIRE(result->at(1).gate_slot == 2);
+    REQUIRE(
+        result->at(1).function_id ==
+        astraea::execution::HleFunctionId{2});
+    REQUIRE(
+        result->at(1).raw_addend ==
+        std::optional<std::int64_t>{123});
+}
+
+TEST_CASE(
+    "batch GLOB_DAT builder requires one explicit slot per plan",
+    "[execution][sce-glob-dat][batch]") {
+    const auto gates = make_gate_region();
+    const std::array plans{
+        make_plan(),
+        make_second_plan(),
+    };
+    const std::array<std::uint32_t, 1> slots{
+        1,
+    };
+
+    const auto result =
+        astraea::execution::
+            build_synthetic_x86_64_glob_dat_gate_patches(
+                plans,
+                gates,
+                slots);
+
+    REQUIRE_FALSE(result.has_value());
+    REQUIRE(
+        result.error().code ==
+        astraea::execution::
+            SceGlobDatBatchErrorCode::
+                gate_slot_count_mismatch);
+    REQUIRE(result.error().plan_count == 2);
+    REQUIRE(result.error().gate_slot_count == 1);
+    REQUIRE_FALSE(result.error().patch_error.has_value());
+}
+
+TEST_CASE(
+    "batch GLOB_DAT builder reports first indexed patch failure",
+    "[execution][sce-glob-dat][batch]") {
+    const auto gates = make_gate_region();
+    const std::array plans{
+        make_plan(),
+        make_second_plan(7),
+    };
+    const std::array<std::uint32_t, 2> slots{
+        1,
+        2,
+    };
+
+    const auto result =
+        astraea::execution::
+            build_synthetic_x86_64_glob_dat_gate_patches(
+                plans,
+                gates,
+                slots);
+
+    REQUIRE_FALSE(result.has_value());
+    REQUIRE(
+        result.error().code ==
+        astraea::execution::
+            SceGlobDatBatchErrorCode::
+                patch_failure);
+    REQUIRE(result.error().plan_index == 1);
+    REQUIRE(result.error().patch_error.has_value());
+    REQUIRE(
+        result.error().patch_error->code ==
+        astraea::execution::
+            SceGlobDatPatchErrorCode::
+                unsupported_relocation_type);
+    REQUIRE(
+        result.error().patch_error->relocation_type ==
+        7);
+}
+
+TEST_CASE(
+    "batch GLOB_DAT builder preserves gate-function mismatch at failing index",
+    "[execution][sce-glob-dat][batch]") {
+    const auto gates = make_gate_region();
+    const std::array plans{
+        make_plan(),
+        make_second_plan(),
+    };
+    const std::array<std::uint32_t, 2> slots{
+        1,
+        1,
+    };
+
+    const auto result =
+        astraea::execution::
+            build_synthetic_x86_64_glob_dat_gate_patches(
+                plans,
+                gates,
+                slots);
+
+    REQUIRE_FALSE(result.has_value());
+    REQUIRE(
+        result.error().code ==
+        astraea::execution::
+            SceGlobDatBatchErrorCode::
+                patch_failure);
+    REQUIRE(result.error().plan_index == 1);
+    REQUIRE(result.error().patch_error.has_value());
+    REQUIRE(
+        result.error().patch_error->code ==
+        astraea::execution::
+            SceGlobDatPatchErrorCode::
+                gate_function_mismatch);
+    REQUIRE(
+        result.error().patch_error->
+            expected_function_id ==
+        astraea::execution::HleFunctionId{2});
+    REQUIRE(
+        result.error().patch_error->
+            actual_function_id ==
+        astraea::execution::HleFunctionId{1});
+}
+
+TEST_CASE(
+    "empty GLOB_DAT batch succeeds without gate allocation",
+    "[execution][sce-glob-dat][batch]") {
+    const auto gates = make_gate_region();
+    const std::span<
+        const astraea::execution::
+            SceImportResolutionPlan>
+        plans{};
+    const std::span<const std::uint32_t> slots{};
+
+    const auto result =
+        astraea::execution::
+            build_synthetic_x86_64_glob_dat_gate_patches(
+                plans,
+                gates,
+                slots);
+
+    REQUIRE(result.has_value());
+    REQUIRE(result->empty());
 }
