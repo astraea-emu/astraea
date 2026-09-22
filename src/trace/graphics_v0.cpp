@@ -468,6 +468,39 @@ shader_vector_written_lane_bits(
     return bytes;
 }
 
+[[nodiscard]] std::vector<std::byte>
+shader_vector_written_lane_bits(
+    const astraea::graphics::ShaderVectorAddF32Effect&
+        effect) {
+    const auto lane_count =
+        static_cast<std::size_t>(
+            shader_wave_size_lane_count(
+                effect.wave_size));
+    std::vector<std::byte> bytes;
+    bytes.reserve(lane_count * 4U);
+
+    for (std::size_t lane = 0;
+         lane < lane_count;
+         ++lane) {
+        const auto value =
+            effect.written_values[lane];
+        bytes.push_back(
+            static_cast<std::byte>(
+                value & 0xffU));
+        bytes.push_back(
+            static_cast<std::byte>(
+                (value >> 8U) & 0xffU));
+        bytes.push_back(
+            static_cast<std::byte>(
+                (value >> 16U) & 0xffU));
+        bytes.push_back(
+            static_cast<std::byte>(
+                (value >> 24U) & 0xffU));
+    }
+
+    return bytes;
+}
+
 [[nodiscard]] GraphicsTraceEventResultV0
 size_failure() {
     return GraphicsTraceEventResultV0::failure(
@@ -1382,6 +1415,57 @@ trace_shader_vector_move_execution_v0(
                         u64_field(
                             "source_vgpr",
                             effect.source_vgpr),
+                        u64_field(
+                            "active_lane_mask",
+                            effect.active_lane_mask),
+                        bytes_field(
+                            "written_lane_bits_le",
+                            shader_vector_written_lane_bits(
+                                effect)),
+                    },
+                .diagnostics = {},
+            });
+    } catch (const std::bad_alloc&) {
+        return GraphicsTraceEventResultV0::failure(
+            adapter_error(
+                GraphicsTraceAdapterErrorCodeV0::
+                    host_allocation_failure));
+    } catch (const std::length_error&) {
+        return GraphicsTraceEventResultV0::failure(
+            adapter_error(
+                GraphicsTraceAdapterErrorCodeV0::
+                    host_allocation_failure));
+    }
+}
+
+
+GraphicsTraceEventResultV0
+trace_shader_vector_add_f32_execution_v0(
+    std::uint64_t event_id,
+    const astraea::graphics::ShaderVectorAddF32Effect&
+        effect) {
+    try {
+        return GraphicsTraceEventResultV0::success(
+            TraceEventV0{
+                .id = event_id,
+                .subsystem = "shader.execute",
+                .type = "vector_add_f32_exact",
+                .guest = std::nullopt,
+                .stable =
+                    std::vector<TraceFieldV0>{
+                        u64_field(
+                            "wave_size_lanes",
+                            shader_wave_size_lane_count(
+                                effect.wave_size)),
+                        u64_field(
+                            "destination_vgpr",
+                            effect.destination_vgpr),
+                        u64_field(
+                            "source0_vgpr",
+                            effect.source0_vgpr),
+                        u64_field(
+                            "source1_vgpr",
+                            effect.source1_vgpr),
                         u64_field(
                             "active_lane_mask",
                             effect.active_lane_mask),
