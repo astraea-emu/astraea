@@ -4,7 +4,7 @@ project(
     Astraea
     VERSION 0.0.0
     DESCRIPTION "Verification-first PlayStation 5 compatibility research and emulation project"
-    LANGUAGES CXX
+    LANGUAGES C CXX
 )
 
 option(ASTRAEA_WARNINGS_AS_ERRORS "Treat Astraea compiler warnings as errors" OFF)
@@ -13,6 +13,28 @@ option(ASTRAEA_BUILD_FUZZERS "Build libFuzzer targets when supported" OFF)
 
 include(CTest)
 include(FetchContent)
+
+set(VULKAN_HEADERS_ENABLE_TESTS OFF CACHE BOOL "" FORCE)
+set(VULKAN_HEADERS_ENABLE_INSTALL OFF CACHE BOOL "" FORCE)
+set(VULKAN_HEADERS_ENABLE_MODULE OFF CACHE BOOL "" FORCE)
+FetchContent_Declare(
+    vulkan_headers
+    GIT_REPOSITORY https://github.com/KhronosGroup/Vulkan-Headers.git
+    GIT_TAG v1.4.350
+    GIT_SHALLOW TRUE
+)
+FetchContent_MakeAvailable(vulkan_headers)
+
+set(VOLK_PULL_IN_VULKAN ON CACHE BOOL "" FORCE)
+set(VOLK_INSTALL OFF CACHE BOOL "" FORCE)
+set(VOLK_HEADERS_ONLY OFF CACHE BOOL "" FORCE)
+FetchContent_Declare(
+    volk
+    GIT_REPOSITORY https://github.com/zeux/volk.git
+    GIT_TAG 1.4.350
+    GIT_SHALLOW TRUE
+)
+FetchContent_MakeAvailable(volk)
 
 set(SPIRV_HEADERS_ENABLE_TESTS OFF CACHE BOOL "" FORCE)
 set(SPIRV_HEADERS_ENABLE_INSTALL OFF CACHE BOOL "" FORCE)
@@ -114,6 +136,7 @@ add_library(astraea_core STATIC
     src/graphics/shader_wave_block_execution.cpp
     src/graphics/shader_wave_program_execution.cpp
     src/graphics/spirv_vector_probe.cpp
+    src/graphics/vulkan_vector_probe_execution.cpp
     src/trace/v0.cpp
     src/trace/diff_v0.cpp
     src/trace/graphics_v0.cpp
@@ -143,6 +166,7 @@ target_compile_features(astraea_core PUBLIC cxx_std_23)
 target_link_libraries(astraea_core PRIVATE
     Threads::Threads
     SPIRV-Headers::SPIRV-Headers
+    volk::volk
 )
 astraea_set_project_warnings(astraea_core)
 astraea_enable_sanitizers(astraea_core)

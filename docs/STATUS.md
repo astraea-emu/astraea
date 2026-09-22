@@ -1,9 +1,9 @@
 # Project Status
 
-**Integration gate:** V2 — Host shader generation  
-**State:** V1 complete; first validated SPIR-V backend slice active  
+**Integration gate:** V3 — Actual host GPU execution  
+**State:** V1 and first V2 SPIR-V backend complete; headless Vulkan differential proof active  
 **Repository:** astraea-emu/astraea  
-**Active branch:** `feat/v2-spirv-vector-probe`
+**Active branch:** `feat/v3-vulkan-vector-probe`
 
 ## Complete
 
@@ -70,6 +70,7 @@
 - Corrected self-relative AGC context/shader register-list addressing is complete and five-gate validated (#143/#144).
 - Evidence-backed version-0x18 pixel shader-object preparation and all-write preflight/application are complete and five-gate validated (#145/#147).
 - Owned SCE-profile guest execution of the real `sceAgcCreateShader` import through generic HLE dispatch, guest shader-object preparation, `RAX=0` resume, and controlled exit is complete and five-gate validated (#148/#149). V1 is complete.
+- Deterministic Shader IR -> Vulkan-valid SPIR-V 1.6 register-state compute-probe lowering for NOP/V_MOV_B32/V_ADD_F32/END is complete and five-gate validated (#150/#151). The V2 probe contract is available for real host execution.
 - Public five-gate CI remains the merge requirement:
   - Linux x64
   - Windows x64
@@ -79,12 +80,12 @@
 
 ## Current frontier
 
-1. V1 is complete through #148/#149: an owned SCE-profile guest resolves the exact `sceAgcCreateShader` identity, enters generic HLE dispatch, prepares the evidence-scoped AGC pixel shader object, returns success in RAX, resumes guest code, and exits under control.
-2. #150 is active: lower only the straight-line existing Shader IR vector subset (NOP, V_MOV_B32, exact-profile V_ADD_F32, END) to a deterministic Vulkan-valid SPIR-V compute probe.
-3. The probe ABI is explicitly a register-state compiler/execution harness, not a claim that real PS5 VGPR state is represented by a Vulkan storage buffer.
-4. SPIRV-Headers is pinned to `29981f65241605e08b0ede4cfeb999fe3b723c6a`; SPIRV-Tools is pinned to release `v2026.3` and used through public APIs for Vulkan 1.3 validation/disassembly.
-5. V2 does not call Vulkan, map real AGC descriptors/resources, lower branches/scalar state/EXEC masks, broaden floating-point semantics, or add RDNA2 instructions.
-6. After #150, V3 begins with one headless Vulkan compute execution of the exact probe buffer contract and a bit-for-bit comparison against Astraea's existing interpreter fixture.
+1. V1 is complete through #148/#149.
+2. #150/#151 are complete: Astraea emits deterministic Vulkan-valid SPIR-V for the straight-line existing vector Shader IR probe and records its buffer ABI.
+3. #152 is active: execute that exact V2 module headlessly on Vulkan, dispatch one wave-sized workgroup, read the state buffer back, and compare every word bit-for-bit with the existing Astraea interpreter oracle.
+4. Vulkan compile-time portability uses pinned volk 1.4.350 + Vulkan-Headers v1.4.350; a system Vulkan SDK is not required to configure Astraea.
+5. Linux x64 CI is the mandatory execution proof and uses Mesa Lavapipe software Vulkan. Windows/macOS compile the backend in this slice without requiring a runtime device.
+6. No surfaces, swapchains, real AGC resources, PS5 command decoding, new RDNA2 instructions, or broader Shader IR semantics are pulled into #152.
 
 ## SCE metadata boundary
 
@@ -143,27 +144,23 @@ PS5-specific assumptions require documented evidence.
 
 ## Next action
 
-Finish #150 on `feat/v2-spirv-vector-probe`.
+Finish #152 on `feat/v3-vulkan-vector-probe`.
 
-The first host-shader profile is deliberately narrow:
+The required proof is:
 
-- GLCompute entry point targeting Vulkan 1.3 / SPIR-V 1.6;
-- wave32 or wave64 local size;
-- descriptor set 0 / binding 0 storage buffer of uint32 words;
-- flattened probe layout `vgpr_index * wave_size + lane`;
-- local invocation index as the lane selector;
-- V_MOV_B32 as exact uint32 load/store;
-- V_ADD_F32 as uint32 load -> float bitcast -> OpFAdd -> uint32 bitcast -> store;
-- all lanes active; partial EXEC is unsupported;
-- exactly one terminal END;
-- every unsupported existing Shader IR operation fails explicitly.
+`existing controlled RDNA2 -> Shader IR -> V2 SPIR-V -> headless Vulkan compute -> readback == Astraea interpreter`.
 
-Production code emits deterministic binary words directly using public SPIRV-Headers enums. Tests validate and disassemble with public SPIRV-Tools APIs under `SPV_ENV_VULKAN_1_3`.
+The V3 executor owns only:
+- dynamic Vulkan loading;
+- one compute-capable device/queue;
+- one host-visible storage buffer;
+- one descriptor set;
+- one compute pipeline;
+- one command buffer and dispatch;
+- explicit GPU-write -> host-read synchronization;
+- non-coherent flush/invalidate handling;
+- exact readback.
 
-Merge only the exact immutable PR head after Linux x64, Windows x64, macOS ARM64, Linux ASan+UBSan, and Linux Clang fuzz smoke are green.
+Linux CI must force Lavapipe and fail if the execution proof is skipped or differs. Other existing CI platforms must compile the same backend and remain green.
 
-After merge, V3 is the next dependency:
-
-`same controlled vector Shader IR -> V2 SPIR-V -> headless Vulkan compute -> readback -> bit-for-bit comparison with Astraea interpreter state`.
-
-Do not pull broader shader/resource/command semantics forward until that concrete workload requires them.
+After this proof, do not broaden Vulkan generically. Pull forward the smallest evidence-backed PS5 frontend/resource dependency required to replace the synthetic register-state probe with real guest graphics state.

@@ -41,7 +41,7 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install --yes ninja-build
+          sudo apt-get install --yes ninja-build mesa-vulkan-drivers libvulkan1
 
       - name: Ensure Ninja (macOS)
         if: runner.os == 'macOS'
@@ -54,7 +54,17 @@ jobs:
       - name: Build
         run: cmake --build --preset ${{ matrix.preset }}
 
+      - name: Test (Linux Vulkan proof)
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          export ASTRAEA_REQUIRE_VULKAN_PROBE=1
+          export VK_DRIVER_FILES="$(find /usr/share/vulkan/icd.d -maxdepth 1 -name 'lvp_icd*.json' -print -quit)"
+          test -n "$VK_DRIVER_FILES"
+          ctest --preset ${{ matrix.preset }}
+
       - name: Test
+        if: runner.os != 'Linux'
         run: ctest --preset ${{ matrix.preset }}
 
   sanitizers:
