@@ -379,6 +379,20 @@ TEST_CASE(
 TEST_CASE(
     "AGC shader container rejects malformed ELF envelope before AGC semantics",
     "[graphics][agc][shader-container][malformed]") {
+    SECTION("wrong ELF version") {
+        auto bytes =
+            make_synthetic_agc_shader();
+        write_little_endian<std::uint32_t>(
+            bytes,
+            20,
+            2);
+        REQUIRE(
+            parse_error(bytes) ==
+            astraea::graphics::
+                AgcShaderContainerErrorCode::
+                    unsupported_elf_version);
+    }
+
     SECTION("wrong machine") {
         auto bytes =
             make_synthetic_agc_shader();
@@ -462,8 +476,25 @@ TEST_CASE(
 }
 
 TEST_CASE(
-    "AGC shader container requires exactly one header and text section",
+    "AGC shader container requires exactly one file-backed header and text section",
     "[graphics][agc][shader-container][sections]") {
+    SECTION("named shader section is not PROGBITS") {
+        auto bytes =
+            make_synthetic_agc_shader();
+        const auto text_record =
+            kSectionTableOffset +
+            2 * kSectionHeaderSize;
+        write_little_endian<std::uint32_t>(
+            bytes,
+            text_record + 4,
+            8);
+        REQUIRE(
+            parse_error(bytes) ==
+            astraea::graphics::
+                AgcShaderContainerErrorCode::
+                    invalid_shader_section_type);
+    }
+
     SECTION("missing header") {
         auto bytes =
             make_synthetic_agc_shader();
