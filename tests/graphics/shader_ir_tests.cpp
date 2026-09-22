@@ -10,6 +10,7 @@
 namespace {
 
 constexpr std::uint32_t kSoppBase = 0xbf800000U;
+constexpr std::uint32_t kSop1Base = 0xbe800000U;
 
 constexpr std::uint32_t make_sopp(
     std::uint8_t opcode,
@@ -28,6 +29,16 @@ astraea::graphics::Rdna2Instruction decode_one(
             0);
     REQUIRE(result.has_value());
     return std::move(result).value();
+}
+
+constexpr std::uint32_t make_sop1(
+    std::uint8_t opcode,
+    std::uint8_t destination,
+    std::uint8_t source) {
+    return kSop1Base |
+           (static_cast<std::uint32_t>(destination) << 16U) |
+           (static_cast<std::uint32_t>(opcode) << 8U) |
+           static_cast<std::uint32_t>(source);
 }
 
 }  // namespace
@@ -340,4 +351,88 @@ TEST_CASE(
         astraea::graphics::shader_ir_semantically_equal(
             left,
             right));
+}
+
+
+TEST_CASE(
+    "RDNA2 S_MOV_B32 lowers plain SGPR move",
+    "[graphics][shader-ir][sop1][mov]") {
+    const auto emission =
+        astraea::graphics::lower_rdna2_to_shader_ir(
+            decode_one(make_sop1(3, 5, 17)));
+
+    REQUIRE(
+        std::holds_alternative<
+            astraea::graphics::ShaderIrScalarMove32>(
+            emission.operation));
+    const auto& move =
+        std::get<
+            astraea::graphics::ShaderIrScalarMove32>(
+            emission.operation);
+    REQUIRE(move.destination.index == 5);
+    REQUIRE(move.source.index == 17);
+}
+
+TEST_CASE(
+    "S_MOV_B32 non-SGPR operands remain typed unsupported",
+    "[graphics][shader-ir][sop1][mov]") {
+    constexpr std::array<std::uint8_t, 3> sources{
+        106,
+        128,
+        255,
+    };
+
+    for (const auto source : sources) {
+        const auto emission =
+            astraea::graphics::lower_rdna2_to_shader_ir(
+                decode_one(make_sop1(3, 5, source)));
+
+        REQUIRE(
+            std::holds_alternative<
+                astraea::graphics::ShaderIrUnsupported>(
+                emission.operation));
+        REQUIRE(
+            std::get<
+                astraea::graphics::ShaderIrUnsupported>(
+                emission.operation)
+                .reason ==
+            astraea::graphics::
+                ShaderIrUnsupportedReason::
+                    unsupported_scalar_operand);
+    }
+
+    const auto special_destination =
+        astraea::graphics::lower_rdna2_to_shader_ir(
+            decode_one(make_sop1(3, 106, 5)));
+    REQUIRE(
+        std::get<
+            astraea::graphics::ShaderIrUnsupported>(
+            special_destination.operation)
+            .reason ==
+        astraea::graphics::
+            ShaderIrUnsupportedReason::
+                unsupported_scalar_operand);
+}
+
+TEST_CASE(
+    "S_MOV_B32 SGPR identity participates in semantic equality",
+    "[graphics][shader-ir][sop1][mov]") {
+    const auto left =
+        astraea::graphics::lower_rdna2_to_shader_ir(
+            decode_one(make_sop1(3, 5, 17)));
+    const auto same =
+        astraea::graphics::lower_rdna2_to_shader_ir(
+            decode_one(make_sop1(3, 5, 17)));
+    const auto different =
+        astraea::graphics::lower_rdna2_to_shader_ir(
+            decode_one(make_sop1(3, 6, 17)));
+
+    REQUIRE(
+        astraea::graphics::shader_ir_semantically_equal(
+            left,
+            same));
+    REQUIRE_FALSE(
+        astraea::graphics::shader_ir_semantically_equal(
+            left,
+            different));
 }
