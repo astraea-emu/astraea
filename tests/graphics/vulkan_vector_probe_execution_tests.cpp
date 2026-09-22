@@ -4,8 +4,10 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstdlib>
+#include <optional>
 #include <span>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 #include <astraea/graphics/shader_cfg.hpp>
