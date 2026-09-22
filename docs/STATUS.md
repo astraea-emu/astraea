@@ -1,9 +1,9 @@
 # Project Status
 
 **Milestone:** M4 — Platform/HLE expansion  
-**State:** Imported-function relocation orchestration baseline complete; bounded RDNA2 stream, validated Shader IR CFG/Trace, scalar move execution, conditional branch predicates, and CFG successor selection complete; one-block scalar Shader IR execution in progress  
+**State:** Imported-function relocation orchestration baseline complete; bounded RDNA2 stream, validated Shader IR CFG/Trace, scalar control primitives, and one-block scalar execution complete; bounded multi-block scalar CFG execution in progress  
 **Repository:** astraea-emu/astraea  
-**Active branch:** `feat/m4-shader-scalar-block-execution`
+**Active branch:** `feat/m4-shader-bounded-scalar-runner`
 
 ## Complete
 
@@ -57,6 +57,7 @@
 - Explicit generic RDNA2 scalar state executes the already-typed S_MOV_B32/B64 Shader IR forms with traced SGPR write effects (#112).
 - Explicit SCC/VCC/EXEC state evaluates the six already-typed conditional branch predicates with traced taken/not-taken decisions (#114).
 - Validated Shader CFG exits select deterministic successor/terminal outcomes from matching conditional decisions (#117).
+- One validated Shader IR basic block executes supported scalar moves/control and returns its successor with explicit non-atomic failure progress (#119).
 - Public five-gate CI remains the merge requirement:
   - Linux x64
   - Windows x64
@@ -66,9 +67,9 @@
 
 ## Current frontier
 
-1. #119 — execute exactly one validated Shader IR basic block against explicit generic scalar state — in progress on this branch.
-2. One-block execution may apply supported scalar moves, evaluate a terminating conditional branch after prior emissions, and return the already-validated successor; failures after earlier writes are explicitly non-atomic and report completed progress.
-3. Cross-block PC execution/loop walking, vector lanes/VGPR execution, floating-point mode semantics, barriers/waits, Sony shader container/launch ABI, SPIR-V/Vulkan lowering, new opcodes, and `R_X86_64_RELATIVE` remain separately deferred.
+1. #121 — repeatedly compose the one-block scalar executor from CFG entry under an explicit maximum block-execution budget — in progress on this branch.
+2. The bounded runner follows only validated returned successors, preserves ordered block execution history, terminates on no-successor, and reports exact aggregate progress on budget or downstream block failure.
+3. Unbounded execution, vector lanes/VGPR execution, floating-point mode semantics, barriers/waits, Sony shader container/launch ABI, SPIR-V/Vulkan lowering, new opcodes, and `R_X86_64_RELATIVE` remain separately deferred.
 
 ## SCE metadata boundary
 
@@ -127,7 +128,7 @@ PS5-specific assumptions require documented evidence.
 
 ## Next action
 
-Validate #119 across the five-gate matrix. Execute only one selected CFG block,
-apply currently-supported scalar moves in source order, evaluate its conditional
-exit after prior emissions, return the validated successor, and keep target-block
-execution, loop walking, vector execution, PS5 launch ABI, SPIR-V, and Vulkan out.
+Validate #121 across the five-gate matrix. Repeatedly execute validated scalar
+CFG blocks from entry under a hard caller-supplied block budget, retain ordered
+block history and aggregate progress, and keep vector execution, PS5 launch ABI,
+SPIR-V, and Vulkan semantics out.
