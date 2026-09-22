@@ -1,5 +1,6 @@
 #include <astraea/graphics/shader_control_execution.hpp>
 
+#include <limits>
 #include <new>
 #include <stdexcept>
 #include <utility>
@@ -43,6 +44,22 @@ namespace {
         .completed_emission_count = completed_emission_count,
         .scalar_error = std::move(scalar_error),
         .successor_error = std::move(successor_error),
+    };
+}
+
+[[nodiscard]] ShaderScalarProgramExecutionError program_error(
+    ShaderScalarProgramExecutionErrorCode code,
+    std::size_t next_block_index,
+    std::size_t completed_block_count,
+    std::size_t completed_emission_count,
+    std::optional<ShaderScalarBlockExecutionError> block_error =
+        std::nullopt) noexcept {
+    return ShaderScalarProgramExecutionError{
+        .code = code,
+        .next_block_index = next_block_index,
+        .completed_block_count = completed_block_count,
+        .completed_emission_count = completed_emission_count,
+        .block_error = std::move(block_error),
     };
 }
 
@@ -538,6 +555,150 @@ execute_shader_scalar_block(
             .successor =
                 std::move(successor).value(),
         });
+}
+
+ShaderScalarProgramExecutionResult
+run_bounded_shader_scalar_program(
+    const ShaderIrProgram& program,
+    const ShaderControlFlowGraph& graph,
+    ShaderScalarState& state,
+    std::size_t max_block_executions) {
+    if (graph.source_word_count !=
+            program.source_word_count ||
+        graph.emission_count !=
+            program.emissions.size()) {
+        return ShaderScalarProgramExecutionResult::failure(
+            program_error(
+                ShaderScalarProgramExecutionErrorCode::
+                    graph_program_mismatch,
+                0,
+                0,
+                0));
+    }
+
+    if (program.emissions.empty()) {
+        if (!graph.blocks.empty()) {
+            return ShaderScalarProgramExecutionResult::failure(
+                program_error(
+                    ShaderScalarProgramExecutionErrorCode::
+                        graph_program_mismatch,
+                    0,
+                    0,
+                    0));
+        }
+
+        return ShaderScalarProgramExecutionResult::success(
+            ShaderScalarProgramExecution{
+                .executed_block_count = 0,
+                .executed_emission_count = 0,
+                .block_executions = {},
+            });
+    }
+
+    if (graph.blocks.empty()) {
+        return ShaderScalarProgramExecutionResult::failure(
+            program_error(
+                ShaderScalarProgramExecutionErrorCode::
+                    missing_entry_block,
+                0,
+                0,
+                0));
+    }
+
+    std::vector<ShaderScalarBlockExecution>
+        block_executions;
+    try {
+        block_executions.reserve(
+            max_block_executions);
+    } catch (const std::bad_alloc&) {
+        return ShaderScalarProgramExecutionResult::failure(
+            program_error(
+                ShaderScalarProgramExecutionErrorCode::
+                    host_allocation_failure,
+                0,
+                0,
+                0));
+    } catch (const std::length_error&) {
+        return ShaderScalarProgramExecutionResult::failure(
+            program_error(
+                ShaderScalarProgramExecutionErrorCode::
+                    host_allocation_failure,
+                0,
+                0,
+                0));
+    }
+
+    std::size_t current_block_index = 0;
+    std::size_t completed_emission_count = 0;
+
+    while (true) {
+        if (block_executions.size() >=
+            max_block_executions) {
+            return ShaderScalarProgramExecutionResult::failure(
+                program_error(
+                    ShaderScalarProgramExecutionErrorCode::
+                        execution_budget_exhausted,
+                    current_block_index,
+                    block_executions.size(),
+                    completed_emission_count));
+        }
+
+        auto block_execution =
+            execute_shader_scalar_block(
+                program,
+                graph,
+                current_block_index,
+                state);
+        if (!block_execution.has_value()) {
+            return ShaderScalarProgramExecutionResult::failure(
+                program_error(
+                    ShaderScalarProgramExecutionErrorCode::
+                        block_execution_failure,
+                    current_block_index,
+                    block_executions.size(),
+                    completed_emission_count,
+                    block_execution.error()));
+        }
+
+        auto completed_block =
+            std::move(block_execution).value();
+        const auto block_emission_count =
+            completed_block.executed_emission_count;
+        const auto successor =
+            completed_block.successor.edge;
+
+        if (block_emission_count >
+            std::numeric_limits<std::size_t>::max() -
+                completed_emission_count) {
+            return ShaderScalarProgramExecutionResult::failure(
+                program_error(
+                    ShaderScalarProgramExecutionErrorCode::
+                        block_execution_failure,
+                    current_block_index,
+                    block_executions.size(),
+                    completed_emission_count));
+        }
+
+        completed_emission_count +=
+            block_emission_count;
+        block_executions.push_back(
+            std::move(completed_block));
+
+        if (!successor.has_value()) {
+            return ShaderScalarProgramExecutionResult::success(
+                ShaderScalarProgramExecution{
+                    .executed_block_count =
+                        block_executions.size(),
+                    .executed_emission_count =
+                        completed_emission_count,
+                    .block_executions =
+                        std::move(block_executions),
+                });
+        }
+
+        current_block_index =
+            successor->target_block_index;
+    }
 }
 
 }  // namespace astraea::graphics
