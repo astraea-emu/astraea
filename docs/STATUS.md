@@ -1,9 +1,9 @@
 # Project Status
 
 **Milestone:** M4 — Platform/HLE expansion  
-**State:** Imported-function relocation orchestration baseline complete; bounded scalar Shader IR program execution and explicit V_MOV_B32 wave execution complete; mixed scalar/vector one-block execution in progress  
+**State:** Imported-function relocation orchestration baseline complete; bounded scalar Shader IR programs, explicit V_MOV_B32 wave execution, and mixed scalar/vector one-block execution complete; bounded mixed-wave program execution in progress  
 **Repository:** astraea-emu/astraea  
-**Active branch:** `feat/m4-shader-mixed-block-execution`
+**Active branch:** `feat/m4-shader-wave-program-execution`
 
 ## Complete
 
@@ -60,6 +60,7 @@
 - One validated Shader IR basic block executes supported scalar operations and returns its selected successor with explicit non-atomic failure progress (#119).
 - Bounded cross-block scalar Shader IR programs execute from an explicit entry block under an explicit block-execution budget (#122).
 - Plain VGPR-to-VGPR V_MOV_B32 executes over explicit caller-selected wave32/wave64 state under EXEC with traced lane-write semantics (#124).
+- One validated Shader IR block composes scalar moves and plain V_MOV_B32 effects in source order with explicit mixed-state failure progress (#126).
 - Public five-gate CI remains the merge requirement:
   - Linux x64
   - Windows x64
@@ -69,9 +70,9 @@
 
 ## Current frontier
 
-1. #126 — execute one validated Shader IR block with scalar moves and plain `V_MOV_B32` effects composed in source order — in progress on this branch.
-2. Mixed execution uses explicit caller-supplied scalar and vector state, preserves ordered typed effects and non-atomic progress, and still stops after selecting one validated successor.
-3. Mixed cross-block execution, `V_ADD_F32`, floating-point mode semantics, barriers/waits, Sony shader container/launch ABI, SPIR-V/Vulkan lowering, new opcodes, and `R_X86_64_RELATIVE` remain separately deferred.
+1. #128 — execute bounded mixed scalar/vector Shader IR programs by repeatedly composing the validated mixed one-block executor — in progress on this branch.
+2. Entry block and maximum block-execution count are explicit caller inputs; scalar/vector state mutations and completed mixed-block provenance remain non-atomic and observable on later failure or budget exhaustion.
+3. `V_ADD_F32`, floating-point mode semantics, barriers/waits, Sony shader container/launch ABI, SPIR-V/Vulkan lowering, new opcodes, and `R_X86_64_RELATIVE` remain separately deferred.
 
 ## SCE metadata boundary
 
@@ -130,7 +131,7 @@ PS5-specific assumptions require documented evidence.
 
 ## Next action
 
-Validate #126 across the five-gate matrix. Compose existing scalar moves and plain
-`V_MOV_B32` execution inside one validated block with one ordered typed effect stream,
-then return the already-validated successor without executing it. Keep V_ADD_F32,
-PS5 launch ABI, SPIR-V, and Vulkan semantics out.
+Validate #128 across the five-gate matrix. Repeatedly compose the merged mixed
+scalar/V_MOV_B32 block executor across already-selected CFG successors under an
+explicit entry block and block-execution budget, preserving completed mixed-block
+progress on failure while keeping V_ADD_F32, PS5 launch ABI, SPIR-V, and Vulkan out.
