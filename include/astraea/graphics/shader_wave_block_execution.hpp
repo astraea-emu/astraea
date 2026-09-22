@@ -15,7 +15,8 @@ namespace astraea::graphics {
 using ShaderWaveExecutionEffect =
     std::variant<
         ShaderScalarExecutionEffect,
-        ShaderVectorMove32Effect>;
+        ShaderVectorMove32Effect,
+        ShaderVectorAddF32Effect>;
 
 struct ShaderWaveBlockExecution {
     std::size_t block_index = 0;
@@ -66,7 +67,8 @@ using ShaderWaveBlockExecutionResult =
 //
 // Earlier successful writes remain applied if a later emission fails. The
 // selected successor is returned but never executed. This function does not
-// infer PS5 launch state or execute V_ADD_F32, memory, barriers, or waits.
+// infer PS5 launch state, broaden V_ADD_F32 beyond the exact mode-independent
+// subset, or execute memory, barriers, or waits.
 [[nodiscard]] ShaderWaveBlockExecutionResult
 execute_shader_wave_block(
     const ShaderIrProgram& program,
