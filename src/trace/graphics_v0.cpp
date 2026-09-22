@@ -179,6 +179,24 @@ namespace {
         Rdna2InstructionKind::s_branch:
         return "s_branch";
     case astraea::graphics::
+        Rdna2InstructionKind::s_cbranch_scc0:
+        return "s_cbranch_scc0";
+    case astraea::graphics::
+        Rdna2InstructionKind::s_cbranch_scc1:
+        return "s_cbranch_scc1";
+    case astraea::graphics::
+        Rdna2InstructionKind::s_cbranch_vccz:
+        return "s_cbranch_vccz";
+    case astraea::graphics::
+        Rdna2InstructionKind::s_cbranch_vccnz:
+        return "s_cbranch_vccnz";
+    case astraea::graphics::
+        Rdna2InstructionKind::s_cbranch_execz:
+        return "s_cbranch_execz";
+    case astraea::graphics::
+        Rdna2InstructionKind::s_cbranch_execnz:
+        return "s_cbranch_execnz";
+    case astraea::graphics::
         Rdna2InstructionKind::unknown_sopp_opcode:
         return "unknown_sopp_opcode";
     case astraea::graphics::
@@ -187,6 +205,26 @@ namespace {
     }
 
     return "unsupported_encoding";
+}
+
+[[nodiscard]] std::string shader_ir_branch_condition_text(
+    astraea::graphics::ShaderIrBranchCondition condition) {
+    switch (condition) {
+    case astraea::graphics::ShaderIrBranchCondition::scc_zero:
+        return "scc_zero";
+    case astraea::graphics::ShaderIrBranchCondition::scc_one:
+        return "scc_one";
+    case astraea::graphics::ShaderIrBranchCondition::vcc_zero:
+        return "vcc_zero";
+    case astraea::graphics::ShaderIrBranchCondition::vcc_nonzero:
+        return "vcc_nonzero";
+    case astraea::graphics::ShaderIrBranchCondition::exec_zero:
+        return "exec_zero";
+    case astraea::graphics::ShaderIrBranchCondition::exec_nonzero:
+        return "exec_nonzero";
+    }
+
+    return "scc_zero";
 }
 
 [[nodiscard]] std::string shader_ir_reason_text(
@@ -546,6 +584,22 @@ trace_shader_ir_v0(
                         astraea::graphics::
                             ShaderIrRelativeBranch>) {
                     event_type = "relative_branch";
+                    stable.push_back(
+                        text_field(
+                            "byte_delta",
+                            std::to_string(
+                                operation.byte_delta)));
+                } else if constexpr (
+                    std::is_same_v<
+                        Operation,
+                        astraea::graphics::
+                            ShaderIrConditionalRelativeBranch>) {
+                    event_type = "conditional_relative_branch";
+                    stable.push_back(
+                        text_field(
+                            "condition",
+                            shader_ir_branch_condition_text(
+                                operation.condition)));
                     stable.push_back(
                         text_field(
                             "byte_delta",
