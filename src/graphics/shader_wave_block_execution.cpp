@@ -215,6 +215,32 @@ execute_shader_wave_block(
             continue;
         }
 
+        if (std::holds_alternative<
+                ShaderIrVectorAddF32>(
+                operation)) {
+            auto vector_result =
+                execute_shader_vector_add_f32_exact_operation(
+                    operation,
+                    scalar_state,
+                    vector_state);
+            if (!vector_result.has_value()) {
+                return ShaderWaveBlockExecutionResult::failure(
+                    wave_block_error(
+                        ShaderWaveBlockExecutionErrorCode::
+                            vector_execution_failure,
+                        block_index,
+                        emission_index,
+                        completed_emission_count,
+                        std::nullopt,
+                        vector_result.error()));
+            }
+
+            effects.emplace_back(
+                std::move(vector_result).value());
+            ++completed_emission_count;
+            continue;
+        }
+
         return ShaderWaveBlockExecutionResult::failure(
             wave_block_error(
                 ShaderWaveBlockExecutionErrorCode::
