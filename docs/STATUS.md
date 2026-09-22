@@ -1,9 +1,9 @@
 # Project Status
 
 **Milestone:** M4 — Platform/HLE expansion  
-**State:** Imported-function relocation orchestration baseline complete; bounded RDNA2 stream, validated Shader IR CFG/Trace, scalar moves, branch predicates, CFG successor selection, and one-block scalar execution complete; bounded cross-block scalar Shader IR execution in progress  
+**State:** Imported-function relocation orchestration baseline complete; bounded scalar Shader IR program execution complete; first explicit wave/VGPR execution slice in progress  
 **Repository:** astraea-emu/astraea  
-**Active branch:** `feat/m4-shader-scalar-program-execution`
+**Active branch:** `feat/m4-shader-vector-move-execution`
 
 ## Complete
 
@@ -58,6 +58,7 @@
 - Explicit SCC/VCC/EXEC state evaluates the six already-typed conditional branch predicates with traced taken/not-taken decisions (#114).
 - Validated Shader CFG exits select deterministic successor/terminal outcomes from matching conditional decisions (#117).
 - One validated Shader IR basic block executes supported scalar operations and returns its selected successor with explicit non-atomic failure progress (#119).
+- Bounded cross-block scalar Shader IR programs execute from an explicit entry block under an explicit block-execution budget (#122).
 - Public five-gate CI remains the merge requirement:
   - Linux x64
   - Windows x64
@@ -67,9 +68,9 @@
 
 ## Current frontier
 
-1. #122 — execute a bounded sequence of validated Shader IR scalar basic blocks by following only already-selected CFG successors — in progress on this branch.
-2. Entry block and maximum block-execution count are explicit caller inputs; backward edges are allowed only within that budget, and errors preserve completed-block provenance plus non-atomic state progress.
-3. Vector lanes/VGPR execution, floating-point mode semantics, barriers/waits, Sony shader container/launch ABI, SPIR-V/Vulkan lowering, new opcodes, and `R_X86_64_RELATIVE` remain separately deferred.
+1. #124 — execute the already-lowered plain VGPR-to-VGPR `V_MOV_B32` over explicit generic wave32/wave64 vector state — in progress on this branch.
+2. Wave size is caller-supplied, EXEC masks active lanes, wave32 ignores EXEC[63:32], and inactive destination lanes remain unchanged; no PS5 launch mode is inferred.
+3. `V_ADD_F32`, floating-point mode semantics, barriers/waits, Sony shader container/launch ABI, SPIR-V/Vulkan lowering, new opcodes, and `R_X86_64_RELATIVE` remain separately deferred.
 
 ## SCE metadata boundary
 
@@ -128,7 +129,7 @@ PS5-specific assumptions require documented evidence.
 
 ## Next action
 
-Validate #122 across the five-gate matrix. Repeatedly compose the existing one-block
-scalar executor across validated CFG successors, require an explicit entry block and
-block-execution budget, preserve completed-block progress on failure/exhaustion, and
-keep vector execution, PS5 launch ABI, SPIR-V, and Vulkan semantics out.
+Validate #124 across the five-gate matrix. Execute only the existing plain VGPR-to-
+VGPR `V_MOV_B32` across explicitly selected wave32/wave64 lane state under EXEC,
+trace the resulting semantic lane writes, and keep V_ADD_F32, PS5 launch ABI, SPIR-V,
+and Vulkan semantics out.

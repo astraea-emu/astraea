@@ -12,6 +12,7 @@
 #include <astraea/graphics/shader_control_execution.hpp>
 #include <astraea/graphics/shader_ir.hpp>
 #include <astraea/graphics/shader_scalar_execution.hpp>
+#include <astraea/graphics/shader_vector_execution.hpp>
 #include <astraea/trace/v0.hpp>
 
 namespace astraea::trace {
@@ -93,5 +94,10 @@ trace_shader_cfg_successor_selection_v0(
     std::uint64_t event_id,
     std::size_t source_block_index,
     const astraea::graphics::ShaderCfgSuccessorSelection& selection);
+
+[[nodiscard]] GraphicsTraceEventResultV0
+trace_shader_vector_move_execution_v0(
+    std::uint64_t event_id,
+    const astraea::graphics::ShaderVectorMove32Effect& effect);
 
 }  // namespace astraea::trace
