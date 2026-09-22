@@ -470,3 +470,45 @@ TEST_CASE(
         diff->first_divergence->field_name ==
         std::optional<std::string>{"condition"});
 }
+
+
+TEST_CASE(
+    "S_BARRIER Shader IR trace exposes barrier semantics only",
+    "[trace][graphics][v0][barrier]") {
+    const auto ir =
+        astraea::graphics::lower_rdna2_to_shader_ir(
+            decode_one(make_sopp(10, 0x1234)));
+
+    auto event =
+        astraea::trace::trace_shader_ir_v0(
+            92,
+            ir);
+
+    REQUIRE(event.has_value());
+    REQUIRE(event->subsystem == "shader.ir");
+    REQUIRE(event->type == "workgroup_barrier");
+    REQUIRE(event->stable.empty());
+    REQUIRE(event->diagnostics.size() == 2);
+}
+
+TEST_CASE(
+    "S_BARRIER trace equality excludes unused immediate provenance",
+    "[trace][graphics][v0][barrier]") {
+    auto left =
+        astraea::trace::trace_shader_ir_v0(
+            93,
+            astraea::graphics::lower_rdna2_to_shader_ir(
+                decode_one(make_sopp(10, 0x0000))));
+    auto right =
+        astraea::trace::trace_shader_ir_v0(
+            93,
+            astraea::graphics::lower_rdna2_to_shader_ir(
+                decode_one(make_sopp(10, 0x7fff))));
+
+    REQUIRE(left.has_value());
+    REQUIRE(right.has_value());
+
+    require_equivalent(
+        std::move(left).value(),
+        std::move(right).value());
+}

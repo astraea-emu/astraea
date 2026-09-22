@@ -23,8 +23,9 @@ namespace {
 //   7 = S_CBRANCH_VCCNZ
 //   8 = S_CBRANCH_EXECZ
 //   9 = S_CBRANCH_EXECNZ
+//  10 = S_BARRIER
 //
-// Opcode 3 (S_WAKEUP) and later synchronization/control instructions remain
+// Opcode 3 (S_WAKEUP) and later control/synchronization instructions remain
 // intentionally unclassified until their state semantics are separately scoped.
 //
 // This is generic RDNA2 ISA evidence. It is not a PS5 shader launch ABI or
@@ -46,6 +47,7 @@ constexpr std::uint8_t kSoppCbranchVcczOpcode = 6;
 constexpr std::uint8_t kSoppCbranchVccnzOpcode = 7;
 constexpr std::uint8_t kSoppCbranchExeczOpcode = 8;
 constexpr std::uint8_t kSoppCbranchExecnzOpcode = 9;
+constexpr std::uint8_t kSoppBarrierOpcode = 10;
 
 [[nodiscard]] Rdna2DecodeError decode_error(
     Rdna2DecodeErrorCode code,
@@ -100,6 +102,8 @@ constexpr std::uint8_t kSoppCbranchExecnzOpcode = 9;
         return Rdna2InstructionKind::s_cbranch_execz;
     case kSoppCbranchExecnzOpcode:
         return Rdna2InstructionKind::s_cbranch_execnz;
+    case kSoppBarrierOpcode:
+        return Rdna2InstructionKind::s_barrier;
     default:
         return Rdna2InstructionKind::unknown_sopp_opcode;
     }

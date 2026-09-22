@@ -142,6 +142,12 @@ ShaderIrEmission lower_rdna2_to_shader_ir(
         }
         break;
 
+    case Rdna2InstructionKind::s_barrier:
+        if (valid_sopp_source(instruction)) {
+            operation = ShaderIrWorkgroupBarrier{};
+        }
+        break;
+
     case Rdna2InstructionKind::unknown_sopp_opcode:
         if (valid_sopp_source(instruction)) {
             operation =

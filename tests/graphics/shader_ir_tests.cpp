@@ -247,3 +247,53 @@ TEST_CASE(
             exec_zero);
     REQUIRE(branch.byte_delta == -4);
 }
+
+
+TEST_CASE(
+    "RDNA2 S_BARRIER lowers to workgroup barrier Shader IR",
+    "[graphics][shader-ir][barrier]") {
+    const auto emission =
+        astraea::graphics::lower_rdna2_to_shader_ir(
+            decode_one(make_sopp(10, 0x1234)));
+
+    REQUIRE(
+        std::holds_alternative<
+            astraea::graphics::ShaderIrWorkgroupBarrier>(
+            emission.operation));
+    REQUIRE(
+        emission.provenance.source_instruction.kind ==
+        astraea::graphics::Rdna2InstructionKind::s_barrier);
+    REQUIRE(
+        emission.provenance.source_instruction.sopp
+            .has_value());
+    REQUIRE(
+        emission.provenance.source_instruction.sopp->opcode ==
+        10);
+}
+
+TEST_CASE(
+    "S_BARRIER Shader IR semantics exclude unused immediate provenance",
+    "[graphics][shader-ir][barrier]") {
+    const auto left =
+        astraea::graphics::lower_rdna2_to_shader_ir(
+            decode_one(make_sopp(10, 0x0000)));
+    const auto right =
+        astraea::graphics::lower_rdna2_to_shader_ir(
+            decode_one(make_sopp(10, 0x7fff)));
+
+    REQUIRE(
+        left.provenance.source_instruction !=
+        right.provenance.source_instruction);
+    REQUIRE(
+        std::holds_alternative<
+            astraea::graphics::ShaderIrWorkgroupBarrier>(
+            left.operation));
+    REQUIRE(
+        std::holds_alternative<
+            astraea::graphics::ShaderIrWorkgroupBarrier>(
+            right.operation));
+    REQUIRE(
+        astraea::graphics::shader_ir_semantically_equal(
+            left,
+            right));
+}
