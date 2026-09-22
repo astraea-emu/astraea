@@ -1,9 +1,9 @@
 # Project Status
 
 **Milestone:** M4 — Platform/HLE expansion  
-**State:** First owned PS5/SCE-oriented synthetic prototype and multi-import proof complete; batch exact SCE PLT import planning in progress  
+**State:** First owned PS5/SCE-oriented synthetic prototype and multi-import proof complete; batch JUMP_SLOT patch construction in progress  
 **Repository:** astraea-emu/astraea  
-**Active branch:** `feat/m4-sce-plt-batch-plan`
+**Active branch:** `feat/m4-sce-jump-slot-batch-patch`
 
 ## Complete
 
@@ -32,6 +32,7 @@
 - Owned SCE-profile ELF end-to-end import/execution proof through HLE exit 42 (#57).
 - Evidence-backed SCE program-header vocabulary classification/preservation (#61).
 - Two exact SCE imports executed end to end through write → HLE resume → exit (#63).
+- Ordered exact SCE PLT import batch planning with indexed typed failures (#66).
 - Public five-gate CI remains the merge requirement:
   - Linux x64
   - Windows x64
@@ -41,8 +42,8 @@
 
 ## Current frontier
 
-1. #66 — batch already-supported exact SCE PLT import planning in table order — in progress on this branch.
-2. The batch layer stops before relocation semantics, gate selection, patch construction, or guest-memory writes.
+1. #68 — batch already-supported x86-64 JUMP_SLOT patch construction with explicit gate slots — in progress on this branch.
+2. The batch layer stops before guest-memory writes and introduces no automatic gate allocation.
 3. `R_X86_64_RELATIVE` remains deferred until Astraea has an explicit, evidence-backed image load-base / load-bias contract.
 
 ## SCE metadata boundary
@@ -102,7 +103,6 @@ PS5-specific assumptions require documented evidence.
 
 ## Next action
 
-Validate #66 across the five-gate matrix. The batch planner must preserve table
-order and raw relocation evidence, stop deterministically at the first indexed typed
-failure, and remain free of gate selection, patching, guest-memory writes, or new
-relocation semantics.
+Validate #68 across the five-gate matrix. The batch patch builder must preserve
+plan order, require explicit one-to-one gate slots, stop at the first indexed typed
+patch failure, and remain free of gate allocation or guest-memory writes.

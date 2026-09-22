@@ -5,6 +5,8 @@
 #include <cstddef>
 #include <cstdint>
 #include <optional>
+#include <span>
+#include <vector>
 
 #include <astraea/core/result.hpp>
 #include <astraea/execution/hle.hpp>
@@ -51,6 +53,28 @@ using SceJumpSlotPatchResult =
         SceJumpSlotPatch,
         SceJumpSlotPatchError>;
 
+enum class SceJumpSlotBatchErrorCode {
+    gate_slot_count_mismatch,
+    patch_failure,
+    host_allocation_failure,
+};
+
+struct SceJumpSlotBatchError {
+    SceJumpSlotBatchErrorCode code =
+        SceJumpSlotBatchErrorCode::host_allocation_failure;
+    std::size_t plan_index = 0;
+    std::size_t plan_count = 0;
+    std::size_t gate_slot_count = 0;
+    std::optional<SceJumpSlotPatchError> patch_error;
+
+    auto operator<=>(const SceJumpSlotBatchError&) const = default;
+};
+
+using SceJumpSlotPatchesResult =
+    astraea::core::Result<
+        std::vector<SceJumpSlotPatch>,
+        SceJumpSlotBatchError>;
+
 // Builds, but does not apply, the portable bytes for a synthetic x86-64
 // R_X86_64_JUMP_SLOT relocation.
 //
@@ -61,5 +85,14 @@ build_synthetic_x86_64_jump_slot_patch(
     const SceImportResolutionPlan& plan,
     const SyntheticGateRegion& gate_region,
     std::uint32_t gate_slot) noexcept;
+
+// Builds an ordered batch of already-supported JUMP_SLOT patches. Gate slots
+// are caller-selected explicitly and must be one-to-one with the input plans.
+// No gate allocation or guest-memory writes occur here.
+[[nodiscard]] SceJumpSlotPatchesResult
+build_synthetic_x86_64_jump_slot_patches(
+    std::span<const SceImportResolutionPlan> plans,
+    const SyntheticGateRegion& gate_region,
+    std::span<const std::uint32_t> gate_slots);
 
 }  // namespace astraea::execution

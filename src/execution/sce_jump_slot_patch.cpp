@@ -2,6 +2,9 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <new>
+#include <stdexcept>
+#include <utility>
 
 namespace astraea::execution {
 namespace {
@@ -123,6 +126,80 @@ build_synthetic_x86_64_jump_slot_patch(
                     gate_address->value()),
             .raw_addend = plan.raw_addend,
         });
+}
+
+SceJumpSlotPatchesResult
+build_synthetic_x86_64_jump_slot_patches(
+    std::span<const SceImportResolutionPlan> plans,
+    const SyntheticGateRegion& gate_region,
+    std::span<const std::uint32_t> gate_slots) {
+    if (plans.size() != gate_slots.size()) {
+        return SceJumpSlotPatchesResult::failure(
+            SceJumpSlotBatchError{
+                .code =
+                    SceJumpSlotBatchErrorCode::
+                        gate_slot_count_mismatch,
+                .plan_index = 0,
+                .plan_count = plans.size(),
+                .gate_slot_count = gate_slots.size(),
+                .patch_error = std::nullopt,
+            });
+    }
+
+    std::size_t index = 0;
+    try {
+        std::vector<SceJumpSlotPatch> patches;
+        patches.reserve(plans.size());
+
+        for (; index < plans.size(); ++index) {
+            auto patch =
+                build_synthetic_x86_64_jump_slot_patch(
+                    plans[index],
+                    gate_region,
+                    gate_slots[index]);
+            if (!patch.has_value()) {
+                return SceJumpSlotPatchesResult::failure(
+                    SceJumpSlotBatchError{
+                        .code =
+                            SceJumpSlotBatchErrorCode::
+                                patch_failure,
+                        .plan_index = index,
+                        .plan_count = plans.size(),
+                        .gate_slot_count =
+                            gate_slots.size(),
+                        .patch_error = patch.error(),
+                    });
+            }
+
+            patches.push_back(
+                std::move(patch.value()));
+        }
+
+        return SceJumpSlotPatchesResult::success(
+            std::move(patches));
+    } catch (const std::bad_alloc&) {
+        return SceJumpSlotPatchesResult::failure(
+            SceJumpSlotBatchError{
+                .code =
+                    SceJumpSlotBatchErrorCode::
+                        host_allocation_failure,
+                .plan_index = index,
+                .plan_count = plans.size(),
+                .gate_slot_count = gate_slots.size(),
+                .patch_error = std::nullopt,
+            });
+    } catch (const std::length_error&) {
+        return SceJumpSlotPatchesResult::failure(
+            SceJumpSlotBatchError{
+                .code =
+                    SceJumpSlotBatchErrorCode::
+                        host_allocation_failure,
+                .plan_index = index,
+                .plan_count = plans.size(),
+                .gate_slot_count = gate_slots.size(),
+                .patch_error = std::nullopt,
+            });
+    }
 }
 
 }  // namespace astraea::execution
