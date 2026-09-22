@@ -398,6 +398,18 @@ namespace {
     return "linear_fallthrough";
 }
 
+[[nodiscard]] std::uint64_t shader_scalar_write_width_bits(
+    astraea::graphics::ShaderScalarWriteWidth width) noexcept {
+    switch (width) {
+    case astraea::graphics::ShaderScalarWriteWidth::bits32:
+        return 32U;
+    case astraea::graphics::ShaderScalarWriteWidth::bits64:
+        return 64U;
+    }
+
+    return 32U;
+}
+
 [[nodiscard]] GraphicsTraceEventResultV0
 size_failure() {
     return GraphicsTraceEventResultV0::failure(
@@ -1122,6 +1134,56 @@ trace_shader_cfg_edge_v0(
                             "target_block_index",
                             target_block_index),
                     },
+                .diagnostics = {},
+            });
+    } catch (const std::bad_alloc&) {
+        return GraphicsTraceEventResultV0::failure(
+            adapter_error(
+                GraphicsTraceAdapterErrorCodeV0::
+                    host_allocation_failure));
+    } catch (const std::length_error&) {
+        return GraphicsTraceEventResultV0::failure(
+            adapter_error(
+                GraphicsTraceAdapterErrorCodeV0::
+                    host_allocation_failure));
+    }
+}
+
+GraphicsTraceEventResultV0
+trace_shader_scalar_execution_v0(
+    std::uint64_t event_id,
+    const astraea::graphics::ShaderScalarExecutionEffect&
+        effect) {
+    try {
+        std::vector<TraceFieldV0> stable{
+            u64_field(
+                "destination_first_sgpr",
+                effect.first_destination_sgpr),
+            u64_field(
+                "write_width_bits",
+                shader_scalar_write_width_bits(
+                    effect.width)),
+            u64_field(
+                "written_value0_bits",
+                effect.written_values[0]),
+        };
+
+        if (effect.width ==
+            astraea::graphics::ShaderScalarWriteWidth::
+                bits64) {
+            stable.push_back(
+                u64_field(
+                    "written_value1_bits",
+                    effect.written_values[1]));
+        }
+
+        return GraphicsTraceEventResultV0::success(
+            TraceEventV0{
+                .id = event_id,
+                .subsystem = "shader.execute",
+                .type = "scalar_write",
+                .guest = std::nullopt,
+                .stable = std::move(stable),
                 .diagnostics = {},
             });
     } catch (const std::bad_alloc&) {
