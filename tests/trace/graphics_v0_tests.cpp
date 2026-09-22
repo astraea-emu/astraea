@@ -2,6 +2,7 @@
 #include <astraea/graphics/packet.hpp>
 #include <astraea/graphics/rdna2_decoder.hpp>
 #include <astraea/graphics/shader_cfg.hpp>
+#include <astraea/graphics/shader_control_execution.hpp>
 #include <astraea/graphics/shader_ir.hpp>
 #include <astraea/graphics/shader_scalar_execution.hpp>
 #include <astraea/trace/diff_v0.hpp>
@@ -1771,4 +1772,84 @@ TEST_CASE(
         diff->first_divergence->field_name ==
         std::optional<std::string>{
             "written_value0_bits"});
+}
+
+
+TEST_CASE(
+    "branch decision Trace v0 exposes typed predicate outcome",
+    "[trace][graphics][v0][shader-execution][branch]") {
+    astraea::graphics::ShaderScalarState state{};
+    state.exec = 0x100000000ULL;
+
+    const auto decision =
+        astraea::graphics::
+            evaluate_shader_branch_condition(
+                astraea::graphics::
+                    ShaderIrBranchCondition::exec_nonzero,
+                state);
+
+    auto event =
+        astraea::trace::
+            trace_shader_branch_decision_v0(
+                127,
+                decision);
+
+    REQUIRE(event.has_value());
+    REQUIRE(event->subsystem == "shader.execute");
+    REQUIRE(
+        event->type ==
+        "conditional_branch_decision");
+    REQUIRE_FALSE(event->guest.has_value());
+    REQUIRE(event->stable.size() == 2);
+    REQUIRE(event->stable[0].name == "condition");
+    REQUIRE(
+        std::get<std::string>(
+            event->stable[0].value) ==
+        "exec_nonzero");
+    REQUIRE(event->stable[1].name == "taken");
+    REQUIRE(
+        std::get<bool>(
+            event->stable[1].value));
+    REQUIRE(event->diagnostics.empty());
+}
+
+TEST_CASE(
+    "branch decision outcome participates in trace divergence",
+    "[trace][graphics][v0][shader-execution][branch][diff]") {
+    const auto make_event =
+        [](std::uint64_t vcc) {
+            astraea::graphics::ShaderScalarState state{};
+            state.vcc = vcc;
+
+            const auto decision =
+                astraea::graphics::
+                    evaluate_shader_branch_condition(
+                        astraea::graphics::
+                            ShaderIrBranchCondition::
+                                vcc_zero,
+                        state);
+
+            auto event =
+                astraea::trace::
+                    trace_shader_branch_decision_v0(
+                        128,
+                        decision);
+            REQUIRE(event.has_value());
+            return std::move(event).value();
+        };
+
+    auto diff =
+        astraea::trace::diff_trace_v0(
+            document(make_event(0)),
+            document(make_event(1)));
+
+    REQUIRE(diff.has_value());
+    REQUIRE_FALSE(diff->equivalent);
+    REQUIRE(
+        diff->first_divergence->kind ==
+        astraea::trace::TraceDivergenceKindV0::
+            stable_field_value_mismatch);
+    REQUIRE(
+        diff->first_divergence->field_name ==
+        std::optional<std::string>{"taken"});
 }
