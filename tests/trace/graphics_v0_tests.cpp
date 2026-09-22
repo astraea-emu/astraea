@@ -661,16 +661,120 @@ TEST_CASE(
     REQUIRE(event.has_value());
     REQUIRE(event->subsystem == "shader.ir");
     REQUIRE(event->type == "scalar_move_32");
-    REQUIRE(event->stable.size() == 2);
+    REQUIRE(event->stable.size() == 3);
     REQUIRE(event->stable[0].name == "destination_sgpr");
     REQUIRE(
         std::get<std::uint64_t>(
             event->stable[0].value) == 5);
-    REQUIRE(event->stable[1].name == "source_sgpr");
+    REQUIRE(event->stable[1].name == "source_kind");
+    REQUIRE(
+        std::get<std::string>(
+            event->stable[1].value) == "sgpr");
+    REQUIRE(event->stable[2].name == "source_sgpr");
     REQUIRE(
         std::get<std::uint64_t>(
-            event->stable[1].value) == 17);
+            event->stable[2].value) == 17);
     REQUIRE(event->diagnostics.size() == 2);
+}
+
+TEST_CASE(
+    "S_MOV_B32 inline integer trace exposes signed semantic value",
+    "[trace][graphics][v0][sop1][mov][inline-integer]") {
+    const auto ir =
+        astraea::graphics::lower_rdna2_to_shader_ir(
+            decode_one(make_sop1(3, 5, 208)));
+
+    auto event =
+        astraea::trace::trace_shader_ir_v0(
+            105,
+            ir);
+
+    REQUIRE(event.has_value());
+    REQUIRE(event->subsystem == "shader.ir");
+    REQUIRE(event->type == "scalar_move_32");
+    REQUIRE(event->stable.size() == 3);
+    REQUIRE(event->stable[0].name == "destination_sgpr");
+    REQUIRE(
+        std::get<std::uint64_t>(
+            event->stable[0].value) == 5);
+    REQUIRE(event->stable[1].name == "source_kind");
+    REQUIRE(
+        std::get<std::string>(
+            event->stable[1].value) == "inline_integer");
+    REQUIRE(
+        event->stable[2].name ==
+        "source_inline_integer");
+    REQUIRE(
+        std::get<std::string>(
+            event->stable[2].value) == "-16");
+    REQUIRE(event->diagnostics.size() == 2);
+}
+
+TEST_CASE(
+    "S_MOV_B32 inline integer value participates in trace divergence",
+    "[trace][graphics][v0][sop1][mov][inline-integer]") {
+    auto left =
+        astraea::trace::trace_shader_ir_v0(
+            106,
+            astraea::graphics::lower_rdna2_to_shader_ir(
+                decode_one(make_sop1(3, 5, 128))));
+    auto right =
+        astraea::trace::trace_shader_ir_v0(
+            106,
+            astraea::graphics::lower_rdna2_to_shader_ir(
+                decode_one(make_sop1(3, 5, 129))));
+
+    REQUIRE(left.has_value());
+    REQUIRE(right.has_value());
+
+    auto diff =
+        astraea::trace::diff_trace_v0(
+            document(std::move(left).value()),
+            document(std::move(right).value()));
+
+    REQUIRE(diff.has_value());
+    REQUIRE_FALSE(diff->equivalent);
+    REQUIRE(
+        diff->first_divergence->kind ==
+        astraea::trace::TraceDivergenceKindV0::
+            stable_field_value_mismatch);
+    REQUIRE(
+        diff->first_divergence->field_name ==
+        std::optional<std::string>{
+            "source_inline_integer"});
+}
+
+TEST_CASE(
+    "S_MOV_B32 source kind participates in trace divergence",
+    "[trace][graphics][v0][sop1][mov][inline-integer]") {
+    auto left =
+        astraea::trace::trace_shader_ir_v0(
+            107,
+            astraea::graphics::lower_rdna2_to_shader_ir(
+                decode_one(make_sop1(3, 5, 0))));
+    auto right =
+        astraea::trace::trace_shader_ir_v0(
+            107,
+            astraea::graphics::lower_rdna2_to_shader_ir(
+                decode_one(make_sop1(3, 5, 128))));
+
+    REQUIRE(left.has_value());
+    REQUIRE(right.has_value());
+
+    auto diff =
+        astraea::trace::diff_trace_v0(
+            document(std::move(left).value()),
+            document(std::move(right).value()));
+
+    REQUIRE(diff.has_value());
+    REQUIRE_FALSE(diff->equivalent);
+    REQUIRE(
+        diff->first_divergence->kind ==
+        astraea::trace::TraceDivergenceKindV0::
+            stable_field_value_mismatch);
+    REQUIRE(
+        diff->first_divergence->field_name ==
+        std::optional<std::string>{"source_kind"});
 }
 
 TEST_CASE(
