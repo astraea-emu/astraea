@@ -1,9 +1,9 @@
 # Project Status
 
 **Milestone:** M4 — Platform/HLE expansion  
-**State:** Multi-import JUMP_SLOT path productionized; evidence-backed x86-64 GLOB_DAT gate patching in progress  
+**State:** Multi-import JUMP_SLOT path productionized; validated x86-64 GLOB_DAT guest-memory application in progress  
 **Repository:** astraea-emu/astraea  
-**Active branch:** `feat/m4-sce-glob-dat-gate-patch`
+**Active branch:** `feat/m4-sce-glob-dat-apply`
 
 ## Complete
 
@@ -35,6 +35,7 @@
 - Ordered exact SCE PLT import batch planning with indexed typed failures (#66).
 - Ordered validated x86-64 JUMP_SLOT batch patch construction with explicit gate slots (#68).
 - Ordered non-atomic JUMP_SLOT batch application with indexed partial-failure reporting (#70).
+- Evidence-backed x86-64 R_X86_64_GLOB_DAT imported-function gate patch construction (#72).
 - Public five-gate CI remains the merge requirement:
   - Linux x64
   - Windows x64
@@ -44,8 +45,8 @@
 
 ## Current frontier
 
-1. #72 — add the evidence-backed x86-64 R_X86_64_GLOB_DAT imported-function gate patch builder — in progress on this branch.
-2. GLOB_DAT is limited to general RELA type 6 and explicit exact-SCE import → HLE gate resolution; raw addend remains evidence only.
+1. #74 — apply an already-validated GLOB_DAT gate patch through GuestMemoryAccess — in progress on this branch.
+2. Application writes only the validated 8-byte patch and preserves exact GuestMemoryError failures.
 3. `R_X86_64_RELATIVE` remains deferred until Astraea has an explicit, evidence-backed image load-base / load-bias contract.
 
 ## SCE metadata boundary
@@ -105,7 +106,6 @@ PS5-specific assumptions require documented evidence.
 
 ## Next action
 
-Validate #72 across the five-gate matrix. The GLOB_DAT builder must require
-an existing general RELA plan with raw type 6, an explicitly selected matching
-HLE gate, emit exactly S as an 8-byte little-endian value, and never apply the
-raw addend or broaden into arbitrary data-symbol or load-bias semantics.
+Validate #74 across the five-gate matrix. GLOB_DAT application must write exactly
+the already-built 8-byte patch through GuestMemoryAccess, return patch provenance,
+and preserve unavailable/read-only/unmapped GuestMemoryError values exactly.
