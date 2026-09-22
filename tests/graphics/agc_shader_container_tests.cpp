@@ -292,24 +292,24 @@ TEST_CASE(
     REQUIRE(result.has_value());
     REQUIRE(result->elf_type == 2);
     REQUIRE(result->elf_machine == 224);
-    REQUIRE(result->header_magic == 0x34333231U);
-    REQUIRE(result->header_version == 7);
-    REQUIRE(result->declared_header_size == kHeaderSize);
+    REQUIRE(result->shader.header_magic == 0x34333231U);
+    REQUIRE(result->shader.header_version == 7);
+    REQUIRE(result->shader.declared_header_size == kHeaderSize);
     REQUIRE(
-        result->declared_shader_text_size ==
+        result->shader.declared_shader_text_size ==
         kTextSize);
-    REQUIRE(result->program_type.raw == 1);
+    REQUIRE(result->shader.program_type.raw == 1);
     REQUIRE(
-        result->program_type.known ==
+        result->shader.program_type.known ==
         std::optional<
             astraea::graphics::AgcShaderStage>{
             astraea::graphics::AgcShaderStage::
                 pixel});
-    REQUIRE(result->program_byte_size == 8);
-    REQUIRE(result->trailer_sl00_byte_size == 4);
-    REQUIRE(result->rdna2_words.size() == 2);
-    REQUIRE(result->rdna2_words[0] == 0xbf800000U);
-    REQUIRE(result->rdna2_words[1] == 0xbf810000U);
+    REQUIRE(result->shader.program_byte_size == 8);
+    REQUIRE(result->shader.trailer_sl00_byte_size == 4);
+    REQUIRE(result->shader.rdna2_words.size() == 2);
+    REQUIRE(result->shader.rdna2_words[0] == 0xbf800000U);
+    REQUIRE(result->shader.rdna2_words[1] == 0xbf810000U);
     REQUIRE(
         result->shader_header_section.section_index ==
         1);
@@ -326,11 +326,29 @@ TEST_CASE(
         result->container_bytes ==
         bytes);
     REQUIRE(
-        result->shader_header_bytes.size() ==
+        result->shader.shader_header_bytes.size() ==
         kHeaderSize);
     REQUIRE(
-        result->shader_text_bytes.size() ==
+        result->shader.shader_text_bytes.size() ==
         kTextSize);
+}
+
+TEST_CASE(
+    "AGC container delegates raw header and text semantics to the canonical runtime parser",
+    "[graphics][agc][shader-container][shader-binary]") {
+    const auto container =
+        astraea::graphics::
+            parse_agc_shader_container(
+                make_synthetic_agc_shader());
+    REQUIRE(container.has_value());
+
+    const auto direct =
+        astraea::graphics::
+            parse_agc_shader_binary(
+                container->shader.shader_header_bytes,
+                container->shader.shader_text_bytes);
+    REQUIRE(direct.has_value());
+    REQUIRE(direct.value() == container->shader);
 }
 
 TEST_CASE(
@@ -344,9 +362,9 @@ TEST_CASE(
             parse_agc_shader_container(bytes);
 
     REQUIRE(result.has_value());
-    REQUIRE(result->program_type.raw == 0x7f);
+    REQUIRE(result->shader.program_type.raw == 0x7f);
     REQUIRE_FALSE(
-        result->program_type.known.has_value());
+        result->shader.program_type.known.has_value());
 }
 
 TEST_CASE(
@@ -361,7 +379,7 @@ TEST_CASE(
     const auto program =
         astraea::graphics::
             lower_rdna2_stream_to_shader_ir(
-                container->rdna2_words);
+                container->shader.rdna2_words);
 
     REQUIRE(program.has_value());
     REQUIRE(program->source_word_count == 2);
