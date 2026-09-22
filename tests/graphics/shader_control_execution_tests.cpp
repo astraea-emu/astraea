@@ -1093,3 +1093,347 @@ TEST_CASE(
         REQUIRE(state == before);
     }
 }
+
+
+TEST_CASE(
+    "bounded scalar runner treats empty program as zero-block termination",
+    "[graphics][shader-execution][program][bounded]") {
+    const astraea::graphics::ShaderIrProgram program{};
+    const auto graph =
+        astraea::graphics::
+            build_shader_control_flow_graph(program);
+    REQUIRE(graph.has_value());
+
+    astraea::graphics::ShaderScalarState state{};
+    state.sgprs[0] = 0x12345678U;
+    const auto before = state;
+
+    const auto result =
+        astraea::graphics::
+            run_bounded_shader_scalar_program(
+                program,
+                graph.value(),
+                state,
+                0);
+
+    REQUIRE(result.has_value());
+    REQUIRE(result->executed_block_count == 0);
+    REQUIRE(result->executed_emission_count == 0);
+    REQUIRE(result->block_executions.empty());
+    REQUIRE(state == before);
+}
+
+TEST_CASE(
+    "bounded scalar runner follows unconditional CFG and skips unreachable source block",
+    "[graphics][shader-execution][program][bounded][branch]") {
+    const std::array<std::uint32_t, 5> words{
+        make_sop1(3, 1, 129),
+        make_sopp(2, 1),
+        make_sop1(3, 2, 130),
+        make_sop1(3, 3, 131),
+        make_sopp(1, 0),
+    };
+    const auto program =
+        astraea::graphics::
+            lower_rdna2_stream_to_shader_ir(words);
+    REQUIRE(program.has_value());
+    const auto graph =
+        astraea::graphics::
+            build_shader_control_flow_graph(
+                program.value());
+    REQUIRE(graph.has_value());
+    REQUIRE(graph->blocks.size() == 3);
+
+    astraea::graphics::ShaderScalarState state{};
+    const auto result =
+        astraea::graphics::
+            run_bounded_shader_scalar_program(
+                program.value(),
+                graph.value(),
+                state,
+                4);
+
+    REQUIRE(result.has_value());
+    REQUIRE(result->executed_block_count == 2);
+    REQUIRE(result->executed_emission_count == 4);
+    REQUIRE(result->block_executions.size() == 2);
+    REQUIRE(result->block_executions[0].block_index == 0);
+    REQUIRE(result->block_executions[1].block_index == 2);
+    REQUIRE(state.sgprs[1] == 1U);
+    REQUIRE(state.sgprs[2] == 0U);
+    REQUIRE(state.sgprs[3] == 3U);
+}
+
+TEST_CASE(
+    "bounded scalar runner follows both conditional paths",
+    "[graphics][shader-execution][program][bounded][conditional]") {
+    const std::array<std::uint32_t, 4> words{
+        make_sopp(5, 1),
+        make_sop1(3, 4, 129),
+        make_sop1(3, 5, 130),
+        make_sopp(1, 0),
+    };
+    const auto program =
+        astraea::graphics::
+            lower_rdna2_stream_to_shader_ir(words);
+    REQUIRE(program.has_value());
+    const auto graph =
+        astraea::graphics::
+            build_shader_control_flow_graph(
+                program.value());
+    REQUIRE(graph.has_value());
+    REQUIRE(graph->blocks.size() == 3);
+
+    SECTION("fallthrough path") {
+        astraea::graphics::ShaderScalarState state{};
+        state.scc = false;
+
+        const auto result =
+            astraea::graphics::
+                run_bounded_shader_scalar_program(
+                    program.value(),
+                    graph.value(),
+                    state,
+                    4);
+
+        REQUIRE(result.has_value());
+        REQUIRE(result->executed_block_count == 3);
+        REQUIRE(result->block_executions[0].block_index == 0);
+        REQUIRE(result->block_executions[1].block_index == 1);
+        REQUIRE(result->block_executions[2].block_index == 2);
+        REQUIRE(state.sgprs[4] == 1U);
+        REQUIRE(state.sgprs[5] == 2U);
+    }
+
+    SECTION("taken path") {
+        astraea::graphics::ShaderScalarState state{};
+        state.scc = true;
+
+        const auto result =
+            astraea::graphics::
+                run_bounded_shader_scalar_program(
+                    program.value(),
+                    graph.value(),
+                    state,
+                    3);
+
+        REQUIRE(result.has_value());
+        REQUIRE(result->executed_block_count == 2);
+        REQUIRE(result->block_executions[0].block_index == 0);
+        REQUIRE(result->block_executions[1].block_index == 2);
+        REQUIRE(state.sgprs[4] == 0U);
+        REQUIRE(state.sgprs[5] == 2U);
+    }
+}
+
+TEST_CASE(
+    "bounded scalar runner stops a self-loop at the explicit block budget",
+    "[graphics][shader-execution][program][bounded][loop]") {
+    const std::array<std::uint32_t, 1> words{
+        make_sopp(2, 0xffffU),
+    };
+    const auto program =
+        astraea::graphics::
+            lower_rdna2_stream_to_shader_ir(words);
+    REQUIRE(program.has_value());
+    const auto graph =
+        astraea::graphics::
+            build_shader_control_flow_graph(
+                program.value());
+    REQUIRE(graph.has_value());
+    REQUIRE(graph->blocks.size() == 1);
+
+    astraea::graphics::ShaderScalarState state{};
+    const auto result =
+        astraea::graphics::
+            run_bounded_shader_scalar_program(
+                program.value(),
+                graph.value(),
+                state,
+                3);
+
+    REQUIRE_FALSE(result.has_value());
+    REQUIRE(
+        result.error().code ==
+        astraea::graphics::
+            ShaderScalarProgramExecutionErrorCode::
+                execution_budget_exhausted);
+    REQUIRE(result.error().next_block_index == 0);
+    REQUIRE(result.error().completed_block_count == 3);
+    REQUIRE(result.error().completed_emission_count == 3);
+    REQUIRE_FALSE(result.error().block_error.has_value());
+}
+
+TEST_CASE(
+    "bounded scalar runner enforces zero budget before first nonempty block",
+    "[graphics][shader-execution][program][bounded][budget]") {
+    const std::array<std::uint32_t, 2> words{
+        make_sop1(3, 6, 132),
+        make_sopp(1, 0),
+    };
+    const auto program =
+        astraea::graphics::
+            lower_rdna2_stream_to_shader_ir(words);
+    REQUIRE(program.has_value());
+    const auto graph =
+        astraea::graphics::
+            build_shader_control_flow_graph(
+                program.value());
+    REQUIRE(graph.has_value());
+
+    astraea::graphics::ShaderScalarState state{};
+    const auto before = state;
+    const auto result =
+        astraea::graphics::
+            run_bounded_shader_scalar_program(
+                program.value(),
+                graph.value(),
+                state,
+                0);
+
+    REQUIRE_FALSE(result.has_value());
+    REQUIRE(
+        result.error().code ==
+        astraea::graphics::
+            ShaderScalarProgramExecutionErrorCode::
+                execution_budget_exhausted);
+    REQUIRE(result.error().next_block_index == 0);
+    REQUIRE(result.error().completed_block_count == 0);
+    REQUIRE(result.error().completed_emission_count == 0);
+    REQUIRE(state == before);
+}
+
+TEST_CASE(
+    "bounded scalar runner forwards downstream block failure after earlier block writes",
+    "[graphics][shader-execution][program][bounded][partial-failure]") {
+    const std::array<std::uint32_t, 4> words{
+        make_sop1(3, 7, 133),
+        make_sopp(2, 0),
+        make_vop1(1, 1, 258),
+        make_sopp(1, 0),
+    };
+    const auto program =
+        astraea::graphics::
+            lower_rdna2_stream_to_shader_ir(words);
+    REQUIRE(program.has_value());
+    const auto graph =
+        astraea::graphics::
+            build_shader_control_flow_graph(
+                program.value());
+    REQUIRE(graph.has_value());
+    REQUIRE(graph->blocks.size() == 2);
+
+    astraea::graphics::ShaderScalarState state{};
+    const auto result =
+        astraea::graphics::
+            run_bounded_shader_scalar_program(
+                program.value(),
+                graph.value(),
+                state,
+                3);
+
+    REQUIRE_FALSE(result.has_value());
+    REQUIRE(
+        result.error().code ==
+        astraea::graphics::
+            ShaderScalarProgramExecutionErrorCode::
+                block_execution_failure);
+    REQUIRE(result.error().next_block_index == 1);
+    REQUIRE(result.error().completed_block_count == 1);
+    REQUIRE(result.error().completed_emission_count == 2);
+    REQUIRE(result.error().block_error.has_value());
+    REQUIRE(
+        result.error().block_error->code ==
+        astraea::graphics::
+            ShaderScalarBlockExecutionErrorCode::
+                unsupported_operation);
+    REQUIRE(result.error().block_error->emission_index == 2);
+    REQUIRE(
+        result.error().block_error->
+            completed_emission_count == 0);
+    REQUIRE(state.sgprs[7] == 5U);
+}
+
+TEST_CASE(
+    "bounded scalar runner forwards malformed entry block before state mutation",
+    "[graphics][shader-execution][program][bounded][validation]") {
+    const std::array<std::uint32_t, 2> words{
+        make_sop1(3, 8, 134),
+        make_sopp(1, 0),
+    };
+    const auto program =
+        astraea::graphics::
+            lower_rdna2_stream_to_shader_ir(words);
+    REQUIRE(program.has_value());
+    auto graph =
+        astraea::graphics::
+            build_shader_control_flow_graph(
+                program.value());
+    REQUIRE(graph.has_value());
+    graph->blocks[0].emission_count = 0;
+
+    astraea::graphics::ShaderScalarState state{};
+    const auto before = state;
+    const auto result =
+        astraea::graphics::
+            run_bounded_shader_scalar_program(
+                program.value(),
+                graph.value(),
+                state,
+                2);
+
+    REQUIRE_FALSE(result.has_value());
+    REQUIRE(
+        result.error().code ==
+        astraea::graphics::
+            ShaderScalarProgramExecutionErrorCode::
+                block_execution_failure);
+    REQUIRE(result.error().next_block_index == 0);
+    REQUIRE(result.error().completed_block_count == 0);
+    REQUIRE(result.error().completed_emission_count == 0);
+    REQUIRE(result.error().block_error.has_value());
+    REQUIRE(
+        result.error().block_error->code ==
+        astraea::graphics::
+            ShaderScalarBlockExecutionErrorCode::
+                invalid_block_extent);
+    REQUIRE(state == before);
+}
+
+TEST_CASE(
+    "bounded scalar runner rejects graph program mismatch before mutation",
+    "[graphics][shader-execution][program][bounded][validation]") {
+    const std::array<std::uint32_t, 1> words{
+        make_sopp(1, 0),
+    };
+    const auto program =
+        astraea::graphics::
+            lower_rdna2_stream_to_shader_ir(words);
+    REQUIRE(program.has_value());
+    auto graph =
+        astraea::graphics::
+            build_shader_control_flow_graph(
+                program.value());
+    REQUIRE(graph.has_value());
+    ++graph->emission_count;
+
+    astraea::graphics::ShaderScalarState state{};
+    state.sgprs[0] = 42U;
+    const auto before = state;
+
+    const auto result =
+        astraea::graphics::
+            run_bounded_shader_scalar_program(
+                program.value(),
+                graph.value(),
+                state,
+                2);
+
+    REQUIRE_FALSE(result.has_value());
+    REQUIRE(
+        result.error().code ==
+        astraea::graphics::
+            ShaderScalarProgramExecutionErrorCode::
+                graph_program_mismatch);
+    REQUIRE(state == before);
+}
