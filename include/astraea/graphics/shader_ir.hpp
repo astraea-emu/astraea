@@ -55,6 +55,19 @@ struct ShaderIrWaitCount {
     auto operator<=>(const ShaderIrWaitCount&) const = default;
 };
 
+struct ShaderIrVgpr {
+    std::uint8_t index = 0;
+
+    auto operator<=>(const ShaderIrVgpr&) const = default;
+};
+
+struct ShaderIrVectorMove32 {
+    ShaderIrVgpr destination;
+    ShaderIrVgpr source;
+
+    auto operator<=>(const ShaderIrVectorMove32&) const = default;
+};
+
 struct ShaderIrSgpr {
     std::uint8_t index = 0;
 
@@ -120,7 +133,9 @@ struct ShaderIrScalarMove64 {
 enum class ShaderIrUnsupportedReason {
     unknown_sopp_opcode,
     unknown_sop1_opcode,
+    unknown_vop1_opcode,
     unsupported_scalar_operand,
+    unsupported_vector_operand,
     unsupported_encoding,
     invalid_decoded_instruction,
 };
@@ -142,6 +157,7 @@ using ShaderIrOperation =
         ShaderIrWaitCount,
         ShaderIrScalarMove32,
         ShaderIrScalarMove64,
+        ShaderIrVectorMove32,
         ShaderIrUnsupported>;
 
 struct ShaderIrProvenance {
