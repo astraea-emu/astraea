@@ -9,6 +9,8 @@
 namespace {
 
 constexpr std::uint32_t kSoppBase = 0xbf800000U;
+constexpr std::uint32_t kSop1Base = 0xbe800000U;
+constexpr std::uint32_t kVop1Base = 0x7e000000U;
 
 constexpr std::uint32_t make_sopp(
     std::uint8_t opcode,
@@ -16,6 +18,26 @@ constexpr std::uint32_t make_sopp(
     return kSoppBase |
            (static_cast<std::uint32_t>(opcode) << 16U) |
            static_cast<std::uint32_t>(simm16);
+}
+
+constexpr std::uint32_t make_sop1(
+    std::uint8_t opcode,
+    std::uint8_t destination,
+    std::uint8_t source) {
+    return kSop1Base |
+           (static_cast<std::uint32_t>(destination) << 16U) |
+           (static_cast<std::uint32_t>(opcode) << 8U) |
+           static_cast<std::uint32_t>(source);
+}
+
+constexpr std::uint32_t make_vop1(
+    std::uint8_t opcode,
+    std::uint8_t destination,
+    std::uint16_t source) {
+    return kVop1Base |
+           (static_cast<std::uint32_t>(destination) << 17U) |
+           (static_cast<std::uint32_t>(opcode) << 9U) |
+           static_cast<std::uint32_t>(source);
 }
 
 }  // namespace
@@ -664,4 +686,410 @@ TEST_CASE(
         astraea::graphics::
             ShaderCfgSuccessorErrorCode::
                 unexpected_branch_decision);
+}
+
+
+TEST_CASE(
+    "scalar block execution applies ordered moves and terminates at S_ENDPGM",
+    "[graphics][shader-execution][block][scalar]") {
+    const std::array<std::uint32_t, 3> words{
+        make_sop1(3, 1, 129),
+        make_sop1(3, 2, 1),
+        make_sopp(1, 0),
+    };
+    const auto program =
+        astraea::graphics::
+            lower_rdna2_stream_to_shader_ir(words);
+    REQUIRE(program.has_value());
+    const auto graph =
+        astraea::graphics::
+            build_shader_control_flow_graph(
+                program.value());
+    REQUIRE(graph.has_value());
+
+    astraea::graphics::ShaderScalarState state{};
+    const auto result =
+        astraea::graphics::
+            execute_shader_scalar_block(
+                program.value(),
+                graph.value(),
+                0,
+                state);
+
+    REQUIRE(result.has_value());
+    REQUIRE(result->block_index == 0);
+    REQUIRE(result->executed_emission_count == 3);
+    REQUIRE(result->scalar_write_effects.size() == 2);
+    REQUIRE(state.sgprs[1] == 1U);
+    REQUIRE(state.sgprs[2] == 1U);
+    REQUIRE(
+        result->scalar_write_effects[0]
+            .first_destination_sgpr == 1);
+    REQUIRE(
+        result->scalar_write_effects[1]
+            .first_destination_sgpr == 2);
+    REQUIRE_FALSE(result->branch_decision.has_value());
+    REQUIRE_FALSE(result->successor.edge.has_value());
+}
+
+TEST_CASE(
+    "scalar block execution returns unconditional branch successor without executing it",
+    "[graphics][shader-execution][block][branch]") {
+    const std::array<std::uint32_t, 4> words{
+        make_sop1(3, 4, 130),
+        make_sopp(2, 1),
+        make_sopp(0, 0),
+        make_sopp(1, 0),
+    };
+    const auto program =
+        astraea::graphics::
+            lower_rdna2_stream_to_shader_ir(words);
+    REQUIRE(program.has_value());
+    const auto graph =
+        astraea::graphics::
+            build_shader_control_flow_graph(
+                program.value());
+    REQUIRE(graph.has_value());
+
+    astraea::graphics::ShaderScalarState state{};
+    const auto result =
+        astraea::graphics::
+            execute_shader_scalar_block(
+                program.value(),
+                graph.value(),
+                0,
+                state);
+
+    REQUIRE(result.has_value());
+    REQUIRE(result->executed_emission_count == 2);
+    REQUIRE(result->scalar_write_effects.size() == 1);
+    REQUIRE(state.sgprs[4] == 2U);
+    REQUIRE_FALSE(result->branch_decision.has_value());
+    REQUIRE(result->successor.edge.has_value());
+    REQUIRE(
+        result->successor.edge->kind ==
+        astraea::graphics::ShaderCfgEdgeKind::
+            unconditional_branch);
+    REQUIRE(
+        result->successor.edge->target_block_index == 2);
+    REQUIRE(state.sgprs[0] == 0U);
+}
+
+TEST_CASE(
+    "scalar block execution evaluates conditional exit after prior emissions",
+    "[graphics][shader-execution][block][conditional]") {
+    const std::array<std::uint32_t, 4> words{
+        make_sop1(3, 5, 131),
+        make_sopp(5, 1),
+        make_sopp(0, 0),
+        make_sopp(1, 0),
+    };
+    const auto program =
+        astraea::graphics::
+            lower_rdna2_stream_to_shader_ir(words);
+    REQUIRE(program.has_value());
+    const auto graph =
+        astraea::graphics::
+            build_shader_control_flow_graph(
+                program.value());
+    REQUIRE(graph.has_value());
+
+    SECTION("not taken") {
+        astraea::graphics::ShaderScalarState state{};
+        state.scc = false;
+
+        const auto result =
+            astraea::graphics::
+                execute_shader_scalar_block(
+                    program.value(),
+                    graph.value(),
+                    0,
+                    state);
+
+        REQUIRE(result.has_value());
+        REQUIRE(state.sgprs[5] == 3U);
+        REQUIRE(result->branch_decision.has_value());
+        REQUIRE_FALSE(result->branch_decision->taken);
+        REQUIRE(result->successor.edge.has_value());
+        REQUIRE(
+            result->successor.edge->kind ==
+            astraea::graphics::ShaderCfgEdgeKind::
+                conditional_branch_fallthrough);
+        REQUIRE(
+            result->successor.edge->target_block_index == 1);
+    }
+
+    SECTION("taken") {
+        astraea::graphics::ShaderScalarState state{};
+        state.scc = true;
+
+        const auto result =
+            astraea::graphics::
+                execute_shader_scalar_block(
+                    program.value(),
+                    graph.value(),
+                    0,
+                    state);
+
+        REQUIRE(result.has_value());
+        REQUIRE(state.sgprs[5] == 3U);
+        REQUIRE(result->branch_decision.has_value());
+        REQUIRE(result->branch_decision->taken);
+        REQUIRE(result->successor.edge.has_value());
+        REQUIRE(
+            result->successor.edge->kind ==
+            astraea::graphics::ShaderCfgEdgeKind::
+                conditional_branch_taken);
+        REQUIRE(
+            result->successor.edge->target_block_index == 2);
+    }
+}
+
+TEST_CASE(
+    "scalar block execution returns ordinary linear fallthrough",
+    "[graphics][shader-execution][block][fallthrough]") {
+    const std::array<std::uint32_t, 4> words{
+        make_sopp(0, 0),
+        make_sopp(0, 0),
+        make_sopp(2, 0xfffeU),
+        make_sopp(1, 0),
+    };
+    const auto program =
+        astraea::graphics::
+            lower_rdna2_stream_to_shader_ir(words);
+    REQUIRE(program.has_value());
+    const auto graph =
+        astraea::graphics::
+            build_shader_control_flow_graph(
+                program.value());
+    REQUIRE(graph.has_value());
+
+    astraea::graphics::ShaderScalarState state{};
+    const auto result =
+        astraea::graphics::
+            execute_shader_scalar_block(
+                program.value(),
+                graph.value(),
+                0,
+                state);
+
+    REQUIRE(result.has_value());
+    REQUIRE(result->executed_emission_count == 1);
+    REQUIRE(result->scalar_write_effects.empty());
+    REQUIRE_FALSE(result->branch_decision.has_value());
+    REQUIRE(result->successor.edge.has_value());
+    REQUIRE(
+        result->successor.edge->kind ==
+        astraea::graphics::ShaderCfgEdgeKind::
+            linear_fallthrough);
+    REQUIRE(
+        result->successor.edge->target_block_index == 1);
+}
+
+TEST_CASE(
+    "scalar block execution preserves prior writes on later unsupported operation",
+    "[graphics][shader-execution][block][partial-failure]") {
+    const std::array<std::uint32_t, 3> words{
+        make_sop1(3, 6, 132),
+        make_vop1(1, 1, 258),
+        make_sopp(1, 0),
+    };
+    const auto program =
+        astraea::graphics::
+            lower_rdna2_stream_to_shader_ir(words);
+    REQUIRE(program.has_value());
+    const auto graph =
+        astraea::graphics::
+            build_shader_control_flow_graph(
+                program.value());
+    REQUIRE(graph.has_value());
+
+    astraea::graphics::ShaderScalarState state{};
+    const auto result =
+        astraea::graphics::
+            execute_shader_scalar_block(
+                program.value(),
+                graph.value(),
+                0,
+                state);
+
+    REQUIRE_FALSE(result.has_value());
+    REQUIRE(
+        result.error().code ==
+        astraea::graphics::
+            ShaderScalarBlockExecutionErrorCode::
+                unsupported_operation);
+    REQUIRE(result.error().emission_index == 1);
+    REQUIRE(
+        result.error().completed_emission_count == 1);
+    REQUIRE(state.sgprs[6] == 4U);
+    REQUIRE_FALSE(result.error().scalar_error.has_value());
+    REQUIRE_FALSE(
+        result.error().successor_error.has_value());
+}
+
+TEST_CASE(
+    "scalar block execution forwards scalar execution failure without mutation",
+    "[graphics][shader-execution][block][validation]") {
+    const std::array<std::uint32_t, 2> words{
+        make_sop1(3, 1, 129),
+        make_sopp(1, 0),
+    };
+    auto program =
+        astraea::graphics::
+            lower_rdna2_stream_to_shader_ir(words);
+    REQUIRE(program.has_value());
+
+    program->emissions[0].operation =
+        astraea::graphics::ShaderIrScalarMove32{
+            .destination =
+                astraea::graphics::ShaderIrSgpr{
+                    .index = 106,
+                },
+            .source =
+                astraea::graphics::ShaderIrInlineInteger32{
+                    .value = 7,
+                },
+        };
+
+    const auto graph =
+        astraea::graphics::
+            build_shader_control_flow_graph(
+                program.value());
+    REQUIRE(graph.has_value());
+
+    astraea::graphics::ShaderScalarState state{};
+    state.sgprs[1] = 0xabcdef01U;
+    const auto before = state;
+
+    const auto result =
+        astraea::graphics::
+            execute_shader_scalar_block(
+                program.value(),
+                graph.value(),
+                0,
+                state);
+
+    REQUIRE_FALSE(result.has_value());
+    REQUIRE(
+        result.error().code ==
+        astraea::graphics::
+            ShaderScalarBlockExecutionErrorCode::
+                scalar_execution_failure);
+    REQUIRE(result.error().emission_index == 0);
+    REQUIRE(
+        result.error().completed_emission_count == 0);
+    REQUIRE(result.error().scalar_error.has_value());
+    REQUIRE(
+        result.error().scalar_error->code ==
+        astraea::graphics::
+            ShaderScalarExecutionErrorCode::
+                invalid_sgpr_index);
+    REQUIRE(state == before);
+}
+
+TEST_CASE(
+    "scalar block execution forwards successor failure after completed writes",
+    "[graphics][shader-execution][block][partial-failure]") {
+    const std::array<std::uint32_t, 4> words{
+        make_sop1(3, 7, 133),
+        make_sopp(2, 1),
+        make_sopp(0, 0),
+        make_sopp(1, 0),
+    };
+    const auto program =
+        astraea::graphics::
+            lower_rdna2_stream_to_shader_ir(words);
+    REQUIRE(program.has_value());
+    auto graph =
+        astraea::graphics::
+            build_shader_control_flow_graph(
+                program.value());
+    REQUIRE(graph.has_value());
+
+    graph->blocks[0].successors[0].kind =
+        astraea::graphics::ShaderCfgEdgeKind::
+            linear_fallthrough;
+
+    astraea::graphics::ShaderScalarState state{};
+    const auto result =
+        astraea::graphics::
+            execute_shader_scalar_block(
+                program.value(),
+                graph.value(),
+                0,
+                state);
+
+    REQUIRE_FALSE(result.has_value());
+    REQUIRE(
+        result.error().code ==
+        astraea::graphics::
+            ShaderScalarBlockExecutionErrorCode::
+                cfg_successor_failure);
+    REQUIRE(
+        result.error().completed_emission_count == 2);
+    REQUIRE(state.sgprs[7] == 5U);
+    REQUIRE(result.error().successor_error.has_value());
+    REQUIRE(
+        result.error().successor_error->code ==
+        astraea::graphics::
+            ShaderCfgSuccessorErrorCode::
+                invalid_successor_topology);
+}
+
+TEST_CASE(
+    "scalar block execution rejects structural mismatch before mutation",
+    "[graphics][shader-execution][block][validation]") {
+    const std::array<std::uint32_t, 2> words{
+        make_sop1(3, 8, 134),
+        make_sopp(1, 0),
+    };
+    const auto program =
+        astraea::graphics::
+            lower_rdna2_stream_to_shader_ir(words);
+    REQUIRE(program.has_value());
+    auto graph =
+        astraea::graphics::
+            build_shader_control_flow_graph(
+                program.value());
+    REQUIRE(graph.has_value());
+
+    astraea::graphics::ShaderScalarState state{};
+    const auto before = state;
+
+    SECTION("graph program mismatch") {
+        ++graph->emission_count;
+        const auto result =
+            astraea::graphics::
+                execute_shader_scalar_block(
+                    program.value(),
+                    graph.value(),
+                    0,
+                    state);
+        REQUIRE_FALSE(result.has_value());
+        REQUIRE(
+            result.error().code ==
+            astraea::graphics::
+                ShaderScalarBlockExecutionErrorCode::
+                    graph_program_mismatch);
+        REQUIRE(state == before);
+    }
+
+    SECTION("invalid block extent") {
+        graph->blocks[0].emission_count = 0;
+        const auto result =
+            astraea::graphics::
+                execute_shader_scalar_block(
+                    program.value(),
+                    graph.value(),
+                    0,
+                    state);
+        REQUIRE_FALSE(result.has_value());
+        REQUIRE(
+            result.error().code ==
+            astraea::graphics::
+                ShaderScalarBlockExecutionErrorCode::
+                    invalid_block_extent);
+        REQUIRE(state == before);
+    }
 }
