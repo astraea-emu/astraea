@@ -20,8 +20,9 @@ constexpr std::uint8_t kElfDataLittleEndian = 1;
 constexpr std::uint8_t kElfCurrentVersion = 1;
 constexpr std::uint16_t kEmAmdgpu = 224;
 constexpr std::uint16_t kShnXindex = 0xffff;
-constexpr std::uint32_t kShtNobits = 8;
+constexpr std::uint32_t kShtProgbits = 1;
 constexpr std::uint32_t kShtStrtab = 3;
+constexpr std::uint32_t kShtNobits = 8;
 
 constexpr std::uint32_t kAgcHeaderMagic = 0x34333231U;
 constexpr std::size_t kAgcHeaderMinimumSize = 96;
@@ -327,6 +328,10 @@ parse_agc_shader_container(
         read_little_endian<std::uint16_t>(
             bytes,
             16);
+    const auto elf_version =
+        read_little_endian<std::uint32_t>(
+            bytes,
+            20);
     const auto machine =
         read_little_endian<std::uint16_t>(
             bytes,
@@ -356,6 +361,13 @@ parse_agc_shader_container(
             bytes,
             62);
 
+    if (elf_version != kElfCurrentVersion) {
+        return AgcShaderContainerResult::failure(
+            error(
+                AgcShaderContainerErrorCode::
+                    unsupported_elf_version,
+                20));
+    }
     if (machine != kEmAmdgpu) {
         return AgcShaderContainerResult::failure(
             error(
@@ -543,6 +555,18 @@ parse_agc_shader_container(
         }
 
         if (is_header) {
+            if (section.type != kShtProgbits) {
+                return AgcShaderContainerResult::failure(
+                    error(
+                        AgcShaderContainerErrorCode::
+                            invalid_shader_section_type,
+                        section_header_offset +
+                            static_cast<std::uint64_t>(
+                                index) *
+                                kElf64SectionHeaderSize +
+                            4U,
+                        index));
+            }
             if (shader_header.has_value()) {
                 return AgcShaderContainerResult::failure(
                     error(
@@ -588,6 +612,18 @@ parse_agc_shader_container(
         }
 
         if (is_text) {
+            if (section.type != kShtProgbits) {
+                return AgcShaderContainerResult::failure(
+                    error(
+                        AgcShaderContainerErrorCode::
+                            invalid_shader_section_type,
+                        section_header_offset +
+                            static_cast<std::uint64_t>(
+                                index) *
+                                kElf64SectionHeaderSize +
+                            4U,
+                        index));
+            }
             if (shader_text.has_value()) {
                 return AgcShaderContainerResult::failure(
                     error(
