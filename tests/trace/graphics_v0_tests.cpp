@@ -58,6 +58,22 @@ astraea::graphics::Rdna2Instruction decode_one(
     return std::move(result).value();
 }
 
+astraea::graphics::Rdna2Instruction decode_literal(
+    std::uint32_t word,
+    std::uint32_t literal) {
+    const std::array<std::uint32_t, 2> words{
+        word,
+        literal,
+    };
+
+    auto result =
+        astraea::graphics::decode_rdna2_instruction(
+            words,
+            0);
+    REQUIRE(result.has_value());
+    return std::move(result).value();
+}
+
 astraea::trace::TraceDocumentV0 document(
     astraea::trace::TraceEventV0 event) {
     return astraea::trace::TraceDocumentV0{
@@ -813,27 +829,108 @@ TEST_CASE(
 
 
 TEST_CASE(
-    "S_MOV_B32 literal source remains typed unsupported in Shader IR trace",
-    "[trace][graphics][v0][sop1][mov]") {
+    "S_MOV_B32 literal decode trace exposes value and full raw encoding",
+    "[trace][graphics][v0][sop1][mov][literal]") {
+    const auto instruction =
+        decode_literal(
+            make_sop1(3, 5, 255),
+            0xdeadbeefU);
+
+    auto event =
+        astraea::trace::trace_rdna2_decode_v0(
+            100,
+            instruction);
+
+    REQUIRE(event.has_value());
+    REQUIRE(event->subsystem == "shader.decode");
+    REQUIRE(event->stable.size() == 6);
+    REQUIRE(
+        event->stable[5].name ==
+        "literal_constant_bits");
+    REQUIRE(
+        std::get<std::uint64_t>(
+            event->stable[5].value) ==
+        0xdeadbeefU);
+    REQUIRE(event->diagnostics.size() == 2);
+    REQUIRE(
+        std::get<std::vector<std::byte>>(
+            event->diagnostics[1].value)
+            .size() == 8);
+}
+
+TEST_CASE(
+    "S_MOV_B32 literal Shader IR trace exposes raw 32-bit semantic bits",
+    "[trace][graphics][v0][sop1][mov][literal]") {
     const auto ir =
         astraea::graphics::lower_rdna2_to_shader_ir(
-            decode_one(make_sop1(3, 5, 255)));
+            decode_literal(
+                make_sop1(3, 5, 255),
+                0xdeadbeefU));
 
     auto event =
         astraea::trace::trace_shader_ir_v0(
-            100,
+            108,
             ir);
 
     REQUIRE(event.has_value());
     REQUIRE(event->subsystem == "shader.ir");
-    REQUIRE(event->type == "unsupported");
-    REQUIRE(event->stable.size() == 1);
-    REQUIRE(event->stable[0].name == "reason");
+    REQUIRE(event->type == "scalar_move_32");
+    REQUIRE(event->stable.size() == 3);
+    REQUIRE(event->stable[1].name == "source_kind");
     REQUIRE(
         std::get<std::string>(
-            event->stable[0].value) ==
-        "unsupported_scalar_operand");
+            event->stable[1].value) ==
+        "literal");
+    REQUIRE(
+        event->stable[2].name ==
+        "source_literal_bits");
+    REQUIRE(
+        std::get<std::uint64_t>(
+            event->stable[2].value) ==
+        0xdeadbeefU);
     REQUIRE(event->diagnostics.size() == 2);
+    REQUIRE(
+        std::get<std::vector<std::byte>>(
+            event->diagnostics[1].value)
+            .size() == 8);
+}
+
+TEST_CASE(
+    "S_MOV_B32 literal bits participate in trace divergence",
+    "[trace][graphics][v0][sop1][mov][literal]") {
+    auto left =
+        astraea::trace::trace_shader_ir_v0(
+            109,
+            astraea::graphics::lower_rdna2_to_shader_ir(
+                decode_literal(
+                    make_sop1(3, 5, 255),
+                    0x12345678U)));
+    auto right =
+        astraea::trace::trace_shader_ir_v0(
+            109,
+            astraea::graphics::lower_rdna2_to_shader_ir(
+                decode_literal(
+                    make_sop1(3, 5, 255),
+                    0x12345679U)));
+
+    REQUIRE(left.has_value());
+    REQUIRE(right.has_value());
+
+    auto diff =
+        astraea::trace::diff_trace_v0(
+            document(std::move(left).value()),
+            document(std::move(right).value()));
+
+    REQUIRE(diff.has_value());
+    REQUIRE_FALSE(diff->equivalent);
+    REQUIRE(
+        diff->first_divergence->kind ==
+        astraea::trace::TraceDivergenceKindV0::
+            stable_field_value_mismatch);
+    REQUIRE(
+        diff->first_divergence->field_name ==
+        std::optional<std::string>{
+            "source_literal_bits"});
 }
 
 

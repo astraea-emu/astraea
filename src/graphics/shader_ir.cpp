@@ -42,7 +42,9 @@ namespace {
 }
 
 [[nodiscard]] std::optional<ShaderIrScalarSource32>
-scalar_source32(std::uint8_t selector) noexcept {
+scalar_source32(
+    std::uint8_t selector,
+    std::optional<std::uint32_t> literal_constant) noexcept {
     if (plain_sgpr_selector(selector)) {
         return ShaderIrScalarSource32{
             ShaderIrSgpr{
@@ -66,6 +68,14 @@ scalar_source32(std::uint8_t selector) noexcept {
                     -(
                         static_cast<std::int32_t>(selector) -
                         192),
+            }};
+    }
+
+    if (selector == 255U &&
+        literal_constant.has_value()) {
+        return ShaderIrScalarSource32{
+            ShaderIrLiteral32{
+                .bits = literal_constant.value(),
             }};
     }
 
@@ -236,7 +246,9 @@ ShaderIrEmission lower_rdna2_to_shader_ir(
             const auto source =
                 instruction.sop1->source_selector;
             auto semantic_source =
-                scalar_source32(source);
+                scalar_source32(
+                    source,
+                    instruction.sop1->literal_constant);
             if (plain_sgpr_selector(destination) &&
                 semantic_source.has_value()) {
                 operation =

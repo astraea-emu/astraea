@@ -31,6 +31,21 @@ astraea::graphics::Rdna2Instruction decode_one(
     return std::move(result).value();
 }
 
+astraea::graphics::Rdna2Instruction decode_literal(
+    std::uint32_t word,
+    std::uint32_t literal) {
+    const std::array<std::uint32_t, 2> words{
+        word,
+        literal,
+    };
+    auto result =
+        astraea::graphics::decode_rdna2_instruction(
+            words,
+            0);
+    REQUIRE(result.has_value());
+    return std::move(result).value();
+}
+
 constexpr std::uint32_t make_sop1(
     std::uint8_t opcode,
     std::uint8_t destination,
@@ -434,14 +449,13 @@ TEST_CASE(
 TEST_CASE(
     "S_MOV_B32 unsupported scalar selectors remain typed unsupported",
     "[graphics][shader-ir][sop1][mov]") {
-    constexpr std::array<std::uint8_t, 7> sources{
+    constexpr std::array<std::uint8_t, 6> sources{
         106,
         127,
         209,
         250,
         251,
         254,
-        255,
     };
 
     for (const auto source : sources) {
@@ -488,6 +502,66 @@ TEST_CASE(
     const auto different =
         astraea::graphics::lower_rdna2_to_shader_ir(
             decode_one(make_sop1(3, 6, 17)));
+
+    REQUIRE(
+        astraea::graphics::shader_ir_semantically_equal(
+            left,
+            same));
+    REQUIRE_FALSE(
+        astraea::graphics::shader_ir_semantically_equal(
+            left,
+            different));
+}
+
+TEST_CASE(
+    "S_MOV_B32 literal source lowers as exact 32-bit bits",
+    "[graphics][shader-ir][sop1][mov][literal]") {
+    const auto emission =
+        astraea::graphics::lower_rdna2_to_shader_ir(
+            decode_literal(
+                make_sop1(3, 5, 255),
+                0xdeadbeefU));
+
+    REQUIRE(
+        std::holds_alternative<
+            astraea::graphics::ShaderIrScalarMove32>(
+            emission.operation));
+    const auto& move =
+        std::get<
+            astraea::graphics::ShaderIrScalarMove32>(
+            emission.operation);
+    REQUIRE(move.destination.index == 5);
+    REQUIRE(
+        std::holds_alternative<
+            astraea::graphics::ShaderIrLiteral32>(
+            move.source));
+    REQUIRE(
+        std::get<astraea::graphics::ShaderIrLiteral32>(
+            move.source)
+            .bits == 0xdeadbeefU);
+    REQUIRE(
+        emission.provenance.source_instruction.word_count ==
+        2);
+}
+
+TEST_CASE(
+    "S_MOV_B32 literal bits participate in semantic equality",
+    "[graphics][shader-ir][sop1][mov][literal]") {
+    const auto left =
+        astraea::graphics::lower_rdna2_to_shader_ir(
+            decode_literal(
+                make_sop1(3, 5, 255),
+                0x12345678U));
+    const auto same =
+        astraea::graphics::lower_rdna2_to_shader_ir(
+            decode_literal(
+                make_sop1(3, 5, 255),
+                0x12345678U));
+    const auto different =
+        astraea::graphics::lower_rdna2_to_shader_ir(
+            decode_literal(
+                make_sop1(3, 5, 255),
+                0x12345679U));
 
     REQUIRE(
         astraea::graphics::shader_ir_semantically_equal(
