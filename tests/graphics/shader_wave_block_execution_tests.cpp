@@ -540,3 +540,259 @@ TEST_CASE(
         REQUIRE(vector_state == before_vector);
     }
 }
+
+
+TEST_CASE(
+    "mixed block preserves scalar move vector move and exact add order",
+    "[graphics][shader-execution][wave-block][add-f32][order]") {
+    const std::array<std::uint32_t, 4> words{
+        make_sop1(3, 1, 129),
+        make_vop1(1, 2, 259),
+        make_vop2(3, 4, 258, 5),
+        make_sopp(1, 0),
+    };
+    const auto program =
+        astraea::graphics::
+            lower_rdna2_stream_to_shader_ir(words);
+    REQUIRE(program.has_value());
+    const auto graph =
+        astraea::graphics::
+            build_shader_control_flow_graph(
+                program.value());
+    REQUIRE(graph.has_value());
+
+    astraea::graphics::ShaderScalarState scalar_state{};
+    scalar_state.exec = 1;
+    auto vector_state = wave32_state();
+    vector_state.vgprs[3][0] = 0x3f800000U;
+    vector_state.vgprs[5][0] = 0x3f800000U;
+
+    const auto result =
+        astraea::graphics::execute_shader_wave_block(
+            program.value(),
+            graph.value(),
+            0,
+            scalar_state,
+            vector_state);
+
+    REQUIRE(result.has_value());
+    REQUIRE(result->executed_emission_count == 4);
+    REQUIRE(result->effects.size() == 3);
+    REQUIRE(
+        std::holds_alternative<
+            astraea::graphics::ShaderScalarExecutionEffect>(
+            result->effects[0]));
+    REQUIRE(
+        std::holds_alternative<
+            astraea::graphics::ShaderVectorMove32Effect>(
+            result->effects[1]));
+    REQUIRE(
+        std::holds_alternative<
+            astraea::graphics::ShaderVectorAddF32Effect>(
+            result->effects[2]));
+    REQUIRE(scalar_state.sgprs[1] == 1U);
+    REQUIRE(vector_state.vgprs[2][0] == 0x3f800000U);
+    REQUIRE(vector_state.vgprs[4][0] == 0x40000000U);
+}
+
+TEST_CASE(
+    "mixed block can execute exact add before scalar move",
+    "[graphics][shader-execution][wave-block][add-f32][order]") {
+    const std::array<std::uint32_t, 3> words{
+        make_vop2(3, 4, 258, 3),
+        make_sop1(3, 6, 130),
+        make_sopp(1, 0),
+    };
+    const auto program =
+        astraea::graphics::
+            lower_rdna2_stream_to_shader_ir(words);
+    REQUIRE(program.has_value());
+    const auto graph =
+        astraea::graphics::
+            build_shader_control_flow_graph(
+                program.value());
+    REQUIRE(graph.has_value());
+
+    astraea::graphics::ShaderScalarState scalar_state{};
+    scalar_state.exec = 1;
+    auto vector_state = wave32_state();
+    vector_state.vgprs[2][0] = 0x3f800000U;
+    vector_state.vgprs[3][0] = 0x40000000U;
+
+    const auto result =
+        astraea::graphics::execute_shader_wave_block(
+            program.value(),
+            graph.value(),
+            0,
+            scalar_state,
+            vector_state);
+
+    REQUIRE(result.has_value());
+    REQUIRE(result->effects.size() == 2);
+    REQUIRE(
+        std::holds_alternative<
+            astraea::graphics::ShaderVectorAddF32Effect>(
+            result->effects[0]));
+    REQUIRE(
+        std::holds_alternative<
+            astraea::graphics::ShaderScalarExecutionEffect>(
+            result->effects[1]));
+    REQUIRE(vector_state.vgprs[4][0] == 0x40400000U);
+    REQUIRE(scalar_state.sgprs[6] == 2U);
+}
+
+TEST_CASE(
+    "mixed block evaluates conditional exit after exact add",
+    "[graphics][shader-execution][wave-block][add-f32][conditional]") {
+    const std::array<std::uint32_t, 4> words{
+        make_vop2(3, 4, 258, 3),
+        make_sopp(5, 1),
+        make_sopp(0, 0),
+        make_sopp(1, 0),
+    };
+    const auto program =
+        astraea::graphics::
+            lower_rdna2_stream_to_shader_ir(words);
+    REQUIRE(program.has_value());
+    const auto graph =
+        astraea::graphics::
+            build_shader_control_flow_graph(
+                program.value());
+    REQUIRE(graph.has_value());
+
+    astraea::graphics::ShaderScalarState scalar_state{};
+    scalar_state.exec = 1;
+    scalar_state.scc = true;
+    auto vector_state = wave32_state();
+    vector_state.vgprs[2][0] = 0x3f800000U;
+    vector_state.vgprs[3][0] = 0x3f800000U;
+
+    const auto result =
+        astraea::graphics::execute_shader_wave_block(
+            program.value(),
+            graph.value(),
+            0,
+            scalar_state,
+            vector_state);
+
+    REQUIRE(result.has_value());
+    REQUIRE(vector_state.vgprs[4][0] == 0x40000000U);
+    REQUIRE(result->branch_decision.has_value());
+    REQUIRE(result->branch_decision->taken);
+    REQUIRE(result->successor.edge.has_value());
+    REQUIRE(
+        result->successor.edge->kind ==
+        astraea::graphics::ShaderCfgEdgeKind::
+            conditional_branch_taken);
+    REQUIRE(
+        result->successor.edge->target_block_index == 2);
+}
+
+TEST_CASE(
+    "mixed block exact add obeys wave32 EXEC mask",
+    "[graphics][shader-execution][wave-block][add-f32][exec]") {
+    const std::array<std::uint32_t, 2> words{
+        make_vop2(3, 4, 258, 3),
+        make_sopp(1, 0),
+    };
+    const auto program =
+        astraea::graphics::
+            lower_rdna2_stream_to_shader_ir(words);
+    REQUIRE(program.has_value());
+    const auto graph =
+        astraea::graphics::
+            build_shader_control_flow_graph(
+                program.value());
+    REQUIRE(graph.has_value());
+
+    astraea::graphics::ShaderScalarState scalar_state{};
+    scalar_state.exec =
+        (std::uint64_t{1} << 2U) |
+        (std::uint64_t{1} << 40U);
+    auto vector_state = wave32_state();
+
+    vector_state.vgprs[2][2] = 0x3f800000U;
+    vector_state.vgprs[3][2] = 0x3f800000U;
+    vector_state.vgprs[4][2] = 0xaaaaaaaaU;
+
+    // High wave32 lane would be unsupported if executed, but must be ignored.
+    vector_state.vgprs[2][40] = 0x3f800000U;
+    vector_state.vgprs[3][40] = 0x33800000U;
+    vector_state.vgprs[4][40] = 0xbbbbbbbbU;
+
+    const auto result =
+        astraea::graphics::execute_shader_wave_block(
+            program.value(),
+            graph.value(),
+            0,
+            scalar_state,
+            vector_state);
+
+    REQUIRE(result.has_value());
+    REQUIRE(vector_state.vgprs[4][2] == 0x40000000U);
+    REQUIRE(vector_state.vgprs[4][40] == 0xbbbbbbbbU);
+    const auto& effect =
+        std::get<
+            astraea::graphics::ShaderVectorAddF32Effect>(
+            result->effects[0]);
+    REQUIRE(
+        effect.active_lane_mask ==
+        (std::uint64_t{1} << 2U));
+}
+
+TEST_CASE(
+    "mixed block forwards first unsupported exact-add lane atomically",
+    "[graphics][shader-execution][wave-block][add-f32][partial-failure]") {
+    const std::array<std::uint32_t, 2> words{
+        make_vop2(3, 4, 258, 3),
+        make_sopp(1, 0),
+    };
+    const auto program =
+        astraea::graphics::
+            lower_rdna2_stream_to_shader_ir(words);
+    REQUIRE(program.has_value());
+    const auto graph =
+        astraea::graphics::
+            build_shader_control_flow_graph(
+                program.value());
+    REQUIRE(graph.has_value());
+
+    astraea::graphics::ShaderScalarState scalar_state{};
+    scalar_state.exec = 0x3;
+    auto vector_state = wave32_state();
+
+    vector_state.vgprs[2][0] = 0x3f800000U;
+    vector_state.vgprs[3][0] = 0x3f800000U;
+    vector_state.vgprs[2][1] = 0x3f800000U;
+    vector_state.vgprs[3][1] = 0x33800000U;
+    vector_state.vgprs[4][0] = 0xaaaaaaaaU;
+    vector_state.vgprs[4][1] = 0xbbbbbbbbU;
+    const auto before = vector_state;
+
+    const auto result =
+        astraea::graphics::execute_shader_wave_block(
+            program.value(),
+            graph.value(),
+            0,
+            scalar_state,
+            vector_state);
+
+    REQUIRE_FALSE(result.has_value());
+    REQUIRE(
+        result.error().code ==
+        astraea::graphics::
+            ShaderWaveBlockExecutionErrorCode::
+                vector_execution_failure);
+    REQUIRE(result.error().emission_index == 0);
+    REQUIRE(result.error().completed_emission_count == 0);
+    REQUIRE(result.error().vector_error.has_value());
+    REQUIRE(
+        result.error().vector_error->code ==
+        astraea::graphics::
+            ShaderVectorExecutionErrorCode::
+                unsupported_f32_case);
+    REQUIRE(
+        result.error().vector_error->lane_index ==
+        std::optional<std::size_t>{1});
+    REQUIRE(vector_state == before);
+}
