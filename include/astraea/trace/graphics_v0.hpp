@@ -9,6 +9,7 @@
 #include <astraea/graphics/packet.hpp>
 #include <astraea/graphics/rdna2_decoder.hpp>
 #include <astraea/graphics/shader_cfg.hpp>
+#include <astraea/graphics/shader_control_execution.hpp>
 #include <astraea/graphics/shader_ir.hpp>
 #include <astraea/graphics/shader_scalar_execution.hpp>
 #include <astraea/trace/v0.hpp>
@@ -81,5 +82,10 @@ trace_shader_cfg_edge_v0(
 trace_shader_scalar_execution_v0(
     std::uint64_t event_id,
     const astraea::graphics::ShaderScalarExecutionEffect& effect);
+
+[[nodiscard]] GraphicsTraceEventResultV0
+trace_shader_branch_decision_v0(
+    std::uint64_t event_id,
+    const astraea::graphics::ShaderBranchDecision& decision);
 
 }  // namespace astraea::trace

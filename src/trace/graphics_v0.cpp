@@ -48,6 +48,15 @@ namespace {
     };
 }
 
+[[nodiscard]] TraceFieldV0 bool_field(
+    std::string name,
+    bool value) {
+    return TraceFieldV0{
+        .name = std::move(name),
+        .value = TraceValueV0{value},
+    };
+}
+
 [[nodiscard]] TraceFieldV0 text_field(
     std::string name,
     std::string value) {
@@ -1184,6 +1193,43 @@ trace_shader_scalar_execution_v0(
                 .type = "scalar_write",
                 .guest = std::nullopt,
                 .stable = std::move(stable),
+                .diagnostics = {},
+            });
+    } catch (const std::bad_alloc&) {
+        return GraphicsTraceEventResultV0::failure(
+            adapter_error(
+                GraphicsTraceAdapterErrorCodeV0::
+                    host_allocation_failure));
+    } catch (const std::length_error&) {
+        return GraphicsTraceEventResultV0::failure(
+            adapter_error(
+                GraphicsTraceAdapterErrorCodeV0::
+                    host_allocation_failure));
+    }
+}
+
+GraphicsTraceEventResultV0
+trace_shader_branch_decision_v0(
+    std::uint64_t event_id,
+    const astraea::graphics::ShaderBranchDecision&
+        decision) {
+    try {
+        return GraphicsTraceEventResultV0::success(
+            TraceEventV0{
+                .id = event_id,
+                .subsystem = "shader.execute",
+                .type = "conditional_branch_decision",
+                .guest = std::nullopt,
+                .stable =
+                    std::vector<TraceFieldV0>{
+                        text_field(
+                            "condition",
+                            shader_ir_branch_condition_text(
+                                decision.condition)),
+                        bool_field(
+                            "taken",
+                            decision.taken),
+                    },
                 .diagnostics = {},
             });
     } catch (const std::bad_alloc&) {

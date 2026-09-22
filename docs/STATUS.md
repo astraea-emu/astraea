@@ -1,9 +1,9 @@
 # Project Status
 
 **Milestone:** M4 — Platform/HLE expansion  
-**State:** Imported-function relocation orchestration baseline complete; bounded RDNA2 stream, validated Shader IR CFG, and CFG Trace v0 complete; scalar Shader IR execution in progress  
+**State:** Imported-function relocation orchestration baseline complete; bounded RDNA2 stream, validated Shader IR CFG/Trace, and scalar move execution complete; conditional branch predicate execution in progress  
 **Repository:** astraea-emu/astraea  
-**Active branch:** `feat/m4-shader-scalar-execution`
+**Active branch:** `feat/m4-shader-branch-predicates`
 
 ## Complete
 
@@ -50,6 +50,11 @@
 - AMD-documented RDNA2 S_MOV_B32 selector-255 literal extension lowered to typed Shader IR/Trace semantics (#98).
 - AMD-documented non-privileged VCC_LO/VCC_HI/M0/NULL/EXEC_LO/EXEC_HI S_MOV_B32 sources typed in Shader IR/Trace (#100).
 - AMD-documented RDNA2 VOP1 V_MOV_B32 plain VGPR-to-VGPR moves lowered to typed Shader IR/Trace (#102).
+- AMD-documented RDNA2 VOP2 V_ADD_F32 plain VGPR + VGPR -> VGPR arithmetic lowered to typed Shader IR/Trace semantics (#104).
+- Bounded whole-stream generic RDNA2 decode/lower pipeline with validated variable instruction extents (#106).
+- Validated Shader IR basic-block/control-flow graph with typed branch and fallthrough edges (#108).
+- Shader CFG block/edge topology exposed through stable Trace v0 semantics and first-divergence comparison (#110).
+- Explicit generic RDNA2 scalar state executes the already-typed S_MOV_B32/B64 Shader IR forms with traced SGPR write effects (#112).
 - Public five-gate CI remains the merge requirement:
   - Linux x64
   - Windows x64
@@ -59,8 +64,8 @@
 
 ## Current frontier
 
-1. #112 — execute the already-lowered scalar move Shader IR against explicit caller-supplied generic RDNA2 scalar state — in progress on this branch.
-2. S_MOV_B32/B64 execution may read the typed SGPR/VCC/M0/NULL/EXEC/inline/literal sources already represented in Shader IR, but it must not infer PS5 shader-entry register values or wave launch state.
+1. #114 — evaluate the six already-typed RDNA2 conditional branch predicates from explicit scalar state — in progress on this branch.
+2. Predicate evaluation may read SCC/VCC/EXEC and emit a typed taken/not-taken decision, but it must not update a PC or follow CFG edges yet.
 3. Dynamic CFG execution, vector lanes/VGPR execution, floating-point mode semantics, barriers/waits, Sony shader container/launch ABI, SPIR-V/Vulkan lowering, new opcodes, and `R_X86_64_RELATIVE` remain separately deferred.
 
 ## SCE metadata boundary
@@ -120,7 +125,7 @@ PS5-specific assumptions require documented evidence.
 
 ## Next action
 
-Validate #112 across the five-gate matrix. Execute only the currently-typed scalar
-move operations against explicit generic RDNA2 scalar state, preserve SCC and other
-unwritten special state, trace the resulting SGPR write effects, and keep CFG/vector
-execution, PS5 launch ABI, SPIR-V, and Vulkan semantics out.
+Validate #114 across the five-gate matrix. Evaluate all six typed SCC/VCC/EXEC
+conditional branch predicates from explicit generic RDNA2 scalar state, trace the
+taken/not-taken decision, and keep PC/CFG traversal, vector execution, PS5 launch
+ABI, SPIR-V, and Vulkan semantics out.
