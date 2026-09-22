@@ -22,6 +22,15 @@ namespace {
            !instruction.sop1.has_value();
 }
 
+[[nodiscard]] bool valid_vop1_source(
+    const Rdna2Instruction& instruction) noexcept {
+    return instruction.format ==
+               Rdna2InstructionFormat::vop1 &&
+           instruction.vop1.has_value() &&
+           !instruction.sopp.has_value() &&
+           !instruction.sop1.has_value();
+}
+
 [[nodiscard]] bool valid_sop1_source(
     const Rdna2Instruction& instruction) noexcept {
     return instruction.format ==
@@ -339,6 +348,35 @@ ShaderIrEmission lower_rdna2_to_shader_ir(
         }
         break;
 
+    case Rdna2InstructionKind::v_mov_b32:
+        if (valid_vop1_source(instruction)) {
+            const auto source =
+                instruction.vop1->source_selector;
+            if (source >= 256U && source <= 511U) {
+                operation =
+                    ShaderIrVectorMove32{
+                        .destination =
+                            ShaderIrVgpr{
+                                .index =
+                                    instruction.vop1->
+                                        destination_selector,
+                            },
+                        .source =
+                            ShaderIrVgpr{
+                                .index =
+                                    static_cast<std::uint8_t>(
+                                        source - 256U),
+                            },
+                    };
+            } else {
+                operation =
+                    unsupported(
+                        ShaderIrUnsupportedReason::
+                            unsupported_vector_operand);
+            }
+        }
+        break;
+
     case Rdna2InstructionKind::unknown_sopp_opcode:
         if (valid_sopp_source(instruction)) {
             operation =
@@ -357,11 +395,21 @@ ShaderIrEmission lower_rdna2_to_shader_ir(
         }
         break;
 
+    case Rdna2InstructionKind::unknown_vop1_opcode:
+        if (valid_vop1_source(instruction)) {
+            operation =
+                unsupported(
+                    ShaderIrUnsupportedReason::
+                        unknown_vop1_opcode);
+        }
+        break;
+
     case Rdna2InstructionKind::unsupported_encoding:
         if (instruction.format ==
                 Rdna2InstructionFormat::unsupported &&
             !instruction.sopp.has_value() &&
-            !instruction.sop1.has_value()) {
+            !instruction.sop1.has_value() &&
+            !instruction.vop1.has_value()) {
             operation =
                 unsupported(
                     ShaderIrUnsupportedReason::
