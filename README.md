@@ -1,48 +1,110 @@
 # Astraea
 
-A verification-first PlayStation 5 compatibility research and emulation project.
+A verification-first PlayStation 5 compatibility research and emulation
+project.
 
-> **Status:** M3 behavioral evidence and differential tooling is active. M2 controlled execution is complete for trusted Astraea-owned x86-64 probes on Linux and Windows. Astraea does not currently run PlayStation 5 software.
+> **Status:** Controlled Astraea-owned x86-64 guest execution is established on
+> Linux and Windows. The first PS5-specific graphics bridge is also established:
+> an evidence-backed AGC shader container can be reduced to bounded RDNA2 code
+> and the existing Shader IR pipeline. Astraea does not currently claim retail
+> PlayStation 5 software compatibility.
 
 ## Principles
 
-- Clean-room implementation: no proprietary Sony source code, firmware, keys, SDK files, or copyrighted game assets in this repository.
-- Evidence before emulation: document observed or public behavior before encoding platform-specific assumptions.
-- Native x86-64 execution where host architecture permits it; portable subsystems remain host-independent.
-- Verification-first development: structured traces, differential tests, regression localization, fuzzing, sanitizers, and reproducible experiments.
-- Small reviewed changes: every implementation task should have explicit scope and acceptance criteria.
-- GitHub is the durable source of truth for architecture, status, decisions, and handoffs.
+- Clean-room implementation: no proprietary Sony source code, firmware, keys,
+  SDK files, proprietary system modules, or copyrighted retail assets in this
+  repository.
+- Evidence before emulation: document public or controlled behavior before
+  encoding PS5-specific assumptions.
+- Guest semantics before host mapping: SCE/AGC/RDNA2 behavior remains separate
+  from Vulkan and other host APIs.
+- Native x86-64 execution where host architecture permits it; portable
+  subsystems remain host-independent.
+- Verification-first development: structured traces, differential tests,
+  regression localization, fuzzing, sanitizers, and reproducible experiments.
+- Dependency-driven vertical integration: build the smallest real dependency
+  that advances the next end-to-end gate instead of maximizing isolated API or
+  opcode coverage.
+- Small reviewed changes with explicit scope and acceptance criteria.
+- GitHub is the durable source of truth for architecture, status, decisions,
+  evidence, and handoffs.
 
-## Initial architecture
+## Architecture
 
-Astraea is organized around five major concerns:
+Astraea keeps guest-domain behavior separate from host implementation.
 
-1. **Guest image and loader** — ELF/module parsing, mappings, relocations, imports, TLS, and stack setup.
-2. **Execution and HLE** — guest CPU context, guest/host transitions, exceptions, and high-level emulation of system interfaces.
-3. **Graphics** — PS5/RDNA2 command and shader understanding, an Astraea graphics IR, and host backends beginning with Vulkan.
-4. **Astraea Lab** — trace capture, normalization, diffing, replayable portions, regression minimization, and behavioral corpora.
-5. **Astraea Probe** — controlled research programs and experiments for legally obtained/reference hardware when appropriate.
+1. **Guest image / CPU path** — SCE ELF/module parsing, mappings, relocations,
+   exact import identity, native x86-64 execution, and HLE platform services.
+2. **PS5 GPU frontend** — AGC shader containers/objects, command buffers,
+   register/state, guest resources, synchronization, and presentation state.
+3. **Shader semantics/compiler** — AMD-documented RDNA2 decoding, Shader IR and
+   CFG, semantic-oracle execution for verified subsets, then SPIR-V lowering.
+4. **Host GPU backend** — Vulkan resource/pipeline/synchronization
+   materialization from the guest GPU model. Vulkan is not the guest API.
+5. **Astraea Lab** — trace capture, normalization, diffing, regression
+   minimization, and behavioral corpora.
+6. **Astraea Probe** — controlled owned programs and experiments for isolating
+   platform behavior and, when appropriate, lawful hardware comparison.
+
+"Generic RDNA2" in Astraea means AMD-defined guest ISA semantics shared by the
+hardware family. It is real emulator behavior, not placeholder data. PS5 AGC
+metadata remains a separate Sony-specific frontend because the two layers are
+not interchangeable.
 
 ## Development hosts
 
-The project is designed to be developed from macOS, Linux, and Windows. The initial primary runtime targets for native x86-64 guest execution will be x86-64 Linux and Windows. macOS remains a first-class development host, but Apple Silicon cannot be treated as equivalent to an x86-64 runtime host.
+The project is designed to be developed from macOS, Linux, and Windows. Native
+x86-64 guest execution targets x86-64 Linux and Windows first. Apple Silicon
+macOS remains a first-class development host for portable components, but it
+is not treated as an x86-64 execution host.
+
+The first graphics backend target is Vulkan. SPIR-V is the first host shader
+IR; Astraea's Shader IR remains backend-independent.
+
+## Current integration path
+
+Astraea now uses vertical gates rather than a strict "finish all HLE, then
+graphics" waterfall:
+
+```text
+V0  AGC container -> RDNA2 -> Shader IR                    COMPLETE
+ |
+ v
+V1  owned guest -> guest-domain AGC shader object          NEXT
+ |
+ v
+V2  supported Shader IR -> validated SPIR-V
+ |
+ v
+V3  guest GPU state/resources -> Vulkan -> headless result
+ |
+ v
+V4  controlled PS5 differential when evidence requires it
+ |
+ v
+V5  guest flip/VideoOut -> host presentation
+```
+
+Platform HLE, RDNA2 instruction coverage, resource semantics, and command
+decoding are pulled into this path when a gate needs them. Unknown
+Sony-specific behavior is recorded as an evidence blocker rather than guessed.
 
 See:
+
 - `docs/PROJECT_PLAN.md`
+- `docs/STATUS.md`
+- `docs/adr/0006-dependency-driven-vertical-integration.md`
 - `docs/DEVELOPMENT_MACOS.md`
 - `docs/CHAT_HANDOFF.md`
 
-## Current milestone
+## Compatibility boundary
 
-**M3 — Behavioral evidence and differential tooling**
-
-M2's validated ELF/guest-image pipeline, guarded Linux and Windows x86-64 execution backends, bounded synthetic HLE path, and `probe_hello.elf` proof are complete. M3 now includes the public PS5 executable/module ABI evidence map, AstraeaProbe v0, Trace v0 normalization/serialization, deterministic first-divergence tooling, and the RDNA2/PS5 graphics evidence map.
-
-The current implementation frontier is deliberately narrow: typed graphics-frontend parsing with raw provenance, evidence-backed SCE metadata parsing, a generic RDNA2 decoder, minimal Graphics IR / Shader IR contracts, and Trace v0 adapters before any Vulkan backend work.
-
-No compatibility claims should be made until the corresponding behavior is implemented and covered by tests.
+Astraea currently executes only trusted Astraea-owned synthetic probes through
+the native guest path. Commercial-title compatibility is an integration
+outcome, not the correctness oracle, and arbitrary retail guest execution is
+not enabled.
 
 ## License
 
-Astraea is licensed under the GNU General Public License v3.0 or later. See `LICENSE`.
-
+Astraea is licensed under the GNU General Public License v3.0 or later. See
+`LICENSE`.

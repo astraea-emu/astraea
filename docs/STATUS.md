@@ -1,9 +1,9 @@
 # Project Status
 
-**Milestone:** M4 — Platform/HLE expansion  
-**State:** Imported-function relocation orchestration and bounded mixed scalar/vector execution complete; first evidence-backed PS5 AGC shader-container ingestion in progress  
+**Integration gate:** V1 — Guest-created shader object  
+**State:** V0 PS5 shader ingestion is complete; dependency-driven architecture/roadmap refresh in progress before V1 implementation  
 **Repository:** astraea-emu/astraea  
-**Active branch:** `feat/m4-agc-shader-container`
+**Active branch:** `docs/architecture-roadmap-refresh`
 
 ## Complete
 
@@ -64,6 +64,7 @@
 - Bounded mixed scalar/vector Shader IR programs traverse validated CFG successors under an explicit caller-selected block budget (#128).
 - Mode-independent exact finite-normal V_ADD_F32 lane cases execute with integer-only semantics, atomic active-lane prevalidation, and Trace v0 effects (#130).
 - Exact V_ADD_F32 execution composes with mixed scalar/vector block execution and bounded CFG traversal while preserving ordered effects and typed nested failures (#132).
+- Evidence-backed PS5 AGC shader-container ingestion validates the bounded container envelope, preserves opaque provenance, extracts the documented RDNA2 program prefix, feeds the existing RDNA2 -> Shader IR path end to end, and executes a dedicated fuzz smoke in CI (#134/#135).
 - Public five-gate CI remains the merge requirement:
   - Linux x64
   - Windows x64
@@ -73,10 +74,11 @@
 
 ## Current frontier
 
-1. #134 — parse the smallest evidence-backed PS5 AGC shader-container envelope and expose only its bounded RDNA2 program prefix to the existing decoder.
-2. Current public evidence supports ELF64 little-endian `EM_AMDGPU`, `.shader_header` / `.shader_text`, the AGC header magic/size/type fields, and the currently observed 0x30-byte shader-text trailer program-length field. Unknown bytes remain opaque provenance.
-3. The parser has an owned synthetic end-to-end AGC -> RDNA2 -> Shader IR gate and a dedicated fuzz target. New RDNA2 opcodes, general FP MODE, resource/descriptor decoding, command execution, SPIR-V, and Vulkan remain out of #134.
-4. `docs/PROJECT_PLAN.md` still reflects the original HLE-then-graphics waterfall. The live dependency graph has evolved; a follow-up architecture/roadmap ADR will formalize parallel platform and graphics workstreams with vertical integration gates rather than rewriting working subsystem boundaries ad hoc.
+1. #136 — replace the obsolete HLE-then-graphics waterfall with ADR 0006's dependency-driven vertical integration model.
+2. V0 is complete: PS5 AGC container -> bounded RDNA2 -> Shader IR is now a tested, fuzzed PS5-specific path in main.
+3. V1 is next: an Astraea-owned SCE guest probe should reach the AGC shader-creation boundary and produce a guest-domain Astraea shader object with validated program/stage/provenance state and no Vulkan dependency.
+4. The first missing dependency on V1 will be selected only after the architecture refresh is merged. Exact ABI/object semantics must be supported by public evidence or identified as an explicit evidence blocker.
+5. SPIR-V/Vulkan work is V2/V3. Broad RDNA2 opcode expansion, broad platform HLE, resource decoding, and command-buffer coverage are pulled forward only by a concrete gate workload.
 
 ## SCE metadata boundary
 
@@ -135,14 +137,16 @@ PS5-specific assumptions require documented evidence.
 
 ## Next action
 
-Complete #134 as the first PS5-specific shader-ingestion bridge: validate the
-documented AGC ELF/header/trailer envelope, preserve unknown bytes, expose only
-the bounded program prefix as little-endian RDNA2 dwords, prove the existing
-RDNA2 -> Shader IR pipeline end to end with owned synthetic input, fuzz the
-parser, and merge only after the exact PR head is green on all five CI gates.
+Merge #136 after its exact documentation-only head passes the five-gate CI
+matrix. Then create the smallest V1 implementation issue for a guest-domain
+AGC shader object / shader-creation boundary.
 
-After #134, refresh the architecture/roadmap in an ADR before broadening the
-graphics frontend. The next implementation slices should be selected by the
-shortest end-to-end path toward AGC shader creation, Shader IR -> validated
-SPIR-V, guest GPU state/resources, and a minimal Vulkan execution/output gate
-rather than by arbitrary opcode count.
+The V1 issue must first resolve the exact public evidence for the input/output
+ABI and guest-memory/object-lifetime contract. It must not introduce Vulkan
+handles, decode unrelated AGC resource/register fields, or guess mutable header
+semantics. If the exact public evidence is insufficient, split out a bounded
+research/probe issue and record that blocker explicitly.
+
+After V1, proceed to V2 with a concrete Shader IR subset chosen by an owned
+workload and lower it to validated Vulkan-environment SPIR-V. RDNA2 coverage is
+demand-driven by that workload rather than expanded for its own sake.
