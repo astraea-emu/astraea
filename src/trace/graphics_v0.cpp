@@ -1245,4 +1245,68 @@ trace_shader_branch_decision_v0(
     }
 }
 
+GraphicsTraceEventResultV0
+trace_shader_cfg_successor_selection_v0(
+    std::uint64_t event_id,
+    std::size_t source_block_index,
+    const astraea::graphics::ShaderCfgSuccessorSelection&
+        selection) {
+    try {
+        std::uint64_t source_block_index_u64 = 0;
+        if (!size_to_u64(
+                source_block_index,
+                source_block_index_u64)) {
+            return size_failure();
+        }
+
+        std::vector<TraceFieldV0> stable{
+            u64_field(
+                "source_block_index",
+                source_block_index_u64),
+            bool_field(
+                "has_successor",
+                selection.edge.has_value()),
+        };
+
+        if (selection.edge.has_value()) {
+            std::uint64_t target_block_index = 0;
+            if (!size_to_u64(
+                    selection.edge->target_block_index,
+                    target_block_index)) {
+                return size_failure();
+            }
+
+            stable.push_back(
+                text_field(
+                    "edge_kind",
+                    shader_cfg_edge_kind_text(
+                        selection.edge->kind)));
+            stable.push_back(
+                u64_field(
+                    "target_block_index",
+                    target_block_index));
+        }
+
+        return GraphicsTraceEventResultV0::success(
+            TraceEventV0{
+                .id = event_id,
+                .subsystem = "shader.execute",
+                .type = "cfg_successor_selection",
+                .guest = std::nullopt,
+                .stable = std::move(stable),
+                .diagnostics = {},
+            });
+    } catch (const std::bad_alloc&) {
+        return GraphicsTraceEventResultV0::failure(
+            adapter_error(
+                GraphicsTraceAdapterErrorCodeV0::
+                    host_allocation_failure));
+    } catch (const std::length_error&) {
+        return GraphicsTraceEventResultV0::failure(
+            adapter_error(
+                GraphicsTraceAdapterErrorCodeV0::
+                    host_allocation_failure));
+    }
+}
+
 }  // namespace astraea::trace
