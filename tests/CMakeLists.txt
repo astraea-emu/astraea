@@ -42,6 +42,7 @@ add_executable(astraea_core_tests
     execution/sce_jump_slot_patch_tests.cpp
     execution/sce_glob_dat_patch_tests.cpp
     execution/sce_glob_dat_apply_tests.cpp
+    execution/sce_glob_dat_prototype_tests.cpp
     execution/sce_prototype_tests.cpp
     execution/sce_multi_import_prototype_tests.cpp
     execution/hle_runtime_tests.cpp
