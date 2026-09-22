@@ -5,6 +5,8 @@
 #include <cstddef>
 #include <cstdint>
 #include <optional>
+#include <span>
+#include <vector>
 
 #include <astraea/core/result.hpp>
 #include <astraea/execution/hle.hpp>
@@ -65,6 +67,31 @@ using SceGlobDatPatchResult =
         SceGlobDatPatch,
         SceGlobDatPatchError>;
 
+enum class SceGlobDatBatchErrorCode {
+    gate_slot_count_mismatch,
+    patch_failure,
+    host_allocation_failure,
+};
+
+struct SceGlobDatBatchError {
+    SceGlobDatBatchErrorCode code =
+        SceGlobDatBatchErrorCode::
+            host_allocation_failure;
+    std::size_t plan_index = 0;
+    std::size_t plan_count = 0;
+    std::size_t gate_slot_count = 0;
+    std::optional<SceGlobDatPatchError>
+        patch_error;
+
+    auto operator<=>(const SceGlobDatBatchError&) const =
+        default;
+};
+
+using SceGlobDatPatchesResult =
+    astraea::core::Result<
+        std::vector<SceGlobDatPatch>,
+        SceGlobDatBatchError>;
+
 // Builds, but does not apply, an imported-function GLOB_DAT patch whose
 // resolved symbol address is an explicitly selected synthetic HLE gate.
 //
@@ -75,5 +102,14 @@ build_synthetic_x86_64_glob_dat_gate_patch(
     const SceImportResolutionPlan& plan,
     const SyntheticGateRegion& gate_region,
     std::uint32_t gate_slot) noexcept;
+
+// Builds an ordered batch of already-supported GLOB_DAT patches. Gate slots
+// are caller-selected explicitly and must be one-to-one with the input plans.
+// No gate allocation or guest-memory writes occur here.
+[[nodiscard]] SceGlobDatPatchesResult
+build_synthetic_x86_64_glob_dat_gate_patches(
+    std::span<const SceImportResolutionPlan> plans,
+    const SyntheticGateRegion& gate_region,
+    std::span<const std::uint32_t> gate_slots);
 
 }  // namespace astraea::execution
