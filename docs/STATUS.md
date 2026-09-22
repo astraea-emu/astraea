@@ -1,9 +1,9 @@
 # Project Status
 
 **Milestone:** M4 — Platform/HLE expansion  
-**State:** Multi-import JUMP_SLOT path productionized; owned end-to-end GLOB_DAT execution proof in progress  
+**State:** JUMP_SLOT and GLOB_DAT owned import paths validated end to end; M4 platform/HLE expansion continues from this baseline  
 **Repository:** astraea-emu/astraea  
-**Active branch:** `feat/m4-sce-glob-dat-prototype-proof`
+**Active branch:** `main`
 
 ## Complete
 
@@ -37,6 +37,7 @@
 - Ordered non-atomic JUMP_SLOT batch application with indexed partial-failure reporting (#70).
 - Evidence-backed x86-64 R_X86_64_GLOB_DAT imported-function gate patch construction (#72).
 - Validated GLOB_DAT gate patch application through GuestMemoryAccess (#74).
+- Owned SCE-profile general-RELA GLOB_DAT import/execution proof through HLE exit 42 (#76).
 - Public five-gate CI remains the merge requirement:
   - Linux x64
   - Windows x64
@@ -46,8 +47,8 @@
 
 ## Current frontier
 
-1. #76 — execute an owned SCE-profile general-RELA GLOB_DAT import end to end — in progress on this branch.
-2. The proof must use exact SCE identity/HLE binding and call only through the patched writable pointer slot.
+1. The owned JUMP_SLOT and general-RELA GLOB_DAT imported-function paths are both validated end to end on `main`.
+2. The next M4 slice should be selected from an evidence-backed unsupported platform/HLE or graphics dependency, not by broadening relocation semantics speculatively.
 3. `R_X86_64_RELATIVE` remains deferred until Astraea has an explicit, evidence-backed image load-base / load-bias contract.
 
 ## SCE metadata boundary
@@ -107,6 +108,6 @@ PS5-specific assumptions require documented evidence.
 
 ## Next action
 
-Validate #76 across the five-gate matrix. The owned fixture must traverse
-GuestImage → general RELA type 6 → exact SCE identity/binding → GLOB_DAT patch →
-GuestMemoryAccess → indirect native call → HLE exit 42, without JUMP_SLOT fallback.
+Select the next post-GLOB_DAT M4 slice from the first unsupported, evidence-backed
+platform/HLE or graphics dependency. Preserve exact provenance and typed failures,
+and keep R_X86_64_RELATIVE deferred until the image load-base contract is explicit.
