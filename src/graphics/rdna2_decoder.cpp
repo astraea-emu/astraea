@@ -60,6 +60,7 @@ constexpr unsigned int kSop1DestinationShift = 16U;
 constexpr std::uint32_t kSop1SourceMask = 0xffU;
 constexpr std::uint8_t kSop1MovB32Opcode = 3;
 constexpr std::uint8_t kSop1MovB64Opcode = 4;
+constexpr std::uint8_t kScalarLiteralSelector = 255;
 
 [[nodiscard]] Rdna2DecodeError decode_error(
     Rdna2DecodeErrorCode code,
@@ -198,21 +199,43 @@ Rdna2DecodeResult decode_rdna2_instruction(
         const auto source =
             static_cast<std::uint8_t>(
                 word & kSop1SourceMask);
+        const auto kind =
+            classify_sop1_opcode(opcode);
+
+        std::size_t word_count = 1;
+        std::optional<std::uint32_t> literal_constant;
+        if (kind == Rdna2InstructionKind::s_mov_b32 &&
+            source == kScalarLiteralSelector) {
+            const auto literal_index = word_index + 1U;
+            if (literal_index >= words.size()) {
+                return Rdna2DecodeResult::failure(
+                    decode_error(
+                        Rdna2DecodeErrorCode::
+                            instruction_out_of_bounds,
+                        literal_index,
+                        words.size()));
+            }
+
+            word_count = 2;
+            literal_constant = words[literal_index];
+        }
 
         return Rdna2DecodeResult::success(
             Rdna2Instruction{
                 .word_index = word_index,
+                .word_count = word_count,
                 .byte_offset = byte_offset,
                 .raw_word = word,
                 .raw_encoding = raw_encoding(word),
                 .format = Rdna2InstructionFormat::sop1,
-                .kind = classify_sop1_opcode(opcode),
+                .kind = kind,
                 .sopp = std::nullopt,
                 .sop1 =
                     Rdna2Sop1Fields{
                         .opcode = opcode,
                         .destination_selector = destination,
                         .source_selector = source,
+                        .literal_constant = literal_constant,
                     },
             });
     }
