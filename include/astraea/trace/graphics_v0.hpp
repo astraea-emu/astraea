@@ -1,12 +1,14 @@
 #pragma once
 
 #include <compare>
+#include <cstddef>
 #include <cstdint>
 
 #include <astraea/core/result.hpp>
 #include <astraea/graphics/graphics_ir.hpp>
 #include <astraea/graphics/packet.hpp>
 #include <astraea/graphics/rdna2_decoder.hpp>
+#include <astraea/graphics/shader_cfg.hpp>
 #include <astraea/graphics/shader_ir.hpp>
 #include <astraea/trace/v0.hpp>
 
@@ -60,5 +62,18 @@ trace_rdna2_decode_error_v0(
 trace_shader_ir_v0(
     std::uint64_t event_id,
     const astraea::graphics::ShaderIrEmission& emission);
+
+[[nodiscard]] GraphicsTraceEventResultV0
+trace_shader_cfg_block_v0(
+    std::uint64_t event_id,
+    std::size_t block_index,
+    const astraea::graphics::ShaderCfgBasicBlock& block);
+
+[[nodiscard]] GraphicsTraceEventResultV0
+trace_shader_cfg_edge_v0(
+    std::uint64_t event_id,
+    std::size_t source_block_index,
+    std::size_t edge_index,
+    const astraea::graphics::ShaderCfgEdge& edge);
 
 }  // namespace astraea::trace
