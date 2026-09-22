@@ -158,7 +158,8 @@ struct TestLayout {
 };
 
 TestLayout make_layout(
-    GuestPermissions data_permissions) {
+    GuestPermissions data_permissions,
+    std::size_t data_size = 8) {
     constexpr auto kRead =
         static_cast<std::uint8_t>(
             GuestPermission::read);
@@ -189,7 +190,7 @@ TestLayout make_layout(
         std::byte{0x0b},
     };
     const std::vector<std::byte> data(
-        8,
+        data_size,
         std::byte{0});
 
     std::vector<std::byte> image_bytes;
@@ -454,6 +455,179 @@ TEST_CASE(
         applied.error().code ==
         GuestMemoryErrorCode::
             guest_memory_unmapped);
+}
+
+#endif
+
+
+TEST_CASE(
+    "empty GLOB_DAT batch succeeds without guest-memory writes",
+    "[execution][sce-glob-dat-apply][batch]") {
+    auto image = make_empty_image();
+    astraea::execution::LinuxPreparedMemory prepared;
+    GuestMemoryAccess memory{
+        image,
+        prepared};
+
+    const std::span<
+        const astraea::execution::SceGlobDatPatch>
+        patches{};
+
+    const auto applied =
+        astraea::execution::
+            apply_synthetic_glob_dat_patches(
+                patches,
+                memory);
+
+    REQUIRE(applied.has_value());
+    REQUIRE(applied->empty());
+}
+
+#if defined(__linux__) && defined(__x86_64__) && defined(MAP_FIXED_NOREPLACE)
+
+TEST_CASE(
+    "batch GLOB_DAT application writes two ordered patches exactly",
+    "[execution][sce-glob-dat-apply][batch]") {
+    constexpr auto kRead =
+        static_cast<std::uint8_t>(
+            GuestPermission::read);
+    constexpr auto kWrite =
+        static_cast<std::uint8_t>(
+            GuestPermission::write);
+
+    auto layout =
+        make_layout(
+            permissions(kRead | kWrite),
+            16);
+    auto prepared =
+        astraea::execution::
+            prepare_linux_guest_memory(
+                layout.image);
+    REQUIRE(prepared.has_value());
+
+    GuestMemoryAccess memory{
+        layout.image,
+        prepared.value()};
+
+    auto first =
+        make_patch(
+            layout.data_base,
+            layout.unmapped_base);
+    auto second =
+        make_patch(
+            layout.data_base + 8U,
+            layout.unmapped_base + 16U);
+    second.gate_slot = 1;
+    second.function_id = HleFunctionId{2};
+
+    const std::array patches{
+        first,
+        second,
+    };
+
+    const auto applied =
+        astraea::execution::
+            apply_synthetic_glob_dat_patches(
+                patches,
+                memory);
+
+    REQUIRE(applied.has_value());
+    REQUIRE(applied->size() == 2);
+    REQUIRE(
+        applied->at(0).relocation_target ==
+        patches[0].relocation_target);
+    REQUIRE(
+        applied->at(1).relocation_target ==
+        patches[1].relocation_target);
+    REQUIRE(applied->at(0).gate_slot == 0);
+    REQUIRE(applied->at(1).gate_slot == 1);
+    REQUIRE(
+        applied->at(1).function_id ==
+        HleFunctionId{2});
+
+    std::array<std::byte, 8> first_bytes{};
+    std::array<std::byte, 8> second_bytes{};
+    REQUIRE(
+        memory.read(
+            GuestAddress{layout.data_base},
+            first_bytes)
+            .has_value());
+    REQUIRE(
+        memory.read(
+            GuestAddress{layout.data_base + 8U},
+            second_bytes)
+            .has_value());
+    REQUIRE(first_bytes == patches[0].bytes);
+    REQUIRE(second_bytes == patches[1].bytes);
+}
+
+TEST_CASE(
+    "batch GLOB_DAT failure reports partial application without rollback",
+    "[execution][sce-glob-dat-apply][batch]") {
+    constexpr auto kRead =
+        static_cast<std::uint8_t>(
+            GuestPermission::read);
+    constexpr auto kWrite =
+        static_cast<std::uint8_t>(
+            GuestPermission::write);
+
+    auto layout =
+        make_layout(
+            permissions(kRead | kWrite));
+    auto prepared =
+        astraea::execution::
+            prepare_linux_guest_memory(
+                layout.image);
+    REQUIRE(prepared.has_value());
+
+    GuestMemoryAccess memory{
+        layout.image,
+        prepared.value()};
+
+    auto first =
+        make_patch(
+            layout.data_base,
+            layout.unmapped_base);
+    auto second =
+        make_patch(
+            layout.unmapped_base,
+            layout.unmapped_base + 16U);
+    second.gate_slot = 1;
+    second.function_id = HleFunctionId{2};
+
+    const std::array patches{
+        first,
+        second,
+    };
+
+    const auto applied =
+        astraea::execution::
+            apply_synthetic_glob_dat_patches(
+                patches,
+                memory);
+
+    REQUIRE_FALSE(applied.has_value());
+    REQUIRE(
+        applied.error().code ==
+        astraea::execution::
+            SceGlobDatApplyBatchErrorCode::
+                apply_failure);
+    REQUIRE(applied.error().patch_index == 1);
+    REQUIRE(applied.error().patch_count == 2);
+    REQUIRE(applied.error().applied_count == 1);
+    REQUIRE(applied.error().memory_error.has_value());
+    REQUIRE(
+        applied.error().memory_error->code ==
+        GuestMemoryErrorCode::
+            guest_memory_unmapped);
+
+    std::array<std::byte, 8> read_back{};
+    REQUIRE(
+        memory.read(
+            GuestAddress{layout.data_base},
+            read_back)
+            .has_value());
+    REQUIRE(read_back == patches[0].bytes);
 }
 
 #endif
