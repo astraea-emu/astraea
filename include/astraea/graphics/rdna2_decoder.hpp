@@ -30,6 +30,7 @@ enum class Rdna2InstructionKind {
     s_barrier,
     s_waitcnt,
     s_mov_b32,
+    s_mov_b64,
     unknown_sopp_opcode,
     unknown_sop1_opcode,
     unsupported_encoding,
