@@ -1,9 +1,9 @@
 # Project Status
 
 **Milestone:** M4 — Platform/HLE expansion  
-**State:** Imported-function relocation orchestration baseline complete; bounded RDNA2 stream, validated Shader IR CFG, and CFG Trace v0 complete; scalar Shader IR execution in progress  
+**State:** Imported-function relocation orchestration baseline complete; bounded RDNA2 stream, validated Shader IR CFG/Trace, and scalar move execution complete; branch decision evaluation in progress  
 **Repository:** astraea-emu/astraea  
-**Active branch:** `feat/m4-shader-scalar-execution`
+**Active branch:** `feat/m4-shader-branch-evaluation`
 
 ## Complete
 
@@ -59,8 +59,8 @@
 
 ## Current frontier
 
-1. #112 — execute the already-lowered scalar move Shader IR against explicit caller-supplied generic RDNA2 scalar state — in progress on this branch.
-2. S_MOV_B32/B64 execution may read the typed SGPR/VCC/M0/NULL/EXEC/inline/literal sources already represented in Shader IR, but it must not infer PS5 shader-entry register values or wave launch state.
+1. #115 — evaluate existing unconditional and SCC/VCC/EXEC conditional Shader IR branches against explicit caller-supplied generic scalar state — in progress on this branch.
+2. Branch evaluation is pure: it preserves the typed byte delta and reports taken/not-taken without mutating state, following an edge, advancing a program counter, or walking the CFG.
 3. Dynamic CFG execution, vector lanes/VGPR execution, floating-point mode semantics, barriers/waits, Sony shader container/launch ABI, SPIR-V/Vulkan lowering, new opcodes, and `R_X86_64_RELATIVE` remain separately deferred.
 
 ## SCE metadata boundary
@@ -120,7 +120,7 @@ PS5-specific assumptions require documented evidence.
 
 ## Next action
 
-Validate #112 across the five-gate matrix. Execute only the currently-typed scalar
-move operations against explicit generic RDNA2 scalar state, preserve SCC and other
-unwritten special state, trace the resulting SGPR write effects, and keep CFG/vector
-execution, PS5 launch ABI, SPIR-V, and Vulkan semantics out.
+Validate #115 across the five-gate matrix. Evaluate only the currently-typed
+unconditional and SCC/VCC/EXEC conditional branches against explicit scalar state,
+trace the resulting decision semantics, and keep CFG walking, vector execution,
+PS5 launch ABI, SPIR-V, and Vulkan semantics out.
