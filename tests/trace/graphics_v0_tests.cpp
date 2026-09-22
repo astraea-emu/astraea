@@ -512,3 +512,90 @@ TEST_CASE(
         std::move(left).value(),
         std::move(right).value());
 }
+
+
+TEST_CASE(
+    "S_WAITCNT Shader IR trace exposes counter thresholds as stable semantics",
+    "[trace][graphics][v0][waitcnt]") {
+    const auto ir =
+        astraea::graphics::lower_rdna2_to_shader_ir(
+            decode_one(make_sopp(12, 0xaa35)));
+
+    auto event =
+        astraea::trace::trace_shader_ir_v0(
+            94,
+            ir);
+
+    REQUIRE(event.has_value());
+    REQUIRE(event->subsystem == "shader.ir");
+    REQUIRE(event->type == "wait_count");
+    REQUIRE(event->stable.size() == 3);
+    REQUIRE(event->stable[0].name == "vmcnt");
+    REQUIRE(
+        std::get<std::uint64_t>(
+            event->stable[0].value) == 37);
+    REQUIRE(event->stable[1].name == "expcnt");
+    REQUIRE(
+        std::get<std::uint64_t>(
+            event->stable[1].value) == 3);
+    REQUIRE(event->stable[2].name == "lgkmcnt");
+    REQUIRE(
+        std::get<std::uint64_t>(
+            event->stable[2].value) == 42);
+    REQUIRE(event->diagnostics.size() == 2);
+}
+
+TEST_CASE(
+    "S_WAITCNT reserved bit is diagnostic-only for trace equality",
+    "[trace][graphics][v0][waitcnt]") {
+    auto left =
+        astraea::trace::trace_shader_ir_v0(
+            95,
+            astraea::graphics::lower_rdna2_to_shader_ir(
+                decode_one(make_sopp(12, 0xaa35))));
+    auto right =
+        astraea::trace::trace_shader_ir_v0(
+            95,
+            astraea::graphics::lower_rdna2_to_shader_ir(
+                decode_one(make_sopp(12, 0xaab5))));
+
+    REQUIRE(left.has_value());
+    REQUIRE(right.has_value());
+
+    require_equivalent(
+        std::move(left).value(),
+        std::move(right).value());
+}
+
+TEST_CASE(
+    "S_WAITCNT threshold change participates in trace divergence",
+    "[trace][graphics][v0][waitcnt]") {
+    auto left =
+        astraea::trace::trace_shader_ir_v0(
+            96,
+            astraea::graphics::lower_rdna2_to_shader_ir(
+                decode_one(make_sopp(12, 0xaa35))));
+    auto right =
+        astraea::trace::trace_shader_ir_v0(
+            96,
+            astraea::graphics::lower_rdna2_to_shader_ir(
+                decode_one(make_sopp(12, 0xaa34))));
+
+    REQUIRE(left.has_value());
+    REQUIRE(right.has_value());
+
+    auto diff =
+        astraea::trace::diff_trace_v0(
+            document(std::move(left).value()),
+            document(std::move(right).value()));
+
+    REQUIRE(diff.has_value());
+    REQUIRE_FALSE(diff->equivalent);
+    REQUIRE(
+        diff->first_divergence->kind ==
+        astraea::trace::TraceDivergenceKindV0::
+            stable_field_value_mismatch);
+    REQUIRE(
+        diff->first_divergence->field_name ==
+        std::optional<std::string>{"vmcnt"});
+}
