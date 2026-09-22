@@ -41,6 +41,41 @@ namespace {
            (selector % 2U) == 0U;
 }
 
+[[nodiscard]] std::optional<ShaderIrSpecialScalarSource32>
+special_scalar_source32(
+    std::uint8_t selector) noexcept {
+    using Kind = ShaderIrSpecialScalarSourceKind32;
+
+    switch (selector) {
+    case 106U:
+        return ShaderIrSpecialScalarSource32{
+            .kind = Kind::vcc_lo,
+        };
+    case 107U:
+        return ShaderIrSpecialScalarSource32{
+            .kind = Kind::vcc_hi,
+        };
+    case 124U:
+        return ShaderIrSpecialScalarSource32{
+            .kind = Kind::m0,
+        };
+    case 125U:
+        return ShaderIrSpecialScalarSource32{
+            .kind = Kind::null_register,
+        };
+    case 126U:
+        return ShaderIrSpecialScalarSource32{
+            .kind = Kind::exec_lo,
+        };
+    case 127U:
+        return ShaderIrSpecialScalarSource32{
+            .kind = Kind::exec_hi,
+        };
+    default:
+        return std::nullopt;
+    }
+}
+
 [[nodiscard]] std::optional<ShaderIrScalarSource32>
 scalar_source32(
     std::uint8_t selector,
@@ -50,6 +85,12 @@ scalar_source32(
             ShaderIrSgpr{
                 .index = selector,
             }};
+    }
+
+    if (auto special = special_scalar_source32(selector);
+        special.has_value()) {
+        return ShaderIrScalarSource32{
+            special.value()};
     }
 
     if (selector >= 128U && selector <= 192U) {
