@@ -297,3 +297,47 @@ TEST_CASE(
             left,
             right));
 }
+
+
+TEST_CASE(
+    "RDNA2 S_WAITCNT lowers documented counter thresholds",
+    "[graphics][shader-ir][waitcnt]") {
+    const auto emission =
+        astraea::graphics::lower_rdna2_to_shader_ir(
+            decode_one(make_sopp(12, 0xaa35)));
+
+    REQUIRE(
+        std::holds_alternative<
+            astraea::graphics::ShaderIrWaitCount>(
+            emission.operation));
+
+    const auto& wait =
+        std::get<
+            astraea::graphics::ShaderIrWaitCount>(
+            emission.operation);
+    REQUIRE(wait.vmcnt == 37);
+    REQUIRE(wait.expcnt == 3);
+    REQUIRE(wait.lgkmcnt == 42);
+    REQUIRE(
+        emission.provenance.source_instruction.kind ==
+        astraea::graphics::Rdna2InstructionKind::s_waitcnt);
+}
+
+TEST_CASE(
+    "S_WAITCNT semantic equality excludes reserved SIMM16 bit 7",
+    "[graphics][shader-ir][waitcnt]") {
+    const auto left =
+        astraea::graphics::lower_rdna2_to_shader_ir(
+            decode_one(make_sopp(12, 0xaa35)));
+    const auto right =
+        astraea::graphics::lower_rdna2_to_shader_ir(
+            decode_one(make_sopp(12, 0xaab5)));
+
+    REQUIRE(
+        left.provenance.source_instruction !=
+        right.provenance.source_instruction);
+    REQUIRE(
+        astraea::graphics::shader_ir_semantically_equal(
+            left,
+            right));
+}
