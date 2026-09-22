@@ -48,6 +48,7 @@ add_executable(astraea_core_tests
     execution/hle_runtime_tests.cpp
     probe/hello_tests.cpp
     probe/reference_tests.cpp
+    graphics/agc_shader_container_tests.cpp
     graphics/packet_tests.cpp
     graphics/graphics_ir_tests.cpp
     graphics/rdna2_decoder_tests.cpp

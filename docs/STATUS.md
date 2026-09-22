@@ -1,9 +1,9 @@
 # Project Status
 
 **Milestone:** M4 — Platform/HLE expansion  
-**State:** Imported-function relocation orchestration baseline complete; bounded mixed scalar/vector programs and mode-independent exact V_ADD_F32 lane execution complete; exact add integration into mixed CFG execution in progress  
+**State:** Imported-function relocation orchestration and bounded mixed scalar/vector execution complete; first evidence-backed PS5 AGC shader-container ingestion in progress  
 **Repository:** astraea-emu/astraea  
-**Active branch:** `feat/m4-integrate-exact-v-add-f32`
+**Active branch:** `feat/m4-agc-shader-container`
 
 ## Complete
 
@@ -63,6 +63,7 @@
 - One validated Shader IR block composes scalar moves and plain V_MOV_B32 effects in source order with explicit mixed-state failure progress (#126).
 - Bounded mixed scalar/vector Shader IR programs traverse validated CFG successors under an explicit caller-selected block budget (#128).
 - Mode-independent exact finite-normal V_ADD_F32 lane cases execute with integer-only semantics, atomic active-lane prevalidation, and Trace v0 effects (#130).
+- Exact V_ADD_F32 execution composes with mixed scalar/vector block execution and bounded CFG traversal while preserving ordered effects and typed nested failures (#132).
 - Public five-gate CI remains the merge requirement:
   - Linux x64
   - Windows x64
@@ -72,9 +73,10 @@
 
 ## Current frontier
 
-1. #132 — compose the merged exact `V_ADD_F32` executor into mixed one-block and bounded CFG wave execution — in progress on this branch.
-2. Exact add effects preserve source order with scalar moves and `V_MOV_B32`; unsupported add lanes forward through typed nested vector errors while the failing add remains atomic and earlier block effects remain explicit.
-3. General `V_ADD_F32` floating-point mode semantics, barriers/waits, Sony shader container/launch ABI, SPIR-V/Vulkan lowering, new opcodes, and `R_X86_64_RELATIVE` remain separately deferred.
+1. #134 — parse the smallest evidence-backed PS5 AGC shader-container envelope and expose only its bounded RDNA2 program prefix to the existing decoder.
+2. Current public evidence supports ELF64 little-endian `EM_AMDGPU`, `.shader_header` / `.shader_text`, the AGC header magic/size/type fields, and the currently observed 0x30-byte shader-text trailer program-length field. Unknown bytes remain opaque provenance.
+3. The parser has an owned synthetic end-to-end AGC -> RDNA2 -> Shader IR gate and a dedicated fuzz target. New RDNA2 opcodes, general FP MODE, resource/descriptor decoding, command execution, SPIR-V, and Vulkan remain out of #134.
+4. `docs/PROJECT_PLAN.md` still reflects the original HLE-then-graphics waterfall. The live dependency graph has evolved; a follow-up architecture/roadmap ADR will formalize parallel platform and graphics workstreams with vertical integration gates rather than rewriting working subsystem boundaries ad hoc.
 
 ## SCE metadata boundary
 
@@ -112,7 +114,7 @@ The completed #9 evidence map supports separating:
 - SPIR-V lowering
 - Vulkan host backend
 
-Guest semantics come first. Raw guest packets are not Vulkan objects, Sony shader-container bytes are not generic RDNA2 instruction semantics, and PS5 must not be assumed to equal desktop `gfx1030`.
+Guest semantics come first. Raw guest packets are not Vulkan objects, Sony shader-container bytes are not generic RDNA2 instruction semantics, and PS5 must not be assumed to equal desktop `gfx1030`. "Generic RDNA2" means AMD-defined guest ISA semantics shared by the hardware family; it is not placeholder behavior.
 
 Unknown packet/register, shader-ABI, descriptor, surface-layout, synchronization, queue, presentation, and ray-tracing behavior remains explicitly unsupported until stronger evidence or controlled observations justify it.
 
@@ -133,7 +135,14 @@ PS5-specific assumptions require documented evidence.
 
 ## Next action
 
-Validate #132 across the five-gate matrix. Compose the already-verified exact
-`V_ADD_F32` primitive into mixed block execution so the bounded CFG runner inherits
-it without new orchestration semantics, preserve ordered effects and nested failures,
-and keep general FP MODE, PS5 launch ABI, SPIR-V, and Vulkan out.
+Complete #134 as the first PS5-specific shader-ingestion bridge: validate the
+documented AGC ELF/header/trailer envelope, preserve unknown bytes, expose only
+the bounded program prefix as little-endian RDNA2 dwords, prove the existing
+RDNA2 -> Shader IR pipeline end to end with owned synthetic input, fuzz the
+parser, and merge only after the exact PR head is green on all five CI gates.
+
+After #134, refresh the architecture/roadmap in an ADR before broadening the
+graphics frontend. The next implementation slices should be selected by the
+shortest end-to-end path toward AGC shader creation, Shader IR -> validated
+SPIR-V, guest GPU state/resources, and a minimal Vulkan execution/output gate
+rather than by arbitrary opcode count.
