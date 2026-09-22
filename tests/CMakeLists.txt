@@ -66,6 +66,7 @@ add_executable(astraea_core_tests
     graphics/shader_wave_block_execution_tests.cpp
     graphics/shader_wave_program_execution_tests.cpp
     graphics/spirv_vector_probe_tests.cpp
+    graphics/vulkan_vector_probe_execution_tests.cpp
     trace/v0_tests.cpp
     trace/diff_v0_tests.cpp
     trace/graphics_v0_tests.cpp
