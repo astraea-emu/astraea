@@ -226,6 +226,7 @@ TEST_CASE(
                 .sopp = std::nullopt,
                 .sop1 = std::nullopt,
                 .vop1 = std::nullopt,
+                .vop2 = std::nullopt,
             });
 
     REQUIRE(
