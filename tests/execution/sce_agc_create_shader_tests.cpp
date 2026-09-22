@@ -102,6 +102,8 @@ HleCall make_call(
     };
 }
 
+#if defined(__linux__) && defined(__x86_64__) && defined(MAP_FIXED_NOREPLACE)
+
 template <typename T>
 void write_little_endian(
     std::vector<std::byte>& bytes,
@@ -180,8 +182,6 @@ RuntimeShaderFixture make_shader_fixture() {
 
     return fixture;
 }
-
-#if defined(__linux__) && defined(__x86_64__) && defined(MAP_FIXED_NOREPLACE)
 
 GuestPermissions permissions(std::uint8_t bits) {
     auto result =
@@ -552,7 +552,7 @@ TEST_CASE(
         result->shader.rdna2_words[1] ==
         0xbf810000U);
 
-    std::array<std::byte, sentinel.size()> after{};
+    std::array<std::byte, 8> after{};
     REQUIRE(
         memory.read(
             GuestAddress{output_address},
