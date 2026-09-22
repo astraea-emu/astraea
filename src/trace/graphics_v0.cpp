@@ -130,6 +130,24 @@ namespace {
                 (extension >> 24U) & 0xffU));
     }
 
+    if (instruction.vop2.has_value() &&
+        instruction.vop2->source0_extension.has_value()) {
+        const auto extension =
+            instruction.vop2->source0_extension.value();
+        bytes.reserve(8);
+        bytes.push_back(
+            static_cast<std::byte>(extension & 0xffU));
+        bytes.push_back(
+            static_cast<std::byte>(
+                (extension >> 8U) & 0xffU));
+        bytes.push_back(
+            static_cast<std::byte>(
+                (extension >> 16U) & 0xffU));
+        bytes.push_back(
+            static_cast<std::byte>(
+                (extension >> 24U) & 0xffU));
+    }
+
     return bytes;
 }
 
@@ -201,6 +219,8 @@ namespace {
         return "sop1";
     case astraea::graphics::Rdna2InstructionFormat::vop1:
         return "vop1";
+    case astraea::graphics::Rdna2InstructionFormat::vop2:
+        return "vop2";
     case astraea::graphics::
         Rdna2InstructionFormat::unsupported:
         return "unsupported";
@@ -254,6 +274,9 @@ namespace {
         Rdna2InstructionKind::v_mov_b32:
         return "v_mov_b32";
     case astraea::graphics::
+        Rdna2InstructionKind::v_add_f32:
+        return "v_add_f32";
+    case astraea::graphics::
         Rdna2InstructionKind::unknown_sopp_opcode:
         return "unknown_sopp_opcode";
     case astraea::graphics::
@@ -262,6 +285,9 @@ namespace {
     case astraea::graphics::
         Rdna2InstructionKind::unknown_vop1_opcode:
         return "unknown_vop1_opcode";
+    case astraea::graphics::
+        Rdna2InstructionKind::unknown_vop2_opcode:
+        return "unknown_vop2_opcode";
     case astraea::graphics::
         Rdna2InstructionKind::unsupported_encoding:
         return "unsupported_encoding";
@@ -329,6 +355,10 @@ namespace {
         ShaderIrUnsupportedReason::
             unknown_vop1_opcode:
         return "unknown_vop1_opcode";
+    case astraea::graphics::
+        ShaderIrUnsupportedReason::
+            unknown_vop2_opcode:
+        return "unknown_vop2_opcode";
     case astraea::graphics::
         ShaderIrUnsupportedReason::
             unsupported_scalar_operand:
@@ -610,6 +640,28 @@ trace_rdna2_decode_v0(
                         source_selector));
         }
 
+        if (instruction.vop2.has_value()) {
+            stable.push_back(
+                u64_field(
+                    "opcode",
+                    instruction.vop2->opcode));
+            stable.push_back(
+                u64_field(
+                    "destination_selector",
+                    instruction.vop2->
+                        destination_selector));
+            stable.push_back(
+                u64_field(
+                    "source0_selector",
+                    instruction.vop2->
+                        source0_selector));
+            stable.push_back(
+                u64_field(
+                    "source1_selector",
+                    instruction.vop2->
+                        source1_selector));
+        }
+
         return GraphicsTraceEventResultV0::success(
             TraceEventV0{
                 .id = event_id,
@@ -874,6 +926,24 @@ trace_shader_ir_v0(
                         u64_field(
                             "source_vgpr",
                             operation.source.index));
+                } else if constexpr (
+                    std::is_same_v<
+                        Operation,
+                        astraea::graphics::
+                            ShaderIrVectorAddF32>) {
+                    event_type = "vector_add_f32";
+                    stable.push_back(
+                        u64_field(
+                            "destination_vgpr",
+                            operation.destination.index));
+                    stable.push_back(
+                        u64_field(
+                            "source0_vgpr",
+                            operation.source0.index));
+                    stable.push_back(
+                        u64_field(
+                            "source1_vgpr",
+                            operation.source1.index));
                 } else if constexpr (
                     std::is_same_v<
                         Operation,
