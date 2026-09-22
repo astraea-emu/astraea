@@ -1,9 +1,9 @@
 # Project Status
 
 **Milestone:** M4 — Platform/HLE expansion  
-**State:** Imported-function relocation orchestration baseline complete; bounded RDNA2 stream, validated Shader IR CFG/Trace, and scalar move execution complete; conditional branch predicate execution in progress  
+**State:** Imported-function relocation orchestration baseline complete; bounded RDNA2 stream, validated Shader IR CFG/Trace, scalar move execution, and conditional branch predicate evaluation complete; CFG successor selection in progress  
 **Repository:** astraea-emu/astraea  
-**Active branch:** `feat/m4-shader-branch-predicates`
+**Active branch:** `feat/m4-shader-cfg-successor`
 
 ## Complete
 
@@ -55,6 +55,7 @@
 - Validated Shader IR basic-block/control-flow graph with typed branch and fallthrough edges (#108).
 - Shader CFG block/edge topology exposed through stable Trace v0 semantics and first-divergence comparison (#110).
 - Explicit generic RDNA2 scalar state executes the already-typed S_MOV_B32/B64 Shader IR forms with traced SGPR write effects (#112).
+- Explicit SCC/VCC/EXEC state evaluates the six already-typed conditional branch predicates with traced taken/not-taken decisions (#114).
 - Public five-gate CI remains the merge requirement:
   - Linux x64
   - Windows x64
@@ -64,9 +65,9 @@
 
 ## Current frontier
 
-1. #114 — evaluate the six already-typed RDNA2 conditional branch predicates from explicit scalar state — in progress on this branch.
-2. Predicate evaluation may read SCC/VCC/EXEC and emit a typed taken/not-taken decision, but it must not update a PC or follow CFG edges yet.
-3. Dynamic CFG execution, vector lanes/VGPR execution, floating-point mode semantics, barriers/waits, Sony shader container/launch ABI, SPIR-V/Vulkan lowering, new opcodes, and `R_X86_64_RELATIVE` remain separately deferred.
+1. #117 — compose validated Shader CFG topology with typed conditional branch decisions into deterministic one-block successor selection — in progress on this branch.
+2. Successor selection validates program/CFG identity, block extent, edge targets, exit topology, and conditional predicate identity, but it does not execute the selected block or maintain a program counter.
+3. Dynamic CFG walking/loop execution, vector lanes/VGPR execution, floating-point mode semantics, barriers/waits, Sony shader container/launch ABI, SPIR-V/Vulkan lowering, new opcodes, and `R_X86_64_RELATIVE` remain separately deferred.
 
 ## SCE metadata boundary
 
@@ -125,7 +126,7 @@ PS5-specific assumptions require documented evidence.
 
 ## Next action
 
-Validate #114 across the five-gate matrix. Evaluate all six typed SCC/VCC/EXEC
-conditional branch predicates from explicit generic RDNA2 scalar state, trace the
-taken/not-taken decision, and keep PC/CFG traversal, vector execution, PS5 launch
-ABI, SPIR-V, and Vulkan semantics out.
+Validate #117 across the five-gate matrix. Select only already-validated CFG
+successor edges from block exit semantics and matching conditional decisions,
+trace the chosen edge or terminal outcome, and keep block execution, loop walking,
+PS5 launch ABI, SPIR-V, and Vulkan semantics out.
