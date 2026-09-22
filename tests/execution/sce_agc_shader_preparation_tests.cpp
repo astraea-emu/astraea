@@ -272,7 +272,8 @@ const SceAgcShaderPatch& require_patch(
             return patch;
         }
     }
-    FAIL("expected AGC preparation patch kind");
+    FAIL_CHECK("expected AGC preparation patch kind");
+    REQUIRE_FALSE(plan.patches.empty());
     return plan.patches.front();
 }
 
