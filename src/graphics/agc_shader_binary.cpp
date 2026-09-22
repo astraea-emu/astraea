@@ -127,9 +127,14 @@ template <typename T>
     };
 }
 
+struct ParsedRegisterList {
+    std::vector<AgcRegisterWrite> writes;
+    std::optional<std::uint64_t> header_offset;
+};
+
 using RegisterListResult =
     astraea::core::Result<
-        std::vector<AgcRegisterWrite>,
+        ParsedRegisterList,
         AgcShaderBinaryError>;
 
 [[nodiscard]] RegisterListResult parse_register_list(
@@ -142,7 +147,11 @@ using RegisterListResult =
             header[count_field]);
 
     if (count == 0) {
-        return RegisterListResult::success({});
+        return RegisterListResult::success(
+            ParsedRegisterList{
+                .writes = {},
+                .header_offset = std::nullopt,
+            });
     }
 
     const auto raw_relative_offset =
@@ -234,7 +243,10 @@ using RegisterListResult =
         }
 
         return RegisterListResult::success(
-            std::move(writes));
+            ParsedRegisterList{
+                .writes = std::move(writes),
+                .header_offset = list_offset,
+            });
     } catch (const std::bad_alloc&) {
         return RegisterListResult::failure(
             error(
@@ -415,10 +427,18 @@ parse_agc_shader_binary(
                         std::to_integer<std::uint8_t>(
                             shader_header[
                                 kAgcProgramTypeOffset])),
+                .context_register_list_header_offset =
+                    context_registers->
+                        header_offset,
+                .shader_register_list_header_offset =
+                    shader_registers->
+                        header_offset,
                 .context_registers =
-                    std::move(context_registers).value(),
+                    std::move(
+                        context_registers->writes),
                 .shader_registers =
-                    std::move(shader_registers).value(),
+                    std::move(
+                        shader_registers->writes),
                 .program_byte_size =
                     program_byte_size,
                 .trailer_sl00_byte_size =

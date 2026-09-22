@@ -52,6 +52,14 @@ struct AgcShaderBinary {
     std::uint32_t declared_shader_text_size = 0;
     AgcShaderProgramType program_type{};
 
+    // Resolved raw-header byte offsets for non-empty register lists. These
+    // preserve the corrected self-relative addressing result so later
+    // preparation code does not reinterpret the raw qwords independently.
+    std::optional<std::uint64_t>
+        context_register_list_header_offset;
+    std::optional<std::uint64_t>
+        shader_register_list_header_offset;
+
     std::vector<AgcRegisterWrite> context_registers;
     std::vector<AgcRegisterWrite> shader_registers;
 
