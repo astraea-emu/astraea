@@ -19,7 +19,8 @@ namespace {
     return instruction.format ==
                Rdna2InstructionFormat::sopp &&
            instruction.sopp.has_value() &&
-           !instruction.sop1.has_value();
+           !instruction.sop1.has_value() &&
+           !instruction.vop1.has_value();
 }
 
 [[nodiscard]] bool valid_vop1_source(
@@ -36,7 +37,8 @@ namespace {
     return instruction.format ==
                Rdna2InstructionFormat::sop1 &&
            instruction.sop1.has_value() &&
-           !instruction.sopp.has_value();
+           !instruction.sopp.has_value() &&
+           !instruction.vop1.has_value();
 }
 
 [[nodiscard]] bool plain_sgpr_selector(
