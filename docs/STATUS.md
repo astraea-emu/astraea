@@ -1,9 +1,9 @@
 # Project Status
 
 **Milestone:** M4 — Platform/HLE expansion  
-**State:** Imported-function relocation orchestration baseline complete; generic RDNA2 SOPP control/synchronization semantic baseline complete  
+**State:** Imported-function relocation orchestration baseline complete; generic RDNA2 SOP1 S_MOV_B32 SGPR slice in progress  
 **Repository:** astraea-emu/astraea  
-**Active branch:** `main`
+**Active branch:** `feat/m4-rdna2-sop1-mov-b32`
 
 ## Complete
 
@@ -53,8 +53,8 @@
 
 ## Current frontier
 
-1. The generic RDNA2 SOPP control/synchronization semantic baseline now includes branches, S_BARRIER, and S_WAITCNT.
-2. The next graphics slice should add evidence-backed data/value semantics rather than enumerate debug/control opcodes with little near-term shader value.
+1. #92 — add generic RDNA2 SOP1 base-word decoding and lower S_MOV_B32 plain SGPR-to-SGPR moves — in progress on this branch.
+2. Special scalar registers, inline constants, literal-extension decoding, execution/register-file state, and host lowering remain explicitly unsupported.
 3. Sony shader ABI/container behavior, SPIR-V/Vulkan lowering, and `R_X86_64_RELATIVE` remain separately deferred.
 
 ## SCE metadata boundary
@@ -114,4 +114,6 @@ PS5-specific assumptions require documented evidence.
 
 ## Next action
 
-Define the next generic-RDNA2 shader slice around the smallest public-ISA data/value operation that establishes reusable register/value semantics. Preserve raw provenance and keep Sony shader ABI/container and host-backend lowering out.
+Validate #92 across the five-gate matrix. Keep the slice generic-RDNA2 only:
+decode SOP1 base fields, lower only S_MOV_B32 SGPR-to-SGPR semantics, preserve raw
+selectors/provenance, and leave special/literal operands plus execution/backend behavior out.

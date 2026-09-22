@@ -159,6 +159,8 @@ namespace {
     switch (format) {
     case astraea::graphics::Rdna2InstructionFormat::sopp:
         return "sopp";
+    case astraea::graphics::Rdna2InstructionFormat::sop1:
+        return "sop1";
     case astraea::graphics::
         Rdna2InstructionFormat::unsupported:
         return "unsupported";
@@ -203,8 +205,14 @@ namespace {
         Rdna2InstructionKind::s_waitcnt:
         return "s_waitcnt";
     case astraea::graphics::
+        Rdna2InstructionKind::s_mov_b32:
+        return "s_mov_b32";
+    case astraea::graphics::
         Rdna2InstructionKind::unknown_sopp_opcode:
         return "unknown_sopp_opcode";
+    case astraea::graphics::
+        Rdna2InstructionKind::unknown_sop1_opcode:
+        return "unknown_sop1_opcode";
     case astraea::graphics::
         Rdna2InstructionKind::unsupported_encoding:
         return "unsupported_encoding";
@@ -241,6 +249,14 @@ namespace {
         ShaderIrUnsupportedReason::
             unknown_sopp_opcode:
         return "unknown_sopp_opcode";
+    case astraea::graphics::
+        ShaderIrUnsupportedReason::
+            unknown_sop1_opcode:
+        return "unknown_sop1_opcode";
+    case astraea::graphics::
+        ShaderIrUnsupportedReason::
+            unsupported_scalar_operand:
+        return "unsupported_scalar_operand";
     case astraea::graphics::
         ShaderIrUnsupportedReason::
             unsupported_encoding:
@@ -472,6 +488,23 @@ trace_rdna2_decode_v0(
                             instruction.sopp->simm16))));
         }
 
+        if (instruction.sop1.has_value()) {
+            stable.push_back(
+                u64_field(
+                    "opcode",
+                    instruction.sop1->opcode));
+            stable.push_back(
+                u64_field(
+                    "destination_selector",
+                    instruction.sop1->
+                        destination_selector));
+            stable.push_back(
+                u64_field(
+                    "source_selector",
+                    instruction.sop1->
+                        source_selector));
+        }
+
         return GraphicsTraceEventResultV0::success(
             TraceEventV0{
                 .id = event_id,
@@ -635,6 +668,20 @@ trace_shader_ir_v0(
                         u64_field(
                             "lgkmcnt",
                             operation.lgkmcnt));
+                } else if constexpr (
+                    std::is_same_v<
+                        Operation,
+                        astraea::graphics::
+                            ShaderIrScalarMove32>) {
+                    event_type = "scalar_move_32";
+                    stable.push_back(
+                        u64_field(
+                            "destination_sgpr",
+                            operation.destination.index));
+                    stable.push_back(
+                        u64_field(
+                            "source_sgpr",
+                            operation.source.index));
                 } else if constexpr (
                     std::is_same_v<
                         Operation,
