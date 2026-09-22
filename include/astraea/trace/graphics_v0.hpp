@@ -88,4 +88,10 @@ trace_shader_branch_decision_v0(
     std::uint64_t event_id,
     const astraea::graphics::ShaderBranchDecision& decision);
 
+[[nodiscard]] GraphicsTraceEventResultV0
+trace_shader_cfg_successor_selection_v0(
+    std::uint64_t event_id,
+    std::size_t source_block_index,
+    const astraea::graphics::ShaderCfgSuccessorSelection& selection);
+
 }  // namespace astraea::trace
