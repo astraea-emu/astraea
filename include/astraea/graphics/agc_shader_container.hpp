@@ -8,27 +8,9 @@
 #include <vector>
 
 #include <astraea/core/result.hpp>
+#include <astraea/graphics/agc_shader_binary.hpp>
 
 namespace astraea::graphics {
-
-enum class AgcShaderStage {
-    compute,
-    pixel,
-    geometry,
-    hull,
-    geometry_front,
-    hull_front,
-    geometry_back,
-    hull_back,
-    function,
-};
-
-struct AgcShaderProgramType {
-    std::uint8_t raw = 0;
-    std::optional<AgcShaderStage> known;
-
-    auto operator<=>(const AgcShaderProgramType&) const = default;
-};
 
 struct AgcShaderSectionProvenance {
     std::size_t section_index = 0;
@@ -46,28 +28,15 @@ struct AgcShaderContainer {
     std::uint16_t elf_machine = 0;
     std::uint32_t elf_flags = 0;
 
-    std::uint32_t header_magic = 0;
-    std::uint32_t header_version = 0;
-    std::uint32_t declared_header_size = 0;
-    std::uint32_t declared_shader_text_size = 0;
-    AgcShaderProgramType program_type{};
-
     AgcShaderSectionProvenance shader_header_section{};
     AgcShaderSectionProvenance shader_text_section{};
 
-    std::uint32_t program_byte_size = 0;
-    std::uint32_t trailer_sl00_byte_size = 0;
+    // The runtime header/text semantics are canonicalized here rather than
+    // duplicated in the outer ELF/container parser.
+    AgcShaderBinary shader;
 
-    // Full input bytes and both AGC sections remain available as opaque
-    // provenance. Unknown header/trailer fields are intentionally not assigned
-    // semantics merely because they are present in a public sample.
+    // Full container bytes remain available as outer-envelope provenance.
     std::vector<std::byte> container_bytes;
-    std::vector<std::byte> shader_header_bytes;
-    std::vector<std::byte> shader_text_bytes;
-
-    // Only the evidence-bounded program prefix is converted to generic RDNA2
-    // dwords. The remaining shader-text bytes stay opaque above.
-    std::vector<std::uint32_t> rdna2_words;
 };
 
 enum class AgcShaderContainerErrorCode {
@@ -98,6 +67,8 @@ enum class AgcShaderContainerErrorCode {
     bad_shader_header_magic,
     declared_header_size_mismatch,
     declared_shader_text_size_mismatch,
+    register_table_extent_overflow,
+    register_table_extent_out_of_bounds,
     shader_text_too_small_for_trailer,
     program_extent_out_of_bounds,
     program_size_not_dword_aligned,
@@ -109,6 +80,7 @@ struct AgcShaderContainerError {
         AgcShaderContainerErrorCode::file_too_small;
     std::optional<std::size_t> section_index;
     std::uint64_t file_offset = 0;
+    std::optional<AgcShaderBinaryError> shader_binary_error;
 
     auto operator<=>(const AgcShaderContainerError&) const = default;
 };
@@ -118,18 +90,12 @@ using AgcShaderContainerResult =
         AgcShaderContainer,
         AgcShaderContainerError>;
 
-// Parses only the evidence-backed outer envelope used by current public PS5
-// AGC shader-container examples:
+// Parses only the evidence-backed outer ELF envelope used by current public
+// PS5 AGC shader-container examples, then delegates the .shader_header /
+// .shader_text pair to parse_agc_shader_binary().
 //
-//   ELF64 little-endian / EM_AMDGPU
-//       .shader_header
-//       .shader_text
-//
-// The parser validates the documented AGC header magic and declared section
-// sizes, then uses the documented shader-text trailer program-length field to
-// expose a bounded little-endian RDNA2 dword stream. It deliberately does not
-// decode register lists, resources, descriptors, hashes, launch state, or any
-// other unknown AGC header/trailer field.
+// The outer parser does not decode register semantics, resources, descriptors,
+// launch state, hashes, or other unknown AGC fields.
 [[nodiscard]] AgcShaderContainerResult
 parse_agc_shader_container(std::span<const std::byte> bytes);
 
