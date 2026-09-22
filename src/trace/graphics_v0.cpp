@@ -90,9 +90,29 @@ namespace {
 [[nodiscard]] std::vector<std::byte> instruction_bytes(
     const astraea::graphics::Rdna2Instruction&
         instruction) {
-    return std::vector<std::byte>(
+    std::vector<std::byte> bytes(
         instruction.raw_encoding.begin(),
         instruction.raw_encoding.end());
+
+    if (instruction.sop1.has_value() &&
+        instruction.sop1->literal_constant.has_value()) {
+        const auto literal =
+            instruction.sop1->literal_constant.value();
+        bytes.reserve(8);
+        bytes.push_back(
+            static_cast<std::byte>(literal & 0xffU));
+        bytes.push_back(
+            static_cast<std::byte>(
+                (literal >> 8U) & 0xffU));
+        bytes.push_back(
+            static_cast<std::byte>(
+                (literal >> 16U) & 0xffU));
+        bytes.push_back(
+            static_cast<std::byte>(
+                (literal >> 24U) & 0xffU));
+    }
+
+    return bytes;
 }
 
 [[nodiscard]] std::string packet_error_code_text(
@@ -506,6 +526,14 @@ trace_rdna2_decode_v0(
                     "source_selector",
                     instruction.sop1->
                         source_selector));
+            if (instruction.sop1->
+                    literal_constant.has_value()) {
+                stable.push_back(
+                    u64_field(
+                        "literal_constant_bits",
+                        instruction.sop1->
+                            literal_constant.value()));
+            }
         }
 
         return GraphicsTraceEventResultV0::success(
@@ -696,7 +724,10 @@ trace_shader_ir_v0(
                                         ShaderIrSgpr>(
                                     operation.source)
                                     .index));
-                    } else {
+                    } else if (std::holds_alternative<
+                                   astraea::graphics::
+                                       ShaderIrInlineInteger32>(
+                                   operation.source)) {
                         stable.push_back(
                             text_field(
                                 "source_kind",
@@ -710,6 +741,19 @@ trace_shader_ir_v0(
                                             ShaderIrInlineInteger32>(
                                         operation.source)
                                         .value)));
+                    } else {
+                        stable.push_back(
+                            text_field(
+                                "source_kind",
+                                "literal"));
+                        stable.push_back(
+                            u64_field(
+                                "source_literal_bits",
+                                std::get<
+                                    astraea::graphics::
+                                        ShaderIrLiteral32>(
+                                    operation.source)
+                                    .bits));
                     }
                 } else if constexpr (
                     std::is_same_v<
