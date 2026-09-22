@@ -1,9 +1,9 @@
 # Project Status
 
 **Milestone:** M4 — Platform/HLE expansion  
-**State:** Imported-function relocation orchestration baseline complete; first RDNA2 VOP2/V_ADD_F32 arithmetic slice in progress  
+**State:** Imported-function relocation orchestration baseline complete; bounded RDNA2 whole-stream decode/lower pipeline in progress  
 **Repository:** astraea-emu/astraea  
-**Active branch:** `feat/m4-rdna2-vop2-vadd-f32`
+**Active branch:** `feat/m4-rdna2-shader-program`
 
 ## Complete
 
@@ -59,9 +59,9 @@
 
 ## Current frontier
 
-1. #104 — add the first RDNA2 VOP2 arithmetic path and lower plain VGPR + VGPR → VGPR V_ADD_F32 — in progress on this branch.
-2. VOP2 SRC0 extension selectors are length-validated and preserved as provenance only; semantic lowering is limited to SRC0 selectors 256..511 while VSRC1/VDST remain direct VGPR selectors.
-3. Other VOP2 opcodes, scalar/inline/special/literal VOP2 SRC0 semantics, DPP/SDWA interpretation, floating-point/wave execution, VOPC/VOP3, Sony shader ABI/container behavior, SPIR-V/Vulkan lowering, and `R_X86_64_RELATIVE` remain separately deferred.
+1. #106 — compose the existing generic RDNA2 decoder and Shader IR lowerer into an ordered bounded whole-stream pipeline — in progress on this branch.
+2. Stream advancement must use each decoded instruction's validated `word_count`, preserving literal/DPP/SDWA extension dwords as part of their owning instruction rather than re-decoding them.
+3. Branch following/CFG construction, shader execution, wave/lane semantics, Sony shader container/launch ABI, SPIR-V/Vulkan lowering, new opcodes, and `R_X86_64_RELATIVE` remain separately deferred.
 
 ## SCE metadata boundary
 
@@ -120,7 +120,7 @@ PS5-specific assumptions require documented evidence.
 
 ## Next action
 
-Validate #104 across the five-gate matrix. Decode VOP2 fields and required SRC0
-extension dwords exactly, lower only plain VGPR + VGPR → VGPR V_ADD_F32 into typed
-Shader IR/Trace, and keep arithmetic execution, DPP/SDWA/literal semantics, Sony ABI,
-SPIR-V, and Vulkan out.
+Validate #106 across the five-gate matrix. Decode and lower bounded RDNA2 words
+linearly in source order, advance only by validated instruction extents, preserve
+ordered Shader IR provenance, and report the first indexed decode failure without
+following control flow or introducing execution, Sony ABI, SPIR-V, or Vulkan semantics.
