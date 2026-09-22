@@ -465,7 +465,7 @@ TEST_CASE(
 }
 
 TEST_CASE(
-    "later mixed block failure preserves prior blocks and in-block vector progress",
+    "later unsupported exact add preserves prior blocks and in-block vector progress",
     "[graphics][shader-execution][wave-program][partial-failure]") {
     const std::array<std::uint32_t, 5> words{
         make_sop1(3, 1, 129),
@@ -487,7 +487,9 @@ TEST_CASE(
     astraea::graphics::ShaderScalarState scalar_state{};
     scalar_state.exec = 1;
     auto vector_state = wave32_state();
-    vector_state.vgprs[3][0] = 0xabcdef01U;
+    // The later V_MOV is valid and must persist, while the following exact-add
+    // rejects the denormal active-lane inputs atomically.
+    vector_state.vgprs[3][0] = 0x00000001U;
 
     const auto result =
         astraea::graphics::
@@ -512,12 +514,21 @@ TEST_CASE(
         result.error().block_error->code ==
         astraea::graphics::
             ShaderWaveBlockExecutionErrorCode::
-                unsupported_operation);
+                vector_execution_failure);
     REQUIRE(
         result.error().block_error->
             completed_emission_count == 1);
+    REQUIRE(result.error().block_error->vector_error.has_value());
+    REQUIRE(
+        result.error().block_error->vector_error->code ==
+        astraea::graphics::
+            ShaderVectorExecutionErrorCode::
+                unsupported_f32_case);
+    REQUIRE(
+        result.error().block_error->vector_error->lane_index ==
+        std::optional<std::size_t>{0});
     REQUIRE(scalar_state.sgprs[1] == 1U);
-    REQUIRE(vector_state.vgprs[2][0] == 0xabcdef01U);
+    REQUIRE(vector_state.vgprs[2][0] == 0x00000001U);
 }
 
 TEST_CASE(
@@ -650,4 +661,128 @@ TEST_CASE(
         REQUIRE(scalar_state == before_scalar);
         REQUIRE(vector_state == before_vector);
     }
+}
+
+
+TEST_CASE(
+    "bounded mixed wave program executes exact add in a later CFG block",
+    "[graphics][shader-execution][wave-program][add-f32]") {
+    const std::array<std::uint32_t, 4> words{
+        make_sop1(3, 1, 129),
+        make_sopp(2, 0),
+        make_vop2(3, 4, 258, 3),
+        make_sopp(1, 0),
+    };
+    const auto program =
+        astraea::graphics::
+            lower_rdna2_stream_to_shader_ir(words);
+    REQUIRE(program.has_value());
+    const auto graph =
+        astraea::graphics::
+            build_shader_control_flow_graph(
+                program.value());
+    REQUIRE(graph.has_value());
+    REQUIRE(graph->blocks.size() == 2);
+
+    astraea::graphics::ShaderScalarState scalar_state{};
+    scalar_state.exec = 1;
+    auto vector_state = wave32_state();
+    vector_state.vgprs[2][0] = 0x3f800000U;
+    vector_state.vgprs[3][0] = 0x40000000U;
+
+    const auto result =
+        astraea::graphics::
+            execute_shader_wave_program(
+                program.value(),
+                graph.value(),
+                0,
+                2,
+                scalar_state,
+                vector_state);
+
+    REQUIRE(result.has_value());
+    REQUIRE(result->block_executions.size() == 2);
+    REQUIRE(result->block_executions[0].block_index == 0);
+    REQUIRE(result->block_executions[1].block_index == 1);
+    REQUIRE(scalar_state.sgprs[1] == 1U);
+    REQUIRE(vector_state.vgprs[4][0] == 0x40400000U);
+    REQUIRE(result->block_executions[1].effects.size() == 1);
+    REQUIRE(
+        std::holds_alternative<
+            astraea::graphics::ShaderVectorAddF32Effect>(
+            result->block_executions[1].effects[0]));
+}
+
+TEST_CASE(
+    "later unsupported exact add preserves prior blocks and prior in-block effects",
+    "[graphics][shader-execution][wave-program][add-f32][partial-failure]") {
+    const std::array<std::uint32_t, 5> words{
+        make_sop1(3, 1, 129),
+        make_sopp(2, 0),
+        make_vop1(1, 6, 263),
+        make_vop2(3, 4, 258, 3),
+        make_sopp(1, 0),
+    };
+    const auto program =
+        astraea::graphics::
+            lower_rdna2_stream_to_shader_ir(words);
+    REQUIRE(program.has_value());
+    const auto graph =
+        astraea::graphics::
+            build_shader_control_flow_graph(
+                program.value());
+    REQUIRE(graph.has_value());
+    REQUIRE(graph->blocks.size() == 2);
+
+    astraea::graphics::ShaderScalarState scalar_state{};
+    scalar_state.exec = 1;
+    auto vector_state = wave32_state();
+
+    vector_state.vgprs[7][0] = 0xabcdef01U;
+    vector_state.vgprs[2][0] = 0x3f800000U;
+    vector_state.vgprs[3][0] = 0x33800000U;
+    vector_state.vgprs[4][0] = 0x12345678U;
+
+    const auto result =
+        astraea::graphics::
+            execute_shader_wave_program(
+                program.value(),
+                graph.value(),
+                0,
+                3,
+                scalar_state,
+                vector_state);
+
+    REQUIRE_FALSE(result.has_value());
+    REQUIRE(
+        result.error().code ==
+        astraea::graphics::
+            ShaderWaveProgramExecutionErrorCode::
+                block_execution_failure);
+    REQUIRE(result.error().current_block_index == 1);
+    REQUIRE(result.error().completed_blocks.size() == 1);
+    REQUIRE(result.error().block_error.has_value());
+    REQUIRE(
+        result.error().block_error->code ==
+        astraea::graphics::
+            ShaderWaveBlockExecutionErrorCode::
+                vector_execution_failure);
+    REQUIRE(
+        result.error().block_error->
+            completed_emission_count == 1);
+    REQUIRE(result.error().block_error->vector_error.has_value());
+    REQUIRE(
+        result.error().block_error->vector_error->code ==
+        astraea::graphics::
+            ShaderVectorExecutionErrorCode::
+                unsupported_f32_case);
+    REQUIRE(
+        result.error().block_error->vector_error->lane_index ==
+        std::optional<std::size_t>{0});
+
+    // Block 0 and the earlier V_MOV_B32 in block 1 remain applied.
+    REQUIRE(scalar_state.sgprs[1] == 1U);
+    REQUIRE(vector_state.vgprs[6][0] == 0xabcdef01U);
+    // The failing add itself is atomic.
+    REQUIRE(vector_state.vgprs[4][0] == 0x12345678U);
 }
