@@ -413,10 +413,11 @@ TEST_CASE(
 }
 
 TEST_CASE(
-    "S_MOV_B32 literal selector is preserved without consuming extension word",
-    "[graphics][rdna2][sop1][mov]") {
-    const std::array<std::uint32_t, 1> words{
+    "S_MOV_B32 literal selector consumes and preserves extension dword",
+    "[graphics][rdna2][sop1][mov][literal]") {
+    const std::array<std::uint32_t, 2> words{
         make_sop1(3, 5, 255),
+        0xdeadbeefU,
     };
 
     const auto result =
@@ -428,8 +429,33 @@ TEST_CASE(
     REQUIRE(
         result->kind ==
         astraea::graphics::Rdna2InstructionKind::s_mov_b32);
+    REQUIRE(result->word_count == 2);
     REQUIRE(result->sop1.has_value());
     REQUIRE(result->sop1->source_selector == 255);
+    REQUIRE(
+        result->sop1->literal_constant ==
+        std::optional<std::uint32_t>{0xdeadbeefU});
+}
+
+TEST_CASE(
+    "S_MOV_B32 literal selector rejects missing extension dword",
+    "[graphics][rdna2][sop1][mov][literal]") {
+    const std::array<std::uint32_t, 1> words{
+        make_sop1(3, 5, 255),
+    };
+
+    const auto result =
+        astraea::graphics::decode_rdna2_instruction(
+            words,
+            0);
+
+    REQUIRE_FALSE(result.has_value());
+    REQUIRE(
+        result.error().code ==
+        astraea::graphics::Rdna2DecodeErrorCode::
+            instruction_out_of_bounds);
+    REQUIRE(result.error().word_index == 1);
+    REQUIRE(result.error().available_words == 1);
 }
 
 
