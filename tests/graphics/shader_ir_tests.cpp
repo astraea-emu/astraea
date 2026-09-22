@@ -157,6 +157,7 @@ TEST_CASE(
                     astraea::graphics::
                         Rdna2InstructionKind::s_branch,
                 .sopp = std::nullopt,
+                .sop1 = std::nullopt,
             });
 
     REQUIRE(
