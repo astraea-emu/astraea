@@ -1,9 +1,9 @@
 # Project Status
 
 **Milestone:** M4 — Platform/HLE expansion  
-**State:** Imported-function relocation orchestration baseline complete; first RDNA2 VOP1/VGPR dataflow slice in progress  
+**State:** Imported-function relocation orchestration baseline complete; first RDNA2 VOP2/V_ADD_F32 arithmetic slice in progress  
 **Repository:** astraea-emu/astraea  
-**Active branch:** `feat/m4-rdna2-vop1-vmov-b32`
+**Active branch:** `feat/m4-rdna2-vop2-vadd-f32`
 
 ## Complete
 
@@ -49,6 +49,7 @@
 - AMD-documented RDNA2 S_MOV_B32 single-word integer inline sources lowered to typed Shader IR/Trace semantics (#95).
 - AMD-documented RDNA2 S_MOV_B32 selector-255 literal extension lowered to typed Shader IR/Trace semantics (#98).
 - AMD-documented non-privileged VCC_LO/VCC_HI/M0/NULL/EXEC_LO/EXEC_HI S_MOV_B32 sources typed in Shader IR/Trace (#100).
+- AMD-documented RDNA2 VOP1 V_MOV_B32 plain VGPR-to-VGPR moves lowered to typed Shader IR/Trace (#102).
 - Public five-gate CI remains the merge requirement:
   - Linux x64
   - Windows x64
@@ -58,9 +59,9 @@
 
 ## Current frontier
 
-1. #102 — add the first RDNA2 VOP1 path and lower plain VGPR-to-VGPR V_MOV_B32 — in progress on this branch.
-2. VOP1 extension selectors are length-validated and preserved as provenance only; only source selectors 256..511 lower semantically in this slice.
-3. VOP2/VOPC/VOP3, scalar/inline/special VOP1 sources, DPP/SDWA semantics, lane execution, Sony shader ABI/container behavior, SPIR-V/Vulkan lowering, and `R_X86_64_RELATIVE` remain separately deferred.
+1. #104 — add the first RDNA2 VOP2 arithmetic path and lower plain VGPR + VGPR → VGPR V_ADD_F32 — in progress on this branch.
+2. VOP2 SRC0 extension selectors are length-validated and preserved as provenance only; semantic lowering is limited to SRC0 selectors 256..511 while VSRC1/VDST remain direct VGPR selectors.
+3. Other VOP2 opcodes, scalar/inline/special/literal VOP2 SRC0 semantics, DPP/SDWA interpretation, floating-point/wave execution, VOPC/VOP3, Sony shader ABI/container behavior, SPIR-V/Vulkan lowering, and `R_X86_64_RELATIVE` remain separately deferred.
 
 ## SCE metadata boundary
 
@@ -119,6 +120,7 @@ PS5-specific assumptions require documented evidence.
 
 ## Next action
 
-Validate #102 across the five-gate matrix. Decode VOP1 fields and required extension
-dwords exactly, lower only plain VGPR-to-VGPR V_MOV_B32 into typed Shader IR/Trace,
-and keep DPP/SDWA/literal semantics, lane execution, Sony ABI, SPIR-V, and Vulkan out.
+Validate #104 across the five-gate matrix. Decode VOP2 fields and required SRC0
+extension dwords exactly, lower only plain VGPR + VGPR → VGPR V_ADD_F32 into typed
+Shader IR/Trace, and keep arithmetic execution, DPP/SDWA/literal semantics, Sony ABI,
+SPIR-V, and Vulkan out.
