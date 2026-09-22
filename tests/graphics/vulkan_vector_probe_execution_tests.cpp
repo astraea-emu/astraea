@@ -59,10 +59,27 @@ constexpr std::uint32_t make_vop2(
 }
 
 [[nodiscard]] bool live_vulkan_required() {
+#if defined(_WIN32)
+    char* value = nullptr;
+    std::size_t value_size = 0;
+    if (_dupenv_s(
+            &value,
+            &value_size,
+            "ASTRAEA_REQUIRE_VULKAN_PROBE") != 0 ||
+        value == nullptr) {
+        return false;
+    }
+
+    const bool required =
+        std::string_view{value} == "1";
+    std::free(value);
+    return required;
+#else
     const auto* value =
         std::getenv("ASTRAEA_REQUIRE_VULKAN_PROBE");
     return value != nullptr &&
            std::string_view{value} == "1";
+#endif
 }
 
 [[nodiscard]] astraea::graphics::ShaderIrProgram
