@@ -24,16 +24,6 @@ constexpr std::uint32_t kShtProgbits = 1;
 constexpr std::uint32_t kShtStrtab = 3;
 constexpr std::uint32_t kShtNobits = 8;
 
-constexpr std::uint32_t kAgcHeaderMagic = 0x34333231U;
-constexpr std::size_t kAgcHeaderMinimumSize = 96;
-constexpr std::size_t kAgcHeaderSizeOffset = 0x40;
-constexpr std::size_t kAgcShaderTextSizeOffset = 0x44;
-constexpr std::size_t kAgcProgramTypeOffset = 0x5a;
-
-constexpr std::size_t kAgcShaderTextTrailerSize = 0x30;
-constexpr std::size_t kAgcTrailerProgramLengthOffset = 0x14;
-constexpr std::size_t kAgcTrailerSl00LengthOffset = 0x1c;
-
 constexpr std::array<std::byte, 4> kElfMagic{
     std::byte{0x7f},
     std::byte{'E'},
@@ -118,11 +108,14 @@ template <typename T>
     AgcShaderContainerErrorCode code,
     std::uint64_t file_offset,
     std::optional<std::size_t> section_index =
+        std::nullopt,
+    std::optional<AgcShaderBinaryError> shader_binary_error =
         std::nullopt) noexcept {
     return AgcShaderContainerError{
         .code = code,
         .section_index = section_index,
         .file_offset = file_offset,
+        .shader_binary_error = shader_binary_error,
     };
 }
 
@@ -215,47 +208,49 @@ template <typename T>
     return true;
 }
 
-[[nodiscard]] AgcShaderProgramType program_type(
-    std::uint8_t raw) noexcept {
-    using Stage = AgcShaderStage;
-
-    std::optional<Stage> known;
-    switch (raw) {
-    case 0:
-        known = Stage::compute;
-        break;
-    case 1:
-        known = Stage::pixel;
-        break;
-    case 2:
-        known = Stage::geometry;
-        break;
-    case 3:
-        known = Stage::hull;
-        break;
-    case 4:
-        known = Stage::geometry_front;
-        break;
-    case 5:
-        known = Stage::hull_front;
-        break;
-    case 6:
-        known = Stage::geometry_back;
-        break;
-    case 7:
-        known = Stage::hull_back;
-        break;
-    case 8:
-        known = Stage::function;
-        break;
-    default:
-        break;
+[[nodiscard]] AgcShaderContainerErrorCode
+container_error_code(
+    AgcShaderBinaryErrorCode code) noexcept {
+    switch (code) {
+    case AgcShaderBinaryErrorCode::shader_header_too_small:
+        return AgcShaderContainerErrorCode::
+            shader_header_too_small;
+    case AgcShaderBinaryErrorCode::bad_shader_header_magic:
+        return AgcShaderContainerErrorCode::
+            bad_shader_header_magic;
+    case AgcShaderBinaryErrorCode::declared_header_size_mismatch:
+        return AgcShaderContainerErrorCode::
+            declared_header_size_mismatch;
+    case AgcShaderBinaryErrorCode::
+        declared_shader_text_size_mismatch:
+        return AgcShaderContainerErrorCode::
+            declared_shader_text_size_mismatch;
+    case AgcShaderBinaryErrorCode::
+        register_table_extent_overflow:
+        return AgcShaderContainerErrorCode::
+            register_table_extent_overflow;
+    case AgcShaderBinaryErrorCode::
+        register_table_extent_out_of_bounds:
+        return AgcShaderContainerErrorCode::
+            register_table_extent_out_of_bounds;
+    case AgcShaderBinaryErrorCode::
+        shader_text_too_small_for_trailer:
+        return AgcShaderContainerErrorCode::
+            shader_text_too_small_for_trailer;
+    case AgcShaderBinaryErrorCode::program_extent_out_of_bounds:
+        return AgcShaderContainerErrorCode::
+            program_extent_out_of_bounds;
+    case AgcShaderBinaryErrorCode::
+        program_size_not_dword_aligned:
+        return AgcShaderContainerErrorCode::
+            program_size_not_dword_aligned;
+    case AgcShaderBinaryErrorCode::host_allocation_failure:
+        return AgcShaderContainerErrorCode::
+            host_allocation_failure;
     }
 
-    return AgcShaderProgramType{
-        .raw = raw,
-        .known = known,
-    };
+    return AgcShaderContainerErrorCode::
+        host_allocation_failure;
 }
 
 }  // namespace
@@ -651,16 +646,6 @@ parse_agc_shader_container(
                 0));
     }
 
-    if (shader_header->size <
-        kAgcHeaderMinimumSize) {
-        return AgcShaderContainerResult::failure(
-            error(
-                AgcShaderContainerErrorCode::
-                    shader_header_too_small,
-                shader_header->offset,
-                shader_header->index));
-    }
-
     const auto header_offset =
         static_cast<std::size_t>(
             shader_header->offset);
@@ -683,114 +668,46 @@ parse_agc_shader_container(
             text_offset,
             text_size);
 
-    const auto header_magic =
-        read_little_endian<std::uint32_t>(
+    auto shader =
+        parse_agc_shader_binary(
             header_span,
-            0);
-    if (header_magic != kAgcHeaderMagic) {
-        return AgcShaderContainerResult::failure(
-            error(
-                AgcShaderContainerErrorCode::
-                    bad_shader_header_magic,
-                shader_header->offset,
-                shader_header->index));
-    }
+            text_span);
+    if (!shader.has_value()) {
+        const auto detail = shader.error();
+        std::uint64_t file_offset = 0;
+        std::optional<std::size_t> section_index;
 
-    const auto header_version =
-        read_little_endian<std::uint32_t>(
-            header_span,
-            4);
-    const auto declared_header_size =
-        read_little_endian<std::uint32_t>(
-            header_span,
-            kAgcHeaderSizeOffset);
-    const auto declared_shader_text_size =
-        read_little_endian<std::uint32_t>(
-            header_span,
-            kAgcShaderTextSizeOffset);
-
-    if (declared_header_size !=
-        shader_header->size) {
-        return AgcShaderContainerResult::failure(
-            error(
-                AgcShaderContainerErrorCode::
-                    declared_header_size_mismatch,
+        switch (detail.region) {
+        case AgcShaderBinaryRegion::shader_header:
+            file_offset =
                 shader_header->offset +
-                    kAgcHeaderSizeOffset,
-                shader_header->index));
-    }
-    if (declared_shader_text_size !=
-        shader_text->size) {
-        return AgcShaderContainerResult::failure(
-            error(
-                AgcShaderContainerErrorCode::
-                    declared_shader_text_size_mismatch,
-                shader_header->offset +
-                    kAgcShaderTextSizeOffset,
-                shader_header->index));
-    }
-
-    if (text_size <
-        kAgcShaderTextTrailerSize) {
-        return AgcShaderContainerResult::failure(
-            error(
-                AgcShaderContainerErrorCode::
-                    shader_text_too_small_for_trailer,
-                shader_text->offset,
-                shader_text->index));
-    }
-
-    const auto trailer_offset =
-        text_size -
-        kAgcShaderTextTrailerSize;
-    const auto program_byte_size =
-        read_little_endian<std::uint32_t>(
-            text_span,
-            trailer_offset +
-                kAgcTrailerProgramLengthOffset);
-    const auto sl00_byte_size =
-        read_little_endian<std::uint32_t>(
-            text_span,
-            trailer_offset +
-                kAgcTrailerSl00LengthOffset);
-
-    if (program_byte_size > trailer_offset) {
-        return AgcShaderContainerResult::failure(
-            error(
-                AgcShaderContainerErrorCode::
-                    program_extent_out_of_bounds,
+                detail.byte_offset;
+            section_index = shader_header->index;
+            break;
+        case AgcShaderBinaryRegion::shader_text:
+            file_offset =
                 shader_text->offset +
-                    trailer_offset +
-                    kAgcTrailerProgramLengthOffset,
-                shader_text->index));
-    }
-    if ((program_byte_size % 4U) != 0U) {
+                detail.byte_offset;
+            section_index = shader_text->index;
+            break;
+        case AgcShaderBinaryRegion::none:
+            break;
+        }
+
         return AgcShaderContainerResult::failure(
             error(
-                AgcShaderContainerErrorCode::
-                    program_size_not_dword_aligned,
-                shader_text->offset +
-                    trailer_offset +
-                    kAgcTrailerProgramLengthOffset,
-                shader_text->index));
+                container_error_code(
+                    detail.code),
+                file_offset,
+                section_index,
+                detail));
     }
 
     try {
-        std::vector<std::uint32_t> words;
-        words.reserve(
-            static_cast<std::size_t>(
-                program_byte_size / 4U));
-        for (std::size_t offset = 0;
-             offset <
-             static_cast<std::size_t>(
-                 program_byte_size);
-             offset += 4) {
-            words.push_back(
-                read_little_endian<
-                    std::uint32_t>(
-                    text_span,
-                    offset));
-        }
+        auto container_bytes =
+            std::vector<std::byte>(
+                bytes.begin(),
+                bytes.end());
 
         return AgcShaderContainerResult::success(
             AgcShaderContainer{
@@ -803,18 +720,6 @@ parse_agc_shader_container(
                 .elf_type = elf_type,
                 .elf_machine = machine,
                 .elf_flags = elf_flags,
-                .header_magic = header_magic,
-                .header_version = header_version,
-                .declared_header_size =
-                    declared_header_size,
-                .declared_shader_text_size =
-                    declared_shader_text_size,
-                .program_type =
-                    program_type(
-                        std::to_integer<
-                            std::uint8_t>(
-                            header_span[
-                                kAgcProgramTypeOffset])),
                 .shader_header_section =
                     AgcShaderSectionProvenance{
                         .section_index =
@@ -837,24 +742,10 @@ parse_agc_shader_container(
                         .alignment =
                             shader_text->alignment,
                     },
-                .program_byte_size =
-                    program_byte_size,
-                .trailer_sl00_byte_size =
-                    sl00_byte_size,
+                .shader =
+                    std::move(shader).value(),
                 .container_bytes =
-                    std::vector<std::byte>(
-                        bytes.begin(),
-                        bytes.end()),
-                .shader_header_bytes =
-                    std::vector<std::byte>(
-                        header_span.begin(),
-                        header_span.end()),
-                .shader_text_bytes =
-                    std::vector<std::byte>(
-                        text_span.begin(),
-                        text_span.end()),
-                .rdna2_words =
-                    std::move(words),
+                    std::move(container_bytes),
             });
     } catch (const std::bad_alloc&) {
         return AgcShaderContainerResult::failure(
@@ -869,6 +760,7 @@ parse_agc_shader_container(
                     host_allocation_failure,
                 0));
     }
+
 }
 
 }  // namespace astraea::graphics
