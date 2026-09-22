@@ -61,12 +61,14 @@ struct Rdna2Sop1Fields {
     std::uint8_t opcode = 0;
     std::uint8_t destination_selector = 0;
     std::uint8_t source_selector = 0;
+    std::optional<std::uint32_t> literal_constant;
 
     auto operator<=>(const Rdna2Sop1Fields&) const = default;
 };
 
 struct Rdna2Instruction {
     std::size_t word_index = 0;
+    std::size_t word_count = 1;
     std::size_t byte_offset = 0;
     std::uint32_t raw_word = 0;
     std::array<std::byte, 4> raw_encoding{};
@@ -84,9 +86,10 @@ using Rdna2DecodeResult =
     astraea::core::Result<Rdna2Instruction, Rdna2DecodeError>;
 
 // Decodes the currently supported generic RDNA2 scalar instruction encodings
-// documented by AMD (SOPP and the base word of SOP1). The caller owns
-// shader-container parsing and conversion into 32-bit
-// instruction words. This function does not encode PS5 launch-ABI,
+// documented by AMD (SOPP and SOP1). S_MOV_B32 selector 255 consumes the
+// following dword as the AMD-documented 32-bit literal source. The caller owns
+// shader-container parsing and conversion into 32-bit instruction words. This
+// function does not encode PS5 launch-ABI,
 // container, descriptor, SPIR-V, or Vulkan assumptions.
 [[nodiscard]] Rdna2DecodeResult decode_rdna2_instruction(
     std::span<const std::uint32_t> words,
