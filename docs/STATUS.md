@@ -1,9 +1,9 @@
 # Project Status
 
 **Milestone:** M4 — Platform/HLE expansion  
-**State:** Imported-function relocation orchestration baseline complete; bounded scalar Shader IR programs, explicit V_MOV_B32 wave execution, and mixed scalar/vector one-block execution complete; bounded mixed-wave program execution in progress  
+**State:** Imported-function relocation orchestration baseline complete; bounded mixed scalar/vector Shader IR program execution complete; first mode-independent exact V_ADD_F32 execution slice in progress  
 **Repository:** astraea-emu/astraea  
-**Active branch:** `feat/m4-shader-wave-program-execution`
+**Active branch:** `feat/m4-exact-v-add-f32`
 
 ## Complete
 
@@ -61,6 +61,7 @@
 - Bounded cross-block scalar Shader IR programs execute from an explicit entry block under an explicit block-execution budget (#122).
 - Plain VGPR-to-VGPR V_MOV_B32 executes over explicit caller-selected wave32/wave64 state under EXEC with traced lane-write semantics (#124).
 - One validated Shader IR block composes scalar moves and plain V_MOV_B32 effects in source order with explicit mixed-state failure progress (#126).
+- Bounded mixed scalar/vector Shader IR programs traverse validated CFG successors under an explicit caller-selected block budget (#128).
 - Public five-gate CI remains the merge requirement:
   - Linux x64
   - Windows x64
@@ -70,9 +71,9 @@
 
 ## Current frontier
 
-1. #128 — execute bounded mixed scalar/vector Shader IR programs by repeatedly composing the validated mixed one-block executor — in progress on this branch.
-2. Entry block and maximum block-execution count are explicit caller inputs; scalar/vector state mutations and completed mixed-block provenance remain non-atomic and observable on later failure or budget exhaustion.
-3. `V_ADD_F32`, floating-point mode semantics, barriers/waits, Sony shader container/launch ABI, SPIR-V/Vulkan lowering, new opcodes, and `R_X86_64_RELATIVE` remain separately deferred.
+1. #130 — execute only mode-independent exact cases of the already-lowered plain `V_ADD_F32` over explicit wave32/wave64 state — in progress on this branch.
+2. Active lanes are supported only when finite-normal inputs produce a nonzero finite-normal binary32 sum with no rounding or denormal handling; all active lanes precompute before mutation so unsupported cases fail atomically.
+3. General `V_ADD_F32` floating-point mode semantics, mixed-block integration for the new add operation, barriers/waits, Sony shader container/launch ABI, SPIR-V/Vulkan lowering, new opcodes, and `R_X86_64_RELATIVE` remain separately deferred.
 
 ## SCE metadata boundary
 
@@ -131,7 +132,7 @@ PS5-specific assumptions require documented evidence.
 
 ## Next action
 
-Validate #128 across the five-gate matrix. Repeatedly compose the merged mixed
-scalar/V_MOV_B32 block executor across already-selected CFG successors under an
-explicit entry block and block-execution budget, preserving completed mixed-block
-progress on failure while keeping V_ADD_F32, PS5 launch ABI, SPIR-V, and Vulkan out.
+Validate #130 across the five-gate matrix. Execute only exact finite-normal
+`V_ADD_F32` lane sums whose bit-identical result is independent of documented
+rounding/denormal modes, precompute every active lane before mutation, trace the
+written result bits, and keep general FP MODE, PS5 launch ABI, SPIR-V, and Vulkan out.
