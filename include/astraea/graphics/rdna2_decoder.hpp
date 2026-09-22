@@ -14,6 +14,7 @@ namespace astraea::graphics {
 enum class Rdna2InstructionFormat {
     sopp,
     sop1,
+    vop1,
     unsupported,
 };
 
@@ -31,8 +32,10 @@ enum class Rdna2InstructionKind {
     s_waitcnt,
     s_mov_b32,
     s_mov_b64,
+    v_mov_b32,
     unknown_sopp_opcode,
     unknown_sop1_opcode,
+    unknown_vop1_opcode,
     unsupported_encoding,
 };
 
@@ -66,6 +69,15 @@ struct Rdna2Sop1Fields {
     auto operator<=>(const Rdna2Sop1Fields&) const = default;
 };
 
+struct Rdna2Vop1Fields {
+    std::uint8_t opcode = 0;
+    std::uint8_t destination_selector = 0;
+    std::uint16_t source_selector = 0;
+    std::optional<std::uint32_t> source_extension;
+
+    auto operator<=>(const Rdna2Vop1Fields&) const = default;
+};
+
 struct Rdna2Instruction {
     std::size_t word_index = 0;
     std::size_t word_count = 1;
@@ -78,6 +90,7 @@ struct Rdna2Instruction {
         Rdna2InstructionKind::unsupported_encoding;
     std::optional<Rdna2SoppFields> sopp;
     std::optional<Rdna2Sop1Fields> sop1;
+    std::optional<Rdna2Vop1Fields> vop1;
 
     auto operator<=>(const Rdna2Instruction&) const = default;
 };
@@ -85,9 +98,10 @@ struct Rdna2Instruction {
 using Rdna2DecodeResult =
     astraea::core::Result<Rdna2Instruction, Rdna2DecodeError>;
 
-// Decodes the currently supported generic RDNA2 scalar instruction encodings
-// documented by AMD (SOPP and SOP1). S_MOV_B32 selector 255 consumes the
-// following dword as the AMD-documented 32-bit literal source. The caller owns
+// Decodes the currently supported generic RDNA2 instruction encodings
+// documented by AMD (SOPP, SOP1, and the first VOP1 slice). S_MOV_B32 selector
+// 255 and AMD-documented VOP1 extension selectors consume the following dword.
+// The caller owns
 // shader-container parsing and conversion into 32-bit instruction words. This
 // function does not encode PS5 launch-ABI,
 // container, descriptor, SPIR-V, or Vulkan assumptions.

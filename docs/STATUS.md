@@ -1,9 +1,9 @@
 # Project Status
 
 **Milestone:** M4 — Platform/HLE expansion  
-**State:** Imported-function relocation orchestration baseline complete; generic RDNA2 S_MOV_B32 special-scalar-source slice in progress  
+**State:** Imported-function relocation orchestration baseline complete; first RDNA2 VOP1/VGPR dataflow slice in progress  
 **Repository:** astraea-emu/astraea  
-**Active branch:** `feat/m4-rdna2-mov-b32-special-sources`
+**Active branch:** `feat/m4-rdna2-vop1-vmov-b32`
 
 ## Complete
 
@@ -48,6 +48,7 @@
 - AMD-documented RDNA2 SOP1 S_MOV_B64 plain even-aligned SGPR-pair moves lowered to typed Shader IR/Trace semantics (#94).
 - AMD-documented RDNA2 S_MOV_B32 single-word integer inline sources lowered to typed Shader IR/Trace semantics (#95).
 - AMD-documented RDNA2 S_MOV_B32 selector-255 literal extension lowered to typed Shader IR/Trace semantics (#98).
+- AMD-documented non-privileged VCC_LO/VCC_HI/M0/NULL/EXEC_LO/EXEC_HI S_MOV_B32 sources typed in Shader IR/Trace (#100).
 - Public five-gate CI remains the merge requirement:
   - Linux x64
   - Windows x64
@@ -57,9 +58,9 @@
 
 ## Current frontier
 
-1. #100 — type the AMD-documented non-privileged VCC_LO/VCC_HI/M0/NULL/EXEC_LO/EXEC_HI S_MOV_B32 sources — in progress on this branch.
-2. The decoder remains unchanged; special sources become Shader IR/Trace semantics only when the destination is a plain SGPR.
-3. TTMPs, special destinations, other special/floating sources, execution, Sony shader ABI/container behavior, SPIR-V/Vulkan lowering, and `R_X86_64_RELATIVE` remain separately deferred.
+1. #102 — add the first RDNA2 VOP1 path and lower plain VGPR-to-VGPR V_MOV_B32 — in progress on this branch.
+2. VOP1 extension selectors are length-validated and preserved as provenance only; only source selectors 256..511 lower semantically in this slice.
+3. VOP2/VOPC/VOP3, scalar/inline/special VOP1 sources, DPP/SDWA semantics, lane execution, Sony shader ABI/container behavior, SPIR-V/Vulkan lowering, and `R_X86_64_RELATIVE` remain separately deferred.
 
 ## SCE metadata boundary
 
@@ -118,6 +119,6 @@ PS5-specific assumptions require documented evidence.
 
 ## Next action
 
-Validate #100 across the five-gate matrix. Keep decoding unchanged; recognize only
-the six AMD-documented non-privileged special S_MOV_B32 sources in Shader IR/Trace,
-while leaving TTMPs, special destinations, execution, Sony ABI, SPIR-V, and Vulkan out.
+Validate #102 across the five-gate matrix. Decode VOP1 fields and required extension
+dwords exactly, lower only plain VGPR-to-VGPR V_MOV_B32 into typed Shader IR/Trace,
+and keep DPP/SDWA/literal semantics, lane execution, Sony ABI, SPIR-V, and Vulkan out.

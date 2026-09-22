@@ -112,6 +112,24 @@ namespace {
                 (literal >> 24U) & 0xffU));
     }
 
+    if (instruction.vop1.has_value() &&
+        instruction.vop1->source_extension.has_value()) {
+        const auto extension =
+            instruction.vop1->source_extension.value();
+        bytes.reserve(8);
+        bytes.push_back(
+            static_cast<std::byte>(extension & 0xffU));
+        bytes.push_back(
+            static_cast<std::byte>(
+                (extension >> 8U) & 0xffU));
+        bytes.push_back(
+            static_cast<std::byte>(
+                (extension >> 16U) & 0xffU));
+        bytes.push_back(
+            static_cast<std::byte>(
+                (extension >> 24U) & 0xffU));
+    }
+
     return bytes;
 }
 
@@ -181,6 +199,8 @@ namespace {
         return "sopp";
     case astraea::graphics::Rdna2InstructionFormat::sop1:
         return "sop1";
+    case astraea::graphics::Rdna2InstructionFormat::vop1:
+        return "vop1";
     case astraea::graphics::
         Rdna2InstructionFormat::unsupported:
         return "unsupported";
@@ -231,11 +251,17 @@ namespace {
         Rdna2InstructionKind::s_mov_b64:
         return "s_mov_b64";
     case astraea::graphics::
+        Rdna2InstructionKind::v_mov_b32:
+        return "v_mov_b32";
+    case astraea::graphics::
         Rdna2InstructionKind::unknown_sopp_opcode:
         return "unknown_sopp_opcode";
     case astraea::graphics::
         Rdna2InstructionKind::unknown_sop1_opcode:
         return "unknown_sop1_opcode";
+    case astraea::graphics::
+        Rdna2InstructionKind::unknown_vop1_opcode:
+        return "unknown_vop1_opcode";
     case astraea::graphics::
         Rdna2InstructionKind::unsupported_encoding:
         return "unsupported_encoding";
@@ -301,8 +327,16 @@ namespace {
         return "unknown_sop1_opcode";
     case astraea::graphics::
         ShaderIrUnsupportedReason::
+            unknown_vop1_opcode:
+        return "unknown_vop1_opcode";
+    case astraea::graphics::
+        ShaderIrUnsupportedReason::
             unsupported_scalar_operand:
         return "unsupported_scalar_operand";
+    case astraea::graphics::
+        ShaderIrUnsupportedReason::
+            unsupported_vector_operand:
+        return "unsupported_vector_operand";
     case astraea::graphics::
         ShaderIrUnsupportedReason::
             unsupported_encoding:
@@ -559,6 +593,23 @@ trace_rdna2_decode_v0(
             }
         }
 
+        if (instruction.vop1.has_value()) {
+            stable.push_back(
+                u64_field(
+                    "opcode",
+                    instruction.vop1->opcode));
+            stable.push_back(
+                u64_field(
+                    "destination_selector",
+                    instruction.vop1->
+                        destination_selector));
+            stable.push_back(
+                u64_field(
+                    "source_selector",
+                    instruction.vop1->
+                        source_selector));
+        }
+
         return GraphicsTraceEventResultV0::success(
             TraceEventV0{
                 .id = event_id,
@@ -809,6 +860,20 @@ trace_shader_ir_v0(
                         u64_field(
                             "source_sgpr_pair_start",
                             operation.source.first_index));
+                } else if constexpr (
+                    std::is_same_v<
+                        Operation,
+                        astraea::graphics::
+                            ShaderIrVectorMove32>) {
+                    event_type = "vector_move_32";
+                    stable.push_back(
+                        u64_field(
+                            "destination_vgpr",
+                            operation.destination.index));
+                    stable.push_back(
+                        u64_field(
+                            "source_vgpr",
+                            operation.source.index));
                 } else if constexpr (
                     std::is_same_v<
                         Operation,
