@@ -68,11 +68,11 @@ make_runtime_shader_fixture() {
     write_little_endian<std::uint64_t>(
         fixture.header,
         0x18,
-        kContextRegistersOffset);
+        kContextRegistersOffset - 0x18U);
     write_little_endian<std::uint64_t>(
         fixture.header,
         0x20,
-        kShaderRegistersOffset);
+        kShaderRegistersOffset - 0x20U);
     write_little_endian<std::uint32_t>(
         fixture.header,
         0x40,
@@ -196,6 +196,101 @@ TEST_CASE(
     REQUIRE(result->rdna2_words[1] == 0xbf810000U);
     REQUIRE(result->shader_header_bytes == fixture.header);
     REQUIRE(result->shader_text_bytes == fixture.text);
+}
+
+
+TEST_CASE(
+    "runtime AGC register-list deltas are self-relative to their pointer fields",
+    "[graphics][agc][shader-binary][registers][self-relative]") {
+    auto fixture =
+        make_runtime_shader_fixture();
+
+    constexpr std::size_t kObservedShapeHeaderSize = 0x160;
+    constexpr std::size_t kContextField = 0x18;
+    constexpr std::size_t kShaderField = 0x20;
+    constexpr std::uint64_t kContextDelta = 0xb0;
+    constexpr std::uint64_t kShaderDelta = 0x78;
+    constexpr std::size_t kContextTarget =
+        kContextField + kContextDelta;
+    constexpr std::size_t kShaderTarget =
+        kShaderField + kShaderDelta;
+
+    fixture.header.resize(
+        kObservedShapeHeaderSize,
+        std::byte{0});
+    write_little_endian<std::uint32_t>(
+        fixture.header,
+        0x40,
+        static_cast<std::uint32_t>(
+            fixture.header.size()));
+    write_little_endian<std::uint64_t>(
+        fixture.header,
+        kContextField,
+        kContextDelta);
+    write_little_endian<std::uint64_t>(
+        fixture.header,
+        kShaderField,
+        kShaderDelta);
+    fixture.header[0x5b] = std::byte{1};
+    fixture.header[0x5c] = std::byte{1};
+
+    // Decoys at the incorrect header-absolute interpretation.
+    write_little_endian<std::uint16_t>(
+        fixture.header,
+        static_cast<std::size_t>(kContextDelta),
+        0xdeadU);
+    write_little_endian<std::uint32_t>(
+        fixture.header,
+        static_cast<std::size_t>(kContextDelta) + 4U,
+        0xaaaaaaaaU);
+    write_little_endian<std::uint16_t>(
+        fixture.header,
+        static_cast<std::size_t>(kShaderDelta),
+        0xbeefU);
+    write_little_endian<std::uint32_t>(
+        fixture.header,
+        static_cast<std::size_t>(kShaderDelta) + 4U,
+        0xbbbbbbbbU);
+
+    // Coherent records at field + raw_delta.
+    write_little_endian<std::uint16_t>(
+        fixture.header,
+        kContextTarget,
+        0x01c4U);
+    write_little_endian<std::uint32_t>(
+        fixture.header,
+        kContextTarget + 4U,
+        0x00000004U);
+    write_little_endian<std::uint16_t>(
+        fixture.header,
+        kShaderTarget,
+        0x0008U);
+    write_little_endian<std::uint32_t>(
+        fixture.header,
+        kShaderTarget + 4U,
+        0x12345678U);
+
+    const auto result =
+        astraea::graphics::
+            parse_agc_shader_binary(
+                fixture.header,
+                fixture.text);
+
+    REQUIRE(result.has_value());
+    REQUIRE(result->context_registers.size() == 1);
+    REQUIRE(
+        result->context_registers[0] ==
+        astraea::graphics::AgcRegisterWrite{
+            .register_offset = 0x01c4U,
+            .value = 0x00000004U,
+        });
+    REQUIRE(result->shader_registers.size() == 1);
+    REQUIRE(
+        result->shader_registers[0] ==
+        astraea::graphics::AgcRegisterWrite{
+            .register_offset = 0x0008U,
+            .value = 0x12345678U,
+        });
 }
 
 TEST_CASE(
