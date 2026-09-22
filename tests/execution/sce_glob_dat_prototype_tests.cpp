@@ -654,10 +654,9 @@ TEST_CASE(
 
     auto registry = make_registry();
 
-    const std::array<
-        astraea::execution::
-            SceImportBinding,
-        0>
+    const std::span<
+        const astraea::execution::
+            SceImportBinding>
         no_bindings{};
     auto unresolved_bindings =
         astraea::execution::
