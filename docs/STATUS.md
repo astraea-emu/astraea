@@ -1,9 +1,9 @@
 # Project Status
 
 **Milestone:** M4 — Platform/HLE expansion  
-**State:** Imported-function relocation orchestration baseline complete; bounded RDNA2 whole-stream decode/lower pipeline in progress  
+**State:** Imported-function relocation orchestration baseline complete; bounded RDNA2 whole-stream decode/lower pipeline complete; Shader IR basic-block CFG in progress  
 **Repository:** astraea-emu/astraea  
-**Active branch:** `feat/m4-rdna2-shader-program`
+**Active branch:** `feat/m4-shader-cfg`
 
 ## Complete
 
@@ -59,9 +59,9 @@
 
 ## Current frontier
 
-1. #106 — compose the existing generic RDNA2 decoder and Shader IR lowerer into an ordered bounded whole-stream pipeline — in progress on this branch.
-2. Stream advancement must use each decoded instruction's validated `word_count`, preserving literal/DPP/SDWA extension dwords as part of their owning instruction rather than re-decoding them.
-3. Branch following/CFG construction, shader execution, wave/lane semantics, Sony shader container/launch ABI, SPIR-V/Vulkan lowering, new opcodes, and `R_X86_64_RELATIVE` remain separately deferred.
+1. #108 — build a validated basic-block/control-flow graph over the ordered bounded `ShaderIrProgram` — in progress on this branch.
+2. Branch targets must resolve only to known decoded instruction starts; negative, out-of-range, non-dword-aligned, and extension-dword targets remain typed failures rather than being rounded or guessed.
+3. SCC/VCC/EXEC evaluation, dynamic branch execution, wave/lane semantics, Sony shader container/launch ABI, SPIR-V/Vulkan lowering, new opcodes, and `R_X86_64_RELATIVE` remain separately deferred.
 
 ## SCE metadata boundary
 
@@ -120,7 +120,7 @@ PS5-specific assumptions require documented evidence.
 
 ## Next action
 
-Validate #106 across the five-gate matrix. Decode and lower bounded RDNA2 words
-linearly in source order, advance only by validated instruction extents, preserve
-ordered Shader IR provenance, and report the first indexed decode failure without
-following control flow or introducing execution, Sony ABI, SPIR-V, or Vulkan semantics.
+Validate #108 across the five-gate matrix. Build deterministic source-ordered basic
+blocks and typed branch/fallthrough edges from the merged bounded Shader IR program,
+reject targets that do not land on real decoded instruction starts, and keep branch
+condition execution, wave state, Sony ABI, SPIR-V, and Vulkan semantics out.
