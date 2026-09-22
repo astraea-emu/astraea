@@ -533,3 +533,53 @@ TEST_CASE(
         result.error().relocation_error.has_value());
     REQUIRE_FALSE(result.error().symbol_error.has_value());
 }
+
+
+TEST_CASE(
+    "generic SCE relocation batch planner preserves general RELA evidence",
+    "[execution][sce-import-resolution][batch][rela]") {
+    auto fixture = make_fixture();
+    fixture.relocations.kind =
+        astraea::loader::RelocationTableKind::rela;
+
+    const auto view = make_view(fixture.bytes);
+    const auto hle = make_hle_registry();
+    const auto bindings = make_bindings(hle);
+
+    const auto result =
+        astraea::execution::plan_sce_imports(
+            fixture.relocations,
+            fixture.symbols,
+            fixture.strings,
+            view,
+            bindings);
+
+    REQUIRE(result.has_value());
+    REQUIRE(result->size() == 2);
+
+    REQUIRE(
+        result->at(0).table_kind ==
+        astraea::loader::RelocationTableKind::rela);
+    REQUIRE(result->at(0).table_index == 0);
+    REQUIRE(result->at(0).raw_relocation_type == 0xfeedbeefU);
+    REQUIRE(
+        result->at(0).raw_addend ==
+        std::optional<std::int64_t>{-7});
+    REQUIRE(result->at(0).raw_symbol_name == kFirstName);
+    REQUIRE(
+        result->at(0).function_id ==
+        astraea::execution::HleFunctionId{1});
+
+    REQUIRE(
+        result->at(1).table_kind ==
+        astraea::loader::RelocationTableKind::rela);
+    REQUIRE(result->at(1).table_index == 1);
+    REQUIRE(result->at(1).raw_relocation_type == 7);
+    REQUIRE(
+        result->at(1).raw_addend ==
+        std::optional<std::int64_t>{11});
+    REQUIRE(result->at(1).raw_symbol_name == kSecondName);
+    REQUIRE(
+        result->at(1).function_id ==
+        astraea::execution::HleFunctionId{2});
+}
