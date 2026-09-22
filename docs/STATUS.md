@@ -1,9 +1,9 @@
 # Project Status
 
 **Milestone:** M4 — Platform/HLE expansion  
-**State:** Imported-function relocation orchestration baseline complete; generic RDNA2 SOP1 S_MOV_B64 SGPR-pair slice in progress  
+**State:** Imported-function relocation orchestration baseline complete; generic RDNA2 S_MOV_B32 inline-integer source slice in progress  
 **Repository:** astraea-emu/astraea  
-**Active branch:** `feat/m4-rdna2-sop1-mov-b64`
+**Active branch:** `feat/m4-rdna2-mov-b32-inline-int`
 
 ## Complete
 
@@ -45,6 +45,7 @@
 - AMD-documented RDNA2 SOPP S_BARRIER lowered to a typed workgroup-barrier Shader IR/Trace marker (#87).
 - AMD-documented RDNA2 SOPP S_WAITCNT thresholds lowered to typed Shader IR/Trace semantics (#88).
 - AMD-documented RDNA2 SOP1 S_MOV_B32 plain SGPR moves lowered to typed Shader IR/Trace semantics (#92).
+- AMD-documented RDNA2 SOP1 S_MOV_B64 plain even-aligned SGPR-pair moves lowered to typed Shader IR/Trace semantics (#94).
 - Public five-gate CI remains the merge requirement:
   - Linux x64
   - Windows x64
@@ -54,9 +55,9 @@
 
 ## Current frontier
 
-1. #94 — lower generic RDNA2 SOP1 S_MOV_B64 plain even-aligned SGPR-pair moves — in progress on this branch.
-2. Odd/out-of-range pairs, special scalar registers, inline constants, literal-extension decoding, execution/register-file state, and host lowering remain explicitly unsupported.
-3. Sony shader ABI/container behavior, SPIR-V/Vulkan lowering, and `R_X86_64_RELATIVE` remain separately deferred.
+1. #95 — lower the AMD-documented single-word integer inline source selectors for S_MOV_B32 — in progress on this branch.
+2. Plain SGPR sources remain supported; selectors 128..208 gain only the documented integer values, while special registers, floating constants, and selector 255 literal extension remain unsupported.
+3. Sony shader ABI/container behavior, register-file execution, SPIR-V/Vulkan lowering, and `R_X86_64_RELATIVE` remain separately deferred.
 
 ## SCE metadata boundary
 
@@ -115,6 +116,6 @@ PS5-specific assumptions require documented evidence.
 
 ## Next action
 
-Validate #94 across the five-gate matrix. Keep the slice generic-RDNA2 only:
-classify S_MOV_B64 and lower only even-aligned SGPR-pair to SGPR-pair semantics,
-preserving raw selectors/provenance and leaving literals/execution/backend behavior out.
+Validate #95 across the five-gate matrix. Keep the SOP1 decoder unchanged; generalize
+only S_MOV_B32 Shader IR sources so plain SGPRs and documented integer inline selectors
+are semantic, while special/floating/literal-extension selectors remain typed unsupported.

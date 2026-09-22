@@ -1,6 +1,7 @@
 #include <astraea/graphics/shader_ir.hpp>
 
 #include <cstdint>
+#include <optional>
 #include <utility>
 
 namespace astraea::graphics {
@@ -38,6 +39,37 @@ namespace {
     std::uint8_t selector) noexcept {
     return selector <= 104U &&
            (selector % 2U) == 0U;
+}
+
+[[nodiscard]] std::optional<ShaderIrScalarSource32>
+scalar_source32(std::uint8_t selector) noexcept {
+    if (plain_sgpr_selector(selector)) {
+        return ShaderIrScalarSource32{
+            ShaderIrSgpr{
+                .index = selector,
+            }};
+    }
+
+    if (selector >= 128U && selector <= 192U) {
+        return ShaderIrScalarSource32{
+            ShaderIrInlineInteger32{
+                .value =
+                    static_cast<std::int32_t>(selector) -
+                    128,
+            }};
+    }
+
+    if (selector >= 193U && selector <= 208U) {
+        return ShaderIrScalarSource32{
+            ShaderIrInlineInteger32{
+                .value =
+                    -(
+                        static_cast<std::int32_t>(selector) -
+                        192),
+            }};
+    }
+
+    return std::nullopt;
 }
 
 [[nodiscard]] std::int32_t relative_branch_delta(
@@ -203,8 +235,10 @@ ShaderIrEmission lower_rdna2_to_shader_ir(
                 instruction.sop1->destination_selector;
             const auto source =
                 instruction.sop1->source_selector;
+            auto semantic_source =
+                scalar_source32(source);
             if (plain_sgpr_selector(destination) &&
-                plain_sgpr_selector(source)) {
+                semantic_source.has_value()) {
                 operation =
                     ShaderIrScalarMove32{
                         .destination =
@@ -212,9 +246,8 @@ ShaderIrEmission lower_rdna2_to_shader_ir(
                                 .index = destination,
                             },
                         .source =
-                            ShaderIrSgpr{
-                                .index = source,
-                            },
+                            std::move(
+                                semantic_source.value()),
                     };
             } else {
                 operation =
