@@ -376,23 +376,6 @@ trace_raw_graphics_packet_v0(
             return size_failure();
         }
 
-        if (instruction.vop1.has_value()) {
-            stable.push_back(
-                u64_field(
-                    "opcode",
-                    instruction.vop1->opcode));
-            stable.push_back(
-                u64_field(
-                    "destination_selector",
-                    instruction.vop1->
-                        destination_selector));
-            stable.push_back(
-                u64_field(
-                    "source_selector",
-                    instruction.vop1->
-                        source_selector));
-        }
-
         return GraphicsTraceEventResultV0::success(
             TraceEventV0{
                 .id = event_id,
@@ -608,6 +591,23 @@ trace_rdna2_decode_v0(
                         instruction.sop1->
                             literal_constant.value()));
             }
+        }
+
+        if (instruction.vop1.has_value()) {
+            stable.push_back(
+                u64_field(
+                    "opcode",
+                    instruction.vop1->opcode));
+            stable.push_back(
+                u64_field(
+                    "destination_selector",
+                    instruction.vop1->
+                        destination_selector));
+            stable.push_back(
+                u64_field(
+                    "source_selector",
+                    instruction.vop1->
+                        source_selector));
         }
 
         return GraphicsTraceEventResultV0::success(
