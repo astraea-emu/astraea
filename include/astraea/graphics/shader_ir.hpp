@@ -47,6 +47,14 @@ struct ShaderIrWorkgroupBarrier {
         const ShaderIrWorkgroupBarrier&) const = default;
 };
 
+struct ShaderIrWaitCount {
+    std::uint8_t vmcnt = 0;
+    std::uint8_t expcnt = 0;
+    std::uint8_t lgkmcnt = 0;
+
+    auto operator<=>(const ShaderIrWaitCount&) const = default;
+};
+
 enum class ShaderIrUnsupportedReason {
     unknown_sopp_opcode,
     unsupported_encoding,
@@ -67,6 +75,7 @@ using ShaderIrOperation =
         ShaderIrRelativeBranch,
         ShaderIrConditionalRelativeBranch,
         ShaderIrWorkgroupBarrier,
+        ShaderIrWaitCount,
         ShaderIrUnsupported>;
 
 struct ShaderIrProvenance {
