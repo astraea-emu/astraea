@@ -30,6 +30,12 @@ namespace {
         .guest_address = guest_address,
         .has_guest_memory_error = false,
         .guest_memory_error = {},
+        .sce_agc_create_shader_plan_error =
+            std::nullopt,
+        .sce_agc_shader_preparation_error =
+            std::nullopt,
+        .sce_agc_shader_apply_error =
+            std::nullopt,
     };
 }
 
@@ -49,6 +55,12 @@ namespace {
             memory_error.guest_address,
         .has_guest_memory_error = true,
         .guest_memory_error = memory_error,
+        .sce_agc_create_shader_plan_error =
+            std::nullopt,
+        .sce_agc_shader_preparation_error =
+            std::nullopt,
+        .sce_agc_shader_apply_error =
+            std::nullopt,
     };
 }
 
