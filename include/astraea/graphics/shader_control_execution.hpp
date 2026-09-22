@@ -143,6 +143,7 @@ enum class ShaderScalarProgramExecutionErrorCode {
     missing_entry_block,
     host_allocation_failure,
     execution_budget_exhausted,
+    execution_count_overflow,
     block_execution_failure,
 };
 
