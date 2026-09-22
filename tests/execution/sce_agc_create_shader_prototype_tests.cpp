@@ -101,8 +101,6 @@ const std::string kAgcSoname =
     "libSceAgc.prx";
 const std::string kAgcModuleName =
     "libSceAgc";
-const std::string kAgcLibraryName =
-    "libSceAgc";
 
 struct AgcPrototypeFixture {
     std::vector<std::byte> bytes;
