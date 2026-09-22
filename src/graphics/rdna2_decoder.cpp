@@ -59,6 +59,7 @@ constexpr std::uint32_t kSop1DestinationMask = 0x7fU;
 constexpr unsigned int kSop1DestinationShift = 16U;
 constexpr std::uint32_t kSop1SourceMask = 0xffU;
 constexpr std::uint8_t kSop1MovB32Opcode = 3;
+constexpr std::uint8_t kSop1MovB64Opcode = 4;
 
 [[nodiscard]] Rdna2DecodeError decode_error(
     Rdna2DecodeErrorCode code,
@@ -124,10 +125,14 @@ constexpr std::uint8_t kSop1MovB32Opcode = 3;
 
 [[nodiscard]] Rdna2InstructionKind classify_sop1_opcode(
     std::uint8_t opcode) noexcept {
-    if (opcode == kSop1MovB32Opcode) {
+    switch (opcode) {
+    case kSop1MovB32Opcode:
         return Rdna2InstructionKind::s_mov_b32;
+    case kSop1MovB64Opcode:
+        return Rdna2InstructionKind::s_mov_b64;
+    default:
+        return Rdna2InstructionKind::unknown_sop1_opcode;
     }
-    return Rdna2InstructionKind::unknown_sop1_opcode;
 }
 
 }  // namespace

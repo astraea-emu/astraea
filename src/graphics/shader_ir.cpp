@@ -34,6 +34,12 @@ namespace {
     return selector <= 105U;
 }
 
+[[nodiscard]] bool plain_sgpr_pair_selector(
+    std::uint8_t selector) noexcept {
+    return selector <= 104U &&
+           (selector % 2U) == 0U;
+}
+
 [[nodiscard]] std::int32_t relative_branch_delta(
     const Rdna2Instruction& instruction) noexcept {
     return static_cast<std::int32_t>(
@@ -208,6 +214,34 @@ ShaderIrEmission lower_rdna2_to_shader_ir(
                         .source =
                             ShaderIrSgpr{
                                 .index = source,
+                            },
+                    };
+            } else {
+                operation =
+                    unsupported(
+                        ShaderIrUnsupportedReason::
+                            unsupported_scalar_operand);
+            }
+        }
+        break;
+
+    case Rdna2InstructionKind::s_mov_b64:
+        if (valid_sop1_source(instruction)) {
+            const auto destination =
+                instruction.sop1->destination_selector;
+            const auto source =
+                instruction.sop1->source_selector;
+            if (plain_sgpr_pair_selector(destination) &&
+                plain_sgpr_pair_selector(source)) {
+                operation =
+                    ShaderIrScalarMove64{
+                        .destination =
+                            ShaderIrSgprPair{
+                                .first_index = destination,
+                            },
+                        .source =
+                            ShaderIrSgprPair{
+                                .first_index = source,
                             },
                     };
             } else {

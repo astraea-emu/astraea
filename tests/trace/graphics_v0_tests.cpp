@@ -730,3 +730,116 @@ TEST_CASE(
         "unsupported_scalar_operand");
     REQUIRE(event->diagnostics.size() == 2);
 }
+
+
+TEST_CASE(
+    "S_MOV_B64 decode trace exposes opcode and pair selectors",
+    "[trace][graphics][v0][sop1][mov64]") {
+    const auto instruction =
+        decode_one(make_sop1(4, 4, 16));
+
+    auto event =
+        astraea::trace::trace_rdna2_decode_v0(
+            101,
+            instruction);
+
+    REQUIRE(event.has_value());
+    REQUIRE(event->subsystem == "shader.decode");
+    REQUIRE(event->type == "instruction");
+    REQUIRE(event->stable.size() == 5);
+    REQUIRE(
+        std::get<std::string>(
+            event->stable[1].value) == "s_mov_b64");
+    REQUIRE(
+        std::get<std::uint64_t>(
+            event->stable[3].value) == 4);
+    REQUIRE(
+        std::get<std::uint64_t>(
+            event->stable[4].value) == 16);
+}
+
+TEST_CASE(
+    "S_MOV_B64 Shader IR trace exposes SGPR-pair move semantics",
+    "[trace][graphics][v0][sop1][mov64]") {
+    const auto ir =
+        astraea::graphics::lower_rdna2_to_shader_ir(
+            decode_one(make_sop1(4, 4, 16)));
+
+    auto event =
+        astraea::trace::trace_shader_ir_v0(
+            102,
+            ir);
+
+    REQUIRE(event.has_value());
+    REQUIRE(event->subsystem == "shader.ir");
+    REQUIRE(event->type == "scalar_move_64");
+    REQUIRE(event->stable.size() == 2);
+    REQUIRE(
+        event->stable[0].name ==
+        "destination_sgpr_pair_start");
+    REQUIRE(
+        std::get<std::uint64_t>(
+            event->stable[0].value) == 4);
+    REQUIRE(
+        event->stable[1].name ==
+        "source_sgpr_pair_start");
+    REQUIRE(
+        std::get<std::uint64_t>(
+            event->stable[1].value) == 16);
+    REQUIRE(event->diagnostics.size() == 2);
+}
+
+TEST_CASE(
+    "S_MOV_B64 pair destination participates in trace divergence",
+    "[trace][graphics][v0][sop1][mov64]") {
+    auto left =
+        astraea::trace::trace_shader_ir_v0(
+            103,
+            astraea::graphics::lower_rdna2_to_shader_ir(
+                decode_one(make_sop1(4, 4, 16))));
+    auto right =
+        astraea::trace::trace_shader_ir_v0(
+            103,
+            astraea::graphics::lower_rdna2_to_shader_ir(
+                decode_one(make_sop1(4, 6, 16))));
+
+    REQUIRE(left.has_value());
+    REQUIRE(right.has_value());
+
+    auto diff =
+        astraea::trace::diff_trace_v0(
+            document(std::move(left).value()),
+            document(std::move(right).value()));
+
+    REQUIRE(diff.has_value());
+    REQUIRE_FALSE(diff->equivalent);
+    REQUIRE(
+        diff->first_divergence->kind ==
+        astraea::trace::TraceDivergenceKindV0::
+            stable_field_value_mismatch);
+    REQUIRE(
+        diff->first_divergence->field_name ==
+        std::optional<std::string>{
+            "destination_sgpr_pair_start"});
+}
+
+TEST_CASE(
+    "S_MOV_B64 odd pair remains typed unsupported in Shader IR trace",
+    "[trace][graphics][v0][sop1][mov64]") {
+    const auto ir =
+        astraea::graphics::lower_rdna2_to_shader_ir(
+            decode_one(make_sop1(4, 5, 16)));
+
+    auto event =
+        astraea::trace::trace_shader_ir_v0(
+            104,
+            ir);
+
+    REQUIRE(event.has_value());
+    REQUIRE(event->type == "unsupported");
+    REQUIRE(event->stable.size() == 1);
+    REQUIRE(
+        std::get<std::string>(
+            event->stable[0].value) ==
+        "unsupported_scalar_operand");
+}

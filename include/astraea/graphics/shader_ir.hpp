@@ -68,6 +68,19 @@ struct ShaderIrScalarMove32 {
     auto operator<=>(const ShaderIrScalarMove32&) const = default;
 };
 
+struct ShaderIrSgprPair {
+    std::uint8_t first_index = 0;
+
+    auto operator<=>(const ShaderIrSgprPair&) const = default;
+};
+
+struct ShaderIrScalarMove64 {
+    ShaderIrSgprPair destination;
+    ShaderIrSgprPair source;
+
+    auto operator<=>(const ShaderIrScalarMove64&) const = default;
+};
+
 enum class ShaderIrUnsupportedReason {
     unknown_sopp_opcode,
     unknown_sop1_opcode,
@@ -92,6 +105,7 @@ using ShaderIrOperation =
         ShaderIrWorkgroupBarrier,
         ShaderIrWaitCount,
         ShaderIrScalarMove32,
+        ShaderIrScalarMove64,
         ShaderIrUnsupported>;
 
 struct ShaderIrProvenance {

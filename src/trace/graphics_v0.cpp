@@ -208,6 +208,9 @@ namespace {
         Rdna2InstructionKind::s_mov_b32:
         return "s_mov_b32";
     case astraea::graphics::
+        Rdna2InstructionKind::s_mov_b64:
+        return "s_mov_b64";
+    case astraea::graphics::
         Rdna2InstructionKind::unknown_sopp_opcode:
         return "unknown_sopp_opcode";
     case astraea::graphics::
@@ -682,6 +685,20 @@ trace_shader_ir_v0(
                         u64_field(
                             "source_sgpr",
                             operation.source.index));
+                } else if constexpr (
+                    std::is_same_v<
+                        Operation,
+                        astraea::graphics::
+                            ShaderIrScalarMove64>) {
+                    event_type = "scalar_move_64";
+                    stable.push_back(
+                        u64_field(
+                            "destination_sgpr_pair_start",
+                            operation.destination.first_index));
+                    stable.push_back(
+                        u64_field(
+                            "source_sgpr_pair_start",
+                            operation.source.first_index));
                 } else if constexpr (
                     std::is_same_v<
                         Operation,
