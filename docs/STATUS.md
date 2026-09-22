@@ -1,9 +1,9 @@
 # Project Status
 
 **Milestone:** M4 — Platform/HLE expansion  
-**State:** Imported-function relocation orchestration baseline complete; AMD-documented RDNA2 S_BARRIER slice in progress  
+**State:** Imported-function relocation orchestration baseline complete; AMD-documented RDNA2 S_WAITCNT slice in progress  
 **Repository:** astraea-emu/astraea  
-**Active branch:** `feat/m4-rdna2-s-barrier`
+**Active branch:** `feat/m4-rdna2-s-waitcnt`
 
 ## Complete
 
@@ -42,6 +42,7 @@
 - Ordered validated x86-64 GLOB_DAT batch patch construction with explicit gate slots (#81).
 - Ordered non-atomic GLOB_DAT batch application with indexed partial-failure reporting (#83).
 - AMD-documented RDNA2 SOPP conditional branches 4-9 lowered to typed Shader IR and Trace semantics (#85).
+- AMD-documented RDNA2 SOPP S_BARRIER lowered to a typed workgroup-barrier Shader IR/Trace marker (#87).
 - Public five-gate CI remains the merge requirement:
   - Linux x64
   - Windows x64
@@ -51,9 +52,9 @@
 
 ## Current frontier
 
-1. #87 — classify AMD-documented RDNA2 SOPP opcode 10 S_BARRIER and lower it to a typed workgroup-barrier Shader IR marker — in progress on this branch.
-2. The barrier is semantic/trace data only; wave scheduling, barrier execution, SPIR-V/Vulkan lowering, and Sony launch semantics remain unsupported.
-3. S_WAITCNT and later SOPP synchronization/control operations remain separately scoped; `R_X86_64_RELATIVE` remains deferred.
+1. #88 — classify AMD-documented RDNA2 SOPP opcode 12 S_WAITCNT and lower its vmcnt/expcnt/lgkmcnt thresholds to typed Shader IR — in progress on this branch.
+2. Wait-count thresholds are semantic/trace data only; counter execution, SPIR-V/Vulkan synchronization, and Sony launch semantics remain unsupported.
+3. S_WAKEUP, S_SETKILL, S_SETHALT, S_WAITCNT_VSCNT, later SOPP operations, and `R_X86_64_RELATIVE` remain separately deferred.
 
 ## SCE metadata boundary
 
@@ -112,6 +113,6 @@ PS5-specific assumptions require documented evidence.
 
 ## Next action
 
-Validate #87 across the five-gate matrix. Keep the slice generic-RDNA2 only:
-classify opcode 10, lower a workgroup-barrier semantic marker, preserve raw provenance,
-and leave barrier execution / Sony shader ABI / SPIR-V / Vulkan behavior out.
+Validate #88 across the five-gate matrix. Keep the slice generic-RDNA2 only:
+classify opcode 12, lower vmcnt/expcnt/lgkmcnt thresholds, preserve raw provenance,
+and leave counter execution / Sony shader ABI / SPIR-V / Vulkan behavior out.

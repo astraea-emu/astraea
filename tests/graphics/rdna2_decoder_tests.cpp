@@ -296,3 +296,53 @@ TEST_CASE(
     REQUIRE(result->sopp->simm16 == 0x1234);
     REQUIRE(result->raw_word == words[0]);
 }
+
+
+TEST_CASE(
+    "RDNA2 SOPP S_WAITCNT opcode is classified exactly",
+    "[graphics][rdna2][waitcnt]") {
+    const std::array<std::uint32_t, 1> words{
+        make_sopp(12, 0xaa35),
+    };
+
+    const auto result =
+        astraea::graphics::decode_rdna2_instruction(
+            words,
+            0);
+
+    REQUIRE(result.has_value());
+    REQUIRE(
+        result->format ==
+        astraea::graphics::Rdna2InstructionFormat::sopp);
+    REQUIRE(
+        result->kind ==
+        astraea::graphics::Rdna2InstructionKind::s_waitcnt);
+    REQUIRE(result->sopp.has_value());
+    REQUIRE(result->sopp->opcode == 12);
+    REQUIRE(
+        static_cast<std::uint16_t>(
+            result->sopp->simm16) ==
+        0xaa35U);
+    REQUIRE(result->raw_word == words[0]);
+}
+
+TEST_CASE(
+    "neighboring S_SETKILL opcode remains explicit unknown",
+    "[graphics][rdna2][waitcnt]") {
+    const std::array<std::uint32_t, 1> words{
+        make_sopp(11, 0),
+    };
+
+    const auto result =
+        astraea::graphics::decode_rdna2_instruction(
+            words,
+            0);
+
+    REQUIRE(result.has_value());
+    REQUIRE(
+        result->kind ==
+        astraea::graphics::Rdna2InstructionKind::
+            unknown_sopp_opcode);
+    REQUIRE(result->sopp.has_value());
+    REQUIRE(result->sopp->opcode == 11);
+}

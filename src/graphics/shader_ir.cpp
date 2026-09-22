@@ -28,6 +28,29 @@ namespace {
            4;
 }
 
+[[nodiscard]] ShaderIrWaitCount wait_count(
+    const Rdna2Instruction& instruction) noexcept {
+    const auto bits =
+        static_cast<std::uint16_t>(
+            instruction.sopp->simm16);
+    const auto vmcnt =
+        static_cast<std::uint8_t>(
+            (((bits >> 14U) & 0x3U) << 4U) |
+            (bits & 0x0fU));
+    const auto expcnt =
+        static_cast<std::uint8_t>(
+            (bits >> 4U) & 0x7U);
+    const auto lgkmcnt =
+        static_cast<std::uint8_t>(
+            (bits >> 8U) & 0x3fU);
+
+    return ShaderIrWaitCount{
+        .vmcnt = vmcnt,
+        .expcnt = expcnt,
+        .lgkmcnt = lgkmcnt,
+    };
+}
+
 }  // namespace
 
 ShaderIrEmission lower_rdna2_to_shader_ir(
@@ -145,6 +168,12 @@ ShaderIrEmission lower_rdna2_to_shader_ir(
     case Rdna2InstructionKind::s_barrier:
         if (valid_sopp_source(instruction)) {
             operation = ShaderIrWorkgroupBarrier{};
+        }
+        break;
+
+    case Rdna2InstructionKind::s_waitcnt:
+        if (valid_sopp_source(instruction)) {
+            operation = wait_count(instruction);
         }
         break;
 
