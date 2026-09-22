@@ -771,10 +771,11 @@ TEST_CASE(
     REQUIRE(
         diff->first_divergence->kind ==
         astraea::trace::TraceDivergenceKindV0::
-            stable_field_value_mismatch);
+            stable_field_missing_left);
     REQUIRE(
         diff->first_divergence->field_name ==
-        std::optional<std::string>{"source_kind"});
+        std::optional<std::string>{
+            "source_inline_integer"});
 }
 
 TEST_CASE(
