@@ -42,6 +42,17 @@ constexpr std::uint32_t make_vop1(
            static_cast<std::uint32_t>(source);
 }
 
+constexpr std::uint32_t make_vop2(
+    std::uint8_t opcode,
+    std::uint8_t destination,
+    std::uint16_t source0,
+    std::uint8_t source1) {
+    return (static_cast<std::uint32_t>(opcode) << 25U) |
+           (static_cast<std::uint32_t>(destination) << 17U) |
+           (static_cast<std::uint32_t>(source1) << 9U) |
+           static_cast<std::uint32_t>(source0);
+}
+
 }  // namespace
 
 TEST_CASE(
@@ -151,7 +162,7 @@ TEST_CASE(
     "unsupported RDNA2 encoding preserves the raw instruction",
     "[graphics][rdna2]") {
     const std::array<std::uint32_t, 1> words{
-        0x01234567U,
+        0x80000000U,
     };
 
     const auto result =
@@ -598,6 +609,150 @@ TEST_CASE(
     for (const auto selector : selectors) {
         const std::array<std::uint32_t, 1> words{
             make_vop1(1, 5, selector),
+        };
+
+        const auto result =
+            astraea::graphics::decode_rdna2_instruction(
+                words,
+                0);
+
+        REQUIRE_FALSE(result.has_value());
+        REQUIRE(
+            result.error().code ==
+            astraea::graphics::Rdna2DecodeErrorCode::
+                instruction_out_of_bounds);
+        REQUIRE(result.error().word_index == 1);
+        REQUIRE(result.error().available_words == 1);
+    }
+}
+
+
+TEST_CASE(
+    "low-bit31 instruction space is typed VOP2 instead of generic unsupported",
+    "[graphics][rdna2][vop2]") {
+    const std::array<std::uint32_t, 1> words{
+        0x01234567U,
+    };
+
+    const auto result =
+        astraea::graphics::decode_rdna2_instruction(
+            words,
+            0);
+
+    REQUIRE(result.has_value());
+    REQUIRE(
+        result->format ==
+        astraea::graphics::Rdna2InstructionFormat::vop2);
+    REQUIRE(
+        result->kind ==
+        astraea::graphics::Rdna2InstructionKind::
+            unknown_vop2_opcode);
+    REQUIRE(result->vop2.has_value());
+    REQUIRE(result->raw_word == words[0]);
+}
+
+TEST_CASE(
+    "RDNA2 VOP2 V_ADD_F32 preserves vector selectors",
+    "[graphics][rdna2][vop2][add-f32]") {
+    const std::array<std::uint32_t, 1> words{
+        make_vop2(3, 5, 273, 9),
+    };
+
+    const auto result =
+        astraea::graphics::decode_rdna2_instruction(
+            words,
+            0);
+
+    REQUIRE(result.has_value());
+    REQUIRE(
+        result->format ==
+        astraea::graphics::Rdna2InstructionFormat::vop2);
+    REQUIRE(
+        result->kind ==
+        astraea::graphics::Rdna2InstructionKind::v_add_f32);
+    REQUIRE(result->word_count == 1);
+    REQUIRE_FALSE(result->sopp.has_value());
+    REQUIRE_FALSE(result->sop1.has_value());
+    REQUIRE_FALSE(result->vop1.has_value());
+    REQUIRE(result->vop2.has_value());
+    REQUIRE(result->vop2->opcode == 3);
+    REQUIRE(result->vop2->destination_selector == 5);
+    REQUIRE(result->vop2->source0_selector == 273);
+    REQUIRE(result->vop2->source1_selector == 9);
+    REQUIRE_FALSE(result->vop2->source0_extension.has_value());
+    REQUIRE(result->raw_word == words[0]);
+}
+
+TEST_CASE(
+    "unknown VOP2 opcode remains typed and preserves selectors",
+    "[graphics][rdna2][vop2]") {
+    const std::array<std::uint32_t, 1> words{
+        make_vop2(4, 7, 300, 11),
+    };
+
+    const auto result =
+        astraea::graphics::decode_rdna2_instruction(
+            words,
+            0);
+
+    REQUIRE(result.has_value());
+    REQUIRE(
+        result->kind ==
+        astraea::graphics::Rdna2InstructionKind::
+            unknown_vop2_opcode);
+    REQUIRE(result->vop2.has_value());
+    REQUIRE(result->vop2->opcode == 4);
+    REQUIRE(result->vop2->destination_selector == 7);
+    REQUIRE(result->vop2->source0_selector == 300);
+    REQUIRE(result->vop2->source1_selector == 11);
+}
+
+TEST_CASE(
+    "VOP2 SRC0 extension selectors consume and preserve following dword",
+    "[graphics][rdna2][vop2][extension]") {
+    constexpr std::array<std::uint16_t, 5> selectors{
+        233,
+        234,
+        249,
+        250,
+        255,
+    };
+
+    for (const auto selector : selectors) {
+        const std::array<std::uint32_t, 2> words{
+            make_vop2(3, 5, selector, 9),
+            0xdeadbeefU,
+        };
+
+        const auto result =
+            astraea::graphics::decode_rdna2_instruction(
+                words,
+                0);
+
+        REQUIRE(result.has_value());
+        REQUIRE(result->word_count == 2);
+        REQUIRE(result->vop2.has_value());
+        REQUIRE(result->vop2->source0_selector == selector);
+        REQUIRE(
+            result->vop2->source0_extension ==
+            std::optional<std::uint32_t>{0xdeadbeefU});
+    }
+}
+
+TEST_CASE(
+    "VOP2 SRC0 extension selectors reject missing following dword",
+    "[graphics][rdna2][vop2][extension]") {
+    constexpr std::array<std::uint16_t, 5> selectors{
+        233,
+        234,
+        249,
+        250,
+        255,
+    };
+
+    for (const auto selector : selectors) {
+        const std::array<std::uint32_t, 1> words{
+            make_vop2(3, 5, selector, 9),
         };
 
         const auto result =
