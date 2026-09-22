@@ -1,9 +1,9 @@
 # Project Status
 
 **Milestone:** M4 — Platform/HLE expansion  
-**State:** Imported-function relocation orchestration baseline complete; bounded scalar Shader IR program execution complete; first explicit wave/VGPR execution slice in progress  
+**State:** Imported-function relocation orchestration baseline complete; bounded scalar Shader IR program execution and explicit V_MOV_B32 wave execution complete; mixed scalar/vector one-block execution in progress  
 **Repository:** astraea-emu/astraea  
-**Active branch:** `feat/m4-shader-vector-move-execution`
+**Active branch:** `feat/m4-shader-mixed-block-execution`
 
 ## Complete
 
@@ -59,6 +59,7 @@
 - Validated Shader CFG exits select deterministic successor/terminal outcomes from matching conditional decisions (#117).
 - One validated Shader IR basic block executes supported scalar operations and returns its selected successor with explicit non-atomic failure progress (#119).
 - Bounded cross-block scalar Shader IR programs execute from an explicit entry block under an explicit block-execution budget (#122).
+- Plain VGPR-to-VGPR V_MOV_B32 executes over explicit caller-selected wave32/wave64 state under EXEC with traced lane-write semantics (#124).
 - Public five-gate CI remains the merge requirement:
   - Linux x64
   - Windows x64
@@ -68,9 +69,9 @@
 
 ## Current frontier
 
-1. #124 — execute the already-lowered plain VGPR-to-VGPR `V_MOV_B32` over explicit generic wave32/wave64 vector state — in progress on this branch.
-2. Wave size is caller-supplied, EXEC masks active lanes, wave32 ignores EXEC[63:32], and inactive destination lanes remain unchanged; no PS5 launch mode is inferred.
-3. `V_ADD_F32`, floating-point mode semantics, barriers/waits, Sony shader container/launch ABI, SPIR-V/Vulkan lowering, new opcodes, and `R_X86_64_RELATIVE` remain separately deferred.
+1. #126 — execute one validated Shader IR block with scalar moves and plain `V_MOV_B32` effects composed in source order — in progress on this branch.
+2. Mixed execution uses explicit caller-supplied scalar and vector state, preserves ordered typed effects and non-atomic progress, and still stops after selecting one validated successor.
+3. Mixed cross-block execution, `V_ADD_F32`, floating-point mode semantics, barriers/waits, Sony shader container/launch ABI, SPIR-V/Vulkan lowering, new opcodes, and `R_X86_64_RELATIVE` remain separately deferred.
 
 ## SCE metadata boundary
 
@@ -129,7 +130,7 @@ PS5-specific assumptions require documented evidence.
 
 ## Next action
 
-Validate #124 across the five-gate matrix. Execute only the existing plain VGPR-to-
-VGPR `V_MOV_B32` across explicitly selected wave32/wave64 lane state under EXEC,
-trace the resulting semantic lane writes, and keep V_ADD_F32, PS5 launch ABI, SPIR-V,
-and Vulkan semantics out.
+Validate #126 across the five-gate matrix. Compose existing scalar moves and plain
+`V_MOV_B32` execution inside one validated block with one ordered typed effect stream,
+then return the already-validated successor without executing it. Keep V_ADD_F32,
+PS5 launch ABI, SPIR-V, and Vulkan semantics out.
