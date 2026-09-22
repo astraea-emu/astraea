@@ -152,14 +152,16 @@ exact_normal_f32_add(
         };
     }
 
+    constexpr int kBinary32SignificandBits = 24;
     std::uint64_t normalized_significand = 0;
-    if (bit_count > 24U) {
+    if (bit_count > kBinary32SignificandBits) {
         const auto discarded_bit_count =
-            bit_count - 24U;
+            bit_count - kBinary32SignificandBits;
+        const auto shift =
+            static_cast<unsigned int>(
+                discarded_bit_count);
         const auto discarded_mask =
-            (std::uint64_t{1}
-             << discarded_bit_count) -
-            1U;
+            (std::uint64_t{1} << shift) - 1U;
         if ((magnitude & discarded_mask) != 0U) {
             return ExactNormalF32Add{
                 .supported = false,
@@ -170,10 +172,14 @@ exact_normal_f32_add(
             };
         }
         normalized_significand =
-            magnitude >> discarded_bit_count;
+            magnitude >> shift;
     } else {
+        const auto shift =
+            static_cast<unsigned int>(
+                kBinary32SignificandBits -
+                bit_count);
         normalized_significand =
-            magnitude << (24U - bit_count);
+            magnitude << shift;
     }
 
     const auto exponent_field =
