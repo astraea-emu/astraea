@@ -3,6 +3,7 @@
 #include <compare>
 #include <cstddef>
 #include <optional>
+#include <vector>
 
 #include <astraea/core/result.hpp>
 #include <astraea/graphics/shader_cfg.hpp>
@@ -72,5 +73,60 @@ select_shader_cfg_successor(
     const ShaderControlFlowGraph& graph,
     std::size_t block_index,
     std::optional<ShaderBranchDecision> branch_decision) noexcept;
+
+struct ShaderScalarBlockExecution {
+    std::size_t block_index = 0;
+    std::size_t executed_emission_count = 0;
+    std::vector<ShaderScalarExecutionEffect> scalar_write_effects;
+    std::optional<ShaderBranchDecision> branch_decision;
+    ShaderCfgSuccessorSelection successor;
+
+    auto operator<=>(const ShaderScalarBlockExecution&) const =
+        default;
+};
+
+enum class ShaderScalarBlockExecutionErrorCode {
+    graph_program_mismatch,
+    block_index_out_of_bounds,
+    invalid_block_extent,
+    invalid_block_control_flow,
+    host_allocation_failure,
+    unsupported_operation,
+    scalar_execution_failure,
+    cfg_successor_failure,
+};
+
+struct ShaderScalarBlockExecutionError {
+    ShaderScalarBlockExecutionErrorCode code =
+        ShaderScalarBlockExecutionErrorCode::
+            unsupported_operation;
+    std::size_t block_index = 0;
+    std::size_t emission_index = 0;
+    std::size_t completed_emission_count = 0;
+    std::optional<ShaderScalarExecutionError> scalar_error;
+    std::optional<ShaderCfgSuccessorError> successor_error;
+
+    auto operator<=>(
+        const ShaderScalarBlockExecutionError&) const = default;
+};
+
+using ShaderScalarBlockExecutionResult =
+    astraea::core::Result<
+        ShaderScalarBlockExecution,
+        ShaderScalarBlockExecutionError>;
+
+// Executes exactly one validated basic block against explicit generic scalar
+// state. Earlier successful scalar writes remain applied if a later emission
+// fails; completed_emission_count makes that non-atomic progress explicit.
+//
+// The selected successor is returned but never executed. This function does not
+// maintain a cross-block PC, walk loops, execute vector/wait/barrier semantics,
+// or infer any PS5 shader-entry state.
+[[nodiscard]] ShaderScalarBlockExecutionResult
+execute_shader_scalar_block(
+    const ShaderIrProgram& program,
+    const ShaderControlFlowGraph& graph,
+    std::size_t block_index,
+    ShaderScalarState& state);
 
 }  // namespace astraea::graphics
