@@ -19,6 +19,7 @@
 namespace {
 
 constexpr std::uint32_t kSoppBase = 0xbf800000U;
+constexpr std::uint32_t kSop1Base = 0xbe800000U;
 
 constexpr std::uint32_t make_sopp(
     std::uint8_t opcode,
@@ -101,6 +102,16 @@ void require_equivalent(
     REQUIRE(result->matched_event_count == 1);
     REQUIRE_FALSE(
         result->first_divergence.has_value());
+}
+
+constexpr std::uint32_t make_sop1(
+    std::uint8_t opcode,
+    std::uint8_t destination,
+    std::uint8_t source) {
+    return kSop1Base |
+           (static_cast<std::uint32_t>(destination) << 16U) |
+           (static_cast<std::uint32_t>(opcode) << 8U) |
+           static_cast<std::uint32_t>(source);
 }
 
 }  // namespace
@@ -598,4 +609,99 @@ TEST_CASE(
     REQUIRE(
         diff->first_divergence->field_name ==
         std::optional<std::string>{"vmcnt"});
+}
+
+
+TEST_CASE(
+    "SOP1 decode trace exposes raw selectors as stable decoded fields",
+    "[trace][graphics][v0][sop1]") {
+    const auto instruction =
+        decode_one(make_sop1(3, 5, 17));
+
+    auto event =
+        astraea::trace::trace_rdna2_decode_v0(
+            97,
+            instruction);
+
+    REQUIRE(event.has_value());
+    REQUIRE(event->subsystem == "shader.decode");
+    REQUIRE(event->type == "instruction");
+    REQUIRE(event->stable.size() == 5);
+    REQUIRE(event->stable[0].name == "format");
+    REQUIRE(
+        std::get<std::string>(
+            event->stable[0].value) == "sop1");
+    REQUIRE(event->stable[1].name == "kind");
+    REQUIRE(
+        std::get<std::string>(
+            event->stable[1].value) == "s_mov_b32");
+    REQUIRE(event->stable[2].name == "opcode");
+    REQUIRE(event->stable[3].name == "destination_selector");
+    REQUIRE(
+        std::get<std::uint64_t>(
+            event->stable[3].value) == 5);
+    REQUIRE(event->stable[4].name == "source_selector");
+    REQUIRE(
+        std::get<std::uint64_t>(
+            event->stable[4].value) == 17);
+}
+
+TEST_CASE(
+    "S_MOV_B32 Shader IR trace exposes SGPR move semantics",
+    "[trace][graphics][v0][sop1][mov]") {
+    const auto ir =
+        astraea::graphics::lower_rdna2_to_shader_ir(
+            decode_one(make_sop1(3, 5, 17)));
+
+    auto event =
+        astraea::trace::trace_shader_ir_v0(
+            98,
+            ir);
+
+    REQUIRE(event.has_value());
+    REQUIRE(event->subsystem == "shader.ir");
+    REQUIRE(event->type == "scalar_move_32");
+    REQUIRE(event->stable.size() == 2);
+    REQUIRE(event->stable[0].name == "destination_sgpr");
+    REQUIRE(
+        std::get<std::uint64_t>(
+            event->stable[0].value) == 5);
+    REQUIRE(event->stable[1].name == "source_sgpr");
+    REQUIRE(
+        std::get<std::uint64_t>(
+            event->stable[1].value) == 17);
+    REQUIRE(event->diagnostics.size() == 2);
+}
+
+TEST_CASE(
+    "S_MOV_B32 SGPR destination participates in trace divergence",
+    "[trace][graphics][v0][sop1][mov]") {
+    auto left =
+        astraea::trace::trace_shader_ir_v0(
+            99,
+            astraea::graphics::lower_rdna2_to_shader_ir(
+                decode_one(make_sop1(3, 5, 17))));
+    auto right =
+        astraea::trace::trace_shader_ir_v0(
+            99,
+            astraea::graphics::lower_rdna2_to_shader_ir(
+                decode_one(make_sop1(3, 6, 17))));
+
+    REQUIRE(left.has_value());
+    REQUIRE(right.has_value());
+
+    auto diff =
+        astraea::trace::diff_trace_v0(
+            document(std::move(left).value()),
+            document(std::move(right).value()));
+
+    REQUIRE(diff.has_value());
+    REQUIRE_FALSE(diff->equivalent);
+    REQUIRE(
+        diff->first_divergence->kind ==
+        astraea::trace::TraceDivergenceKindV0::
+            stable_field_value_mismatch);
+    REQUIRE(
+        diff->first_divergence->field_name ==
+        std::optional<std::string>{"destination_sgpr"});
 }
