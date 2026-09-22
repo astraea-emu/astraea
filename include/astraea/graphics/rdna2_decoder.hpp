@@ -82,8 +82,9 @@ struct Rdna2Instruction {
 using Rdna2DecodeResult =
     astraea::core::Result<Rdna2Instruction, Rdna2DecodeError>;
 
-// Decodes only the generic RDNA2 SOPP encoding documented by AMD.
-// The caller owns shader-container parsing and conversion into 32-bit
+// Decodes the currently supported generic RDNA2 scalar instruction encodings
+// documented by AMD (SOPP and the base word of SOP1). The caller owns
+// shader-container parsing and conversion into 32-bit
 // instruction words. This function does not encode PS5 launch-ABI,
 // container, descriptor, SPIR-V, or Vulkan assumptions.
 [[nodiscard]] Rdna2DecodeResult decode_rdna2_instruction(
