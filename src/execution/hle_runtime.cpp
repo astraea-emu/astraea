@@ -73,14 +73,115 @@ namespace {
     };
 }
 
+[[nodiscard]] HleRuntimeError agc_create_plan_runtime_error(
+    HleFunctionId function_id,
+    std::uint32_t gate_slot,
+    SceAgcCreateShaderPlanError detail) noexcept {
+    const bool has_memory =
+        detail.guest_memory_error.has_value();
+    const auto memory =
+        has_memory
+            ? detail.guest_memory_error.value()
+            : GuestMemoryError{};
+    return HleRuntimeError{
+        .code =
+            HleRuntimeErrorCode::
+                sce_agc_create_shader_plan_failure,
+        .has_function_id = true,
+        .function_id = function_id,
+        .has_gate_slot = true,
+        .gate_slot = gate_slot,
+        .has_guest_address =
+            detail.guest_address.has_value(),
+        .guest_address =
+            detail.guest_address.has_value()
+                ? detail.guest_address->value()
+                : 0,
+        .has_guest_memory_error = has_memory,
+        .guest_memory_error = memory,
+        .sce_agc_create_shader_plan_error =
+            std::move(detail),
+        .sce_agc_shader_preparation_error =
+            std::nullopt,
+        .sce_agc_shader_apply_error =
+            std::nullopt,
+    };
+}
+
+[[nodiscard]] HleRuntimeError
+agc_preparation_runtime_error(
+    HleFunctionId function_id,
+    std::uint32_t gate_slot,
+    SceAgcShaderPreparationError detail) noexcept {
+    return HleRuntimeError{
+        .code =
+            HleRuntimeErrorCode::
+                sce_agc_shader_preparation_failure,
+        .has_function_id = true,
+        .function_id = function_id,
+        .has_gate_slot = true,
+        .gate_slot = gate_slot,
+        .has_guest_address =
+            detail.guest_address.has_value(),
+        .guest_address =
+            detail.guest_address.has_value()
+                ? detail.guest_address->value()
+                : 0,
+        .has_guest_memory_error = false,
+        .guest_memory_error = {},
+        .sce_agc_create_shader_plan_error =
+            std::nullopt,
+        .sce_agc_shader_preparation_error =
+            std::move(detail),
+        .sce_agc_shader_apply_error =
+            std::nullopt,
+    };
+}
+
+[[nodiscard]] HleRuntimeError agc_apply_runtime_error(
+    HleFunctionId function_id,
+    std::uint32_t gate_slot,
+    SceAgcShaderApplyError detail) noexcept {
+    const bool has_memory =
+        detail.guest_memory_error.has_value();
+    const auto memory =
+        has_memory
+            ? detail.guest_memory_error.value()
+            : GuestMemoryError{};
+    return HleRuntimeError{
+        .code =
+            HleRuntimeErrorCode::
+                sce_agc_shader_apply_failure,
+        .has_function_id = true,
+        .function_id = function_id,
+        .has_gate_slot = true,
+        .gate_slot = gate_slot,
+        .has_guest_address =
+            has_memory &&
+            memory.has_guest_address,
+        .guest_address =
+            has_memory
+                ? memory.guest_address
+                : 0,
+        .has_guest_memory_error = has_memory,
+        .guest_memory_error = memory,
+        .sce_agc_create_shader_plan_error =
+            std::nullopt,
+        .sce_agc_shader_preparation_error =
+            std::nullopt,
+        .sce_agc_shader_apply_error =
+            std::move(detail),
+    };
+}
+
 }  // namespace
 
-HleDispatchResult dispatch_synthetic_hle(
+HleDispatchResult dispatch_hle(
     const HleRegistry& registry,
     const SyntheticGateRegion& gate_region,
     const ExecutionStop& stop,
     const GuestMemoryAccess& guest_memory,
-    SyntheticHleTranscript& transcript) {
+    HleDispatchState& state) {
     if (stop.reason != ExecutionStopReason::host_gate ||
         !stop.has_gate_slot) {
         return HleDispatchResult::failure(
@@ -120,6 +221,51 @@ HleDispatchResult dispatch_synthetic_hle(
             stop.gate_slot,
             stop.context);
 
+    if (descriptor->id ==
+        kSceAgcCreateShaderHleId) {
+        auto create_shader =
+            plan_sce_agc_create_shader(
+                call,
+                guest_memory);
+        if (!create_shader.has_value()) {
+            return HleDispatchResult::failure(
+                agc_create_plan_runtime_error(
+                    descriptor->id,
+                    stop.gate_slot,
+                    create_shader.error()));
+        }
+
+        auto preparation =
+            plan_sce_agc_shader_preparation(
+                create_shader.value());
+        if (!preparation.has_value()) {
+            return HleDispatchResult::failure(
+                agc_preparation_runtime_error(
+                    descriptor->id,
+                    stop.gate_slot,
+                    preparation.error()));
+        }
+
+        auto applied =
+            apply_sce_agc_shader_preparation(
+                preparation.value(),
+                guest_memory);
+        if (!applied.has_value()) {
+            return HleDispatchResult::failure(
+                agc_apply_runtime_error(
+                    descriptor->id,
+                    stop.gate_slot,
+                    applied.error()));
+        }
+
+        return HleDispatchResult::success(
+            HleHandlerResult{
+                .action =
+                    HleHandlerAction::resume,
+                .value = 0,
+            });
+    }
+
     if (descriptor->id == kSyntheticTestWriteId) {
         const std::uint64_t raw_count =
             call.arguments[1];
@@ -146,10 +292,10 @@ HleDispatchResult dispatch_synthetic_hle(
         const auto count =
             static_cast<std::size_t>(raw_count);
         const auto old_size =
-            transcript.output.size();
+            state.output.size();
 
         if (count >
-            transcript.output.max_size() -
+            state.output.max_size() -
                 old_size) {
             return HleDispatchResult::failure(
                 runtime_error(
@@ -165,7 +311,7 @@ HleDispatchResult dispatch_synthetic_hle(
 
         if (count != 0) {
             try {
-                transcript.output.resize(
+                state.output.resize(
                     old_size + count);
             } catch (const std::bad_alloc&) {
                 return HleDispatchResult::failure(
@@ -196,11 +342,11 @@ HleDispatchResult dispatch_synthetic_hle(
                     astraea::memory::GuestAddress{
                         call.arguments[0]},
                     std::span<std::byte>{
-                        transcript.output.data() +
+                        state.output.data() +
                             old_size,
                         count});
             if (!copied.has_value()) {
-                transcript.output.resize(old_size);
+                state.output.resize(old_size);
                 return HleDispatchResult::failure(
                     memory_runtime_error(
                         descriptor->id,
@@ -236,7 +382,21 @@ HleDispatchResult dispatch_synthetic_hle(
             stop.gate_slot));
 }
 
-HleResumeResult apply_synthetic_hle_resume(
+HleDispatchResult dispatch_synthetic_hle(
+    const HleRegistry& registry,
+    const SyntheticGateRegion& gate_region,
+    const ExecutionStop& stop,
+    const GuestMemoryAccess& guest_memory,
+    SyntheticHleTranscript& transcript) {
+    return dispatch_hle(
+        registry,
+        gate_region,
+        stop,
+        guest_memory,
+        transcript);
+}
+
+HleResumeResult apply_hle_resume(
     GuestCpuContext context,
     const HleHandlerResult& handler_result,
     const GuestMemoryAccess& guest_memory) {
@@ -316,6 +476,16 @@ HleResumeResult apply_synthetic_hle_resume(
 
     return HleResumeResult::success(
         context);
+}
+
+HleResumeResult apply_synthetic_hle_resume(
+    GuestCpuContext context,
+    const HleHandlerResult& handler_result,
+    const GuestMemoryAccess& guest_memory) {
+    return apply_hle_resume(
+        std::move(context),
+        handler_result,
+        guest_memory);
 }
 
 }  // namespace astraea::execution
