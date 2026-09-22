@@ -200,6 +200,9 @@ namespace {
         Rdna2InstructionKind::s_barrier:
         return "s_barrier";
     case astraea::graphics::
+        Rdna2InstructionKind::s_waitcnt:
+        return "s_waitcnt";
+    case astraea::graphics::
         Rdna2InstructionKind::unknown_sopp_opcode:
         return "unknown_sopp_opcode";
     case astraea::graphics::
@@ -614,6 +617,24 @@ trace_shader_ir_v0(
                         astraea::graphics::
                             ShaderIrWorkgroupBarrier>) {
                     event_type = "workgroup_barrier";
+                } else if constexpr (
+                    std::is_same_v<
+                        Operation,
+                        astraea::graphics::
+                            ShaderIrWaitCount>) {
+                    event_type = "wait_count";
+                    stable.push_back(
+                        u64_field(
+                            "vmcnt",
+                            operation.vmcnt));
+                    stable.push_back(
+                        u64_field(
+                            "expcnt",
+                            operation.expcnt));
+                    stable.push_back(
+                        u64_field(
+                            "lgkmcnt",
+                            operation.lgkmcnt));
                 } else if constexpr (
                     std::is_same_v<
                         Operation,
