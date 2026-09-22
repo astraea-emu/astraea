@@ -34,8 +34,9 @@ namespace {
 // evidence that a particular Sony shader container uses any specific form.
 
 constexpr std::uint32_t kSoppEncoding = 0x17fU;
-constexpr std::uint32_t kSoppEncodingMask = 0x1ffU;
-constexpr unsigned int kSoppEncodingShift = 23U;
+constexpr std::uint32_t kSop1Encoding = 0x17dU;
+constexpr std::uint32_t kScalarEncodingMask = 0x1ffU;
+constexpr unsigned int kScalarEncodingShift = 23U;
 constexpr std::uint32_t kSoppOpcodeMask = 0x7fU;
 constexpr unsigned int kSoppOpcodeShift = 16U;
 constexpr std::uint32_t kSimm16Mask = 0xffffU;
@@ -51,6 +52,13 @@ constexpr std::uint8_t kSoppCbranchExeczOpcode = 8;
 constexpr std::uint8_t kSoppCbranchExecnzOpcode = 9;
 constexpr std::uint8_t kSoppBarrierOpcode = 10;
 constexpr std::uint8_t kSoppWaitcntOpcode = 12;
+
+constexpr std::uint32_t kSop1OpcodeMask = 0xffU;
+constexpr unsigned int kSop1OpcodeShift = 8U;
+constexpr std::uint32_t kSop1DestinationMask = 0x7fU;
+constexpr unsigned int kSop1DestinationShift = 16U;
+constexpr std::uint32_t kSop1SourceMask = 0xffU;
+constexpr std::uint8_t kSop1MovB32Opcode = 3;
 
 [[nodiscard]] Rdna2DecodeError decode_error(
     Rdna2DecodeErrorCode code,
@@ -114,6 +122,14 @@ constexpr std::uint8_t kSoppWaitcntOpcode = 12;
     }
 }
 
+[[nodiscard]] Rdna2InstructionKind classify_sop1_opcode(
+    std::uint8_t opcode) noexcept {
+    if (opcode == kSop1MovB32Opcode) {
+        return Rdna2InstructionKind::s_mov_b32;
+    }
+    return Rdna2InstructionKind::unknown_sop1_opcode;
+}
+
 }  // namespace
 
 Rdna2DecodeResult decode_rdna2_instruction(
@@ -139,28 +155,62 @@ Rdna2DecodeResult decode_rdna2_instruction(
     const auto word = words[word_index];
     const auto byte_offset = word_index * 4U;
     const auto encoding =
-        (word >> kSoppEncodingShift) &
-        kSoppEncodingMask;
+        (word >> kScalarEncodingShift) &
+        kScalarEncodingMask;
 
-    if (encoding != kSoppEncoding) {
+    if (encoding == kSoppEncoding) {
+        const auto opcode =
+            static_cast<std::uint8_t>(
+                (word >> kSoppOpcodeShift) &
+                kSoppOpcodeMask);
+
         return Rdna2DecodeResult::success(
             Rdna2Instruction{
                 .word_index = word_index,
                 .byte_offset = byte_offset,
                 .raw_word = word,
                 .raw_encoding = raw_encoding(word),
-                .format =
-                    Rdna2InstructionFormat::unsupported,
-                .kind =
-                    Rdna2InstructionKind::
-                        unsupported_encoding,
-                .sopp = std::nullopt,
+                .format = Rdna2InstructionFormat::sopp,
+                .kind = classify_sopp_opcode(opcode),
+                .sopp =
+                    Rdna2SoppFields{
+                        .opcode = opcode,
+                        .simm16 = decode_simm16(word),
+                    },
+                .sop1 = std::nullopt,
             });
     }
 
-    const auto opcode = static_cast<std::uint8_t>(
-        (word >> kSoppOpcodeShift) &
-        kSoppOpcodeMask);
+    if (encoding == kSop1Encoding) {
+        const auto opcode =
+            static_cast<std::uint8_t>(
+                (word >> kSop1OpcodeShift) &
+                kSop1OpcodeMask);
+        const auto destination =
+            static_cast<std::uint8_t>(
+                (word >> kSop1DestinationShift) &
+                kSop1DestinationMask);
+        const auto source =
+            static_cast<std::uint8_t>(
+                word & kSop1SourceMask);
+
+        return Rdna2DecodeResult::success(
+            Rdna2Instruction{
+                .word_index = word_index,
+                .byte_offset = byte_offset,
+                .raw_word = word,
+                .raw_encoding = raw_encoding(word),
+                .format = Rdna2InstructionFormat::sop1,
+                .kind = classify_sop1_opcode(opcode),
+                .sopp = std::nullopt,
+                .sop1 =
+                    Rdna2Sop1Fields{
+                        .opcode = opcode,
+                        .destination_selector = destination,
+                        .source_selector = source,
+                    },
+            });
+    }
 
     return Rdna2DecodeResult::success(
         Rdna2Instruction{
@@ -168,13 +218,12 @@ Rdna2DecodeResult decode_rdna2_instruction(
             .byte_offset = byte_offset,
             .raw_word = word,
             .raw_encoding = raw_encoding(word),
-            .format = Rdna2InstructionFormat::sopp,
-            .kind = classify_sopp_opcode(opcode),
-            .sopp =
-                Rdna2SoppFields{
-                    .opcode = opcode,
-                    .simm16 = decode_simm16(word),
-                },
+            .format = Rdna2InstructionFormat::unsupported,
+            .kind =
+                Rdna2InstructionKind::
+                    unsupported_encoding,
+            .sopp = std::nullopt,
+            .sop1 = std::nullopt,
         });
 }
 
