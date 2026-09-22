@@ -145,10 +145,24 @@ using RegisterListResult =
         return RegisterListResult::success({});
     }
 
-    const auto list_offset =
+    const auto raw_relative_offset =
         read_little_endian<std::uint64_t>(
             header,
             offset_field);
+
+    std::uint64_t list_offset = 0;
+    if (!checked_add(
+            static_cast<std::uint64_t>(offset_field),
+            raw_relative_offset,
+            list_offset)) {
+        return RegisterListResult::failure(
+            error(
+                AgcShaderBinaryErrorCode::
+                    register_table_extent_overflow,
+                AgcShaderBinaryRegion::shader_header,
+                offset_field,
+                kind));
+    }
 
     std::uint64_t list_size = 0;
     if (!checked_multiply(
