@@ -1853,3 +1853,119 @@ TEST_CASE(
         diff->first_divergence->field_name ==
         std::optional<std::string>{"taken"});
 }
+
+
+TEST_CASE(
+    "CFG successor selection Trace v0 exposes selected edge",
+    "[trace][graphics][v0][shader-execution][cfg-successor]") {
+    const astraea::graphics::ShaderCfgSuccessorSelection
+        selection{
+            .edge =
+                astraea::graphics::ShaderCfgEdge{
+                    .kind =
+                        astraea::graphics::ShaderCfgEdgeKind::
+                            conditional_branch_taken,
+                    .target_block_index = 4,
+                },
+        };
+
+    auto event =
+        astraea::trace::
+            trace_shader_cfg_successor_selection_v0(
+                129,
+                2,
+                selection);
+
+    REQUIRE(event.has_value());
+    REQUIRE(event->subsystem == "shader.execute");
+    REQUIRE(
+        event->type ==
+        "cfg_successor_selection");
+    REQUIRE(event->stable.size() == 4);
+    REQUIRE(event->stable[0].name == "source_block_index");
+    REQUIRE(
+        std::get<std::uint64_t>(
+            event->stable[0].value) == 2);
+    REQUIRE(event->stable[1].name == "has_successor");
+    REQUIRE(
+        std::get<bool>(
+            event->stable[1].value));
+    REQUIRE(event->stable[2].name == "edge_kind");
+    REQUIRE(
+        std::get<std::string>(
+            event->stable[2].value) ==
+        "conditional_branch_taken");
+    REQUIRE(
+        event->stable[3].name ==
+        "target_block_index");
+    REQUIRE(
+        std::get<std::uint64_t>(
+            event->stable[3].value) == 4);
+    REQUIRE(event->diagnostics.empty());
+}
+
+TEST_CASE(
+    "terminal CFG successor selection Trace v0 has no edge fields",
+    "[trace][graphics][v0][shader-execution][cfg-successor]") {
+    const astraea::graphics::ShaderCfgSuccessorSelection
+        selection{};
+
+    auto event =
+        astraea::trace::
+            trace_shader_cfg_successor_selection_v0(
+                130,
+                3,
+                selection);
+
+    REQUIRE(event.has_value());
+    REQUIRE(event->stable.size() == 2);
+    REQUIRE(event->stable[1].name == "has_successor");
+    REQUIRE_FALSE(
+        std::get<bool>(
+            event->stable[1].value));
+}
+
+TEST_CASE(
+    "CFG successor target participates in trace divergence",
+    "[trace][graphics][v0][shader-execution][cfg-successor][diff]") {
+    const auto make_event =
+        [](std::size_t target_block_index) {
+            const astraea::graphics::
+                ShaderCfgSuccessorSelection selection{
+                    .edge =
+                        astraea::graphics::ShaderCfgEdge{
+                            .kind =
+                                astraea::graphics::
+                                    ShaderCfgEdgeKind::
+                                        unconditional_branch,
+                            .target_block_index =
+                                target_block_index,
+                        },
+                };
+
+            auto event =
+                astraea::trace::
+                    trace_shader_cfg_successor_selection_v0(
+                        131,
+                        1,
+                        selection);
+            REQUIRE(event.has_value());
+            return std::move(event).value();
+        };
+
+    auto diff =
+        astraea::trace::diff_trace_v0(
+            document(make_event(2)),
+            document(make_event(3)));
+
+    REQUIRE(diff.has_value());
+    REQUIRE_FALSE(diff->equivalent);
+    REQUIRE(
+        diff->first_divergence->kind ==
+        astraea::trace::TraceDivergenceKindV0::
+            stable_field_value_mismatch);
+    REQUIRE(
+        diff->first_divergence->field_name ==
+        std::optional<std::string>{
+            "target_block_index"});
+}
