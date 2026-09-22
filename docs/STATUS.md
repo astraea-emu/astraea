@@ -1,9 +1,9 @@
 # Project Status
 
 **Integration gate:** V1 — Guest-created shader object  
-**State:** V1 correctness correction active after guest-call materialization  
+**State:** V1 pixel shader-object preparation/apply active after corrected AGC raw semantics  
 **Repository:** astraea-emu/astraea  
-**Active branch:** `fix/v1-agc-self-relative-register-lists`
+**Active branch:** `feat/v1-prepare-pixel-agc-shader`
 
 ## Complete
 
@@ -67,6 +67,7 @@
 - Evidence-backed PS5 AGC shader-container ingestion validates the bounded container envelope, preserves opaque provenance, extracts the documented RDNA2 program prefix, feeds the existing RDNA2 -> Shader IR path end to end, and executes a dedicated fuzz smoke in CI (#134/#135).
 - Dependency-driven vertical integration and the V0–V5 architecture gates are adopted as the project planning model (ADR 0006, #136/#137).
 - Canonical guest `sceAgcCreateShader` call materialization and backend-neutral guest-memory validation are complete (#140/#141).
+- Corrected self-relative AGC context/shader register-list addressing is complete and five-gate validated (#143/#144).
 - Public five-gate CI remains the merge requirement:
   - Linux x64
   - Windows x64
@@ -76,12 +77,13 @@
 
 ## Current frontier
 
-1. #140/#141 are complete: RDI/RSI/RDX at the real `sceAgcCreateShader` ABI can be materialized safely from guest memory into the canonical `AgcShaderBinary` without mutation.
-2. A pre-preparation evidence audit found that #138/#139 interpreted the raw register-list qwords at `+0x18/+0x20` incorrectly as header-absolute offsets.
-3. #143 is active: correct those two fields to checked self-relative deltas from their own qword field addresses and regression-lock the behavior with Astraea-owned bytes shaped after two current public observations.
-4. #142 is superseded and closed; its intermediate header-base-offset preparation premise must not be used.
-5. After #143, resume V1 with a field-by-field `sceAgcCreateShader` preparation profile, then real service dispatch and the owned end-to-end guest return proof.
-6. V2 begins immediately after V1 with the smallest workload-driven Shader IR -> valid SPIR-V proof; V3 then introduces the first guest-driven Vulkan command/resource/result path.
+1. #140/#141 are complete: the real three-pointer `sceAgcCreateShader` ABI can be materialized safely into canonical raw AGC state without mutation.
+2. #143/#144 are complete: non-empty raw context/shader register lists resolve from their own pointer-field addresses, not from header byte zero.
+3. #145 is active: prepare and apply one evidence-backed version-0x18 pixel shader-object profile shaped after current public native-homebrew artifacts.
+4. The #145 layer keeps canonical parsing, pure mutation planning, and guest-memory application separate. Application preflights every writable range before the first mutation and publishes `*outShader` last.
+5. Resource descriptor interpretation, command submission, extra RDNA2 coverage, SPIR-V, and Vulkan remain out of scope until the vertical path requires them.
+6. After #145, wire exact `libSceAgc:f3dg2CSgRKY` dispatch and prove the owned guest returns successfully from `sceAgcCreateShader`. That closes V1.
+7. V2 then begins immediately with the smallest workload-driven Shader IR -> validated SPIR-V proof; V3 introduces the first guest-driven headless Vulkan workload.
 
 ## SCE metadata boundary
 
@@ -140,16 +142,24 @@ PS5-specific assumptions require documented evidence.
 
 ## Next action
 
-Finish #143 and merge only after its immutable PR head passes all five public CI gates, including the AGC shader-binary fuzz smoke.
+Finish #145 on `feat/v1-prepare-pixel-agc-shader`.
 
-The correction is intentionally narrow:
+The supported first profile is deliberately bounded but shaped after a current public pixel shader header:
 
-`raw register-list qword -> checked (field offset + raw delta) -> bounded 8-byte register records`.
+- version `0x18`, pixel stage;
+- corrected self-relative context/shader register lists;
+- top-level user-data, context, shader, specials, input/output-semantics pointer preparation when non-zero;
+- the five evidenced nested user-data pointer fields, without decoding descriptor payloads;
+- code association at header `+0x10`;
+- leading pixel PGM_LO/HI register values derived from a 256-byte-aligned, 48-bit-representable guest code address;
+- prepared header address written to `*outShader` only after all header writes validate and apply.
 
-Do not add shader-header mutation, resource-table relocation, program-address patching, command submission, new RDNA2 opcodes, SPIR-V, or Vulkan in #143.
+Do not return to guest execution, bind the real NID, add AGC commands, interpret descriptors, add RDNA2 instructions, or introduce SPIR-V/Vulkan inside #145.
 
-After #143 merges, open a fresh evidence-scoped V1 preparation issue from the corrected semantics. The target remains:
+Merge only the exact immutable PR head after Linux x64, Windows x64, macOS ARM64, Linux ASan+UBSan, and Linux Clang fuzz smoke are green.
 
-`owned SCE program -> exact libSceAgc import -> sceAgcCreateShader -> prepared guest shader object -> validated AGC/RDNA2/Shader IR -> return to guest`.
+Then create the final V1 integration issue:
 
-That V1 proof closes before host rendering begins. V2 then starts with a minimal Shader IR -> SPIR-V semantic proof, and V3 connects the first controlled guest GPU workload to Vulkan headlessly.
+`owned SCE program -> exact libSceAgc import -> sceAgcCreateShader service -> prepared guest shader object -> return to guest -> controlled exit`.
+
+Once that proof is real, begin V2 instead of horizontally expanding AGC.

@@ -139,3 +139,58 @@ Astraea uses public projects and public homebrew artifacts to establish
 observable layout/call contracts, then implements independent C++ code with
 Astraea-owned synthetic bytes. No third-party shader binary, Sony binary,
 firmware, key, proprietary SDK file, or copied implementation is committed.
+
+
+## V1 preparation evidence for #145
+
+The #143 correction was followed by a field-by-field preparation audit before
+any guest mutation code was added.
+
+Current public SharpProspero `mesh_ps.sb` at commit
+`9220876e25bc28aca1f65ea644783a479949ad77` was inspected without committing
+its bytes. The relevant raw shape is:
+
+- header size `0x160`;
+- format version `0x18`;
+- pixel program type `1`;
+- top-level self-relative qwords:
+  - user-data `+0x08 = 0x108`, resolving to header `+0x110`;
+  - context registers `+0x18 = 0xB0`, resolving to `+0xC8`;
+  - shader registers `+0x20 = 0x78`, resolving to `+0x98`;
+  - specials `+0x28 = 0x38`, resolving to `+0x60`;
+  - input semantics `+0x30 = 0x60`, resolving to `+0x90`;
+  - output semantics `+0x38 = 0`.
+- the first two shader-register records at the corrected `+0x98` list are
+  offsets `0x08` and `0x09`.
+
+Kyty and current prosper independently identify those first two pixel
+register offsets as `SPI_SHADER_PGM_LO_PS` and `SPI_SHADER_PGM_HI_PS`, and
+both model shader creation as writing code-address bits 8..39 and 40..47 into
+their values. Astraea treats that as independently corroborated
+emulator/research evidence, not as an official Sony specification.
+
+The same public pixel sample resolves its user-data object to header
+`+0x110`. Kyty's published `ShaderUserData` layout and SharpProspero's
+post-create resource accessor agree that the object begins with five pointer
+fields: one direct-resource pointer followed by four sharp-resource pointers.
+For the inspected sample their raw self-relative values resolve to:
+
+- direct-resource pointer: header `+0x148`;
+- each of the four sharp-resource pointers: header end `+0x160`.
+
+The latter are one-past-end values paired with zero-count resource kinds in
+the inspected profile. #145 therefore permits a non-zero self-relative
+pointer target to resolve exactly to the validated header end; it does not
+dereference or interpret descriptor payloads.
+
+The creation behavior used by #145 is intentionally split into three layers:
+
+1. canonical raw parsing owns format validation and corrected register-list
+   provenance;
+2. a pure preparation planner derives only evidenced guest byte patches;
+3. an apply step preflights every writable patch range before mutating the
+   guest and publishes the output shader handle last.
+
+The supported first profile does not claim universal AGC semantics. Other
+shader stages, versions, resource payload interpretation, command buffers, and
+host GPU objects remain separate dependencies.

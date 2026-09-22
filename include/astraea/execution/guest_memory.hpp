@@ -63,6 +63,13 @@ public:
         astraea::memory::GuestAddress address,
         std::span<const std::byte> input) const noexcept;
 
+    // Validates the exact writable guest range without mutating memory.
+    // Intended for multi-patch operations that must establish every expected
+    // write before applying the first mutation.
+    [[nodiscard]] CopyResult preflight_write(
+        astraea::memory::GuestAddress address,
+        std::size_t byte_count) const noexcept;
+
     [[nodiscard]] StringResult read_c_string(
         astraea::memory::GuestAddress address,
         std::size_t max_bytes) const;

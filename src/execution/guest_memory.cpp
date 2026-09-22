@@ -274,6 +274,16 @@ GuestMemoryAccess::CopyResult GuestMemoryAccess::write(
     return CopyResult::success(input.size());
 }
 
+GuestMemoryAccess::CopyResult
+GuestMemoryAccess::preflight_write(
+    astraea::memory::GuestAddress address,
+    std::size_t byte_count) const noexcept {
+    return validate(
+        address,
+        byte_count,
+        AccessKind::write);
+}
+
 GuestMemoryAccess::StringResult
 GuestMemoryAccess::read_c_string(
     astraea::memory::GuestAddress address,
