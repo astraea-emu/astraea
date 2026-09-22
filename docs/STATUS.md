@@ -1,9 +1,9 @@
 # Project Status
 
 **Milestone:** M4 — Platform/HLE expansion  
-**State:** Imported-function relocation orchestration baseline complete; generic RDNA2 S_MOV_B32 inline-integer source slice in progress  
+**State:** Imported-function relocation orchestration baseline complete; generic RDNA2 S_MOV_B32 literal-extension source slice in progress  
 **Repository:** astraea-emu/astraea  
-**Active branch:** `feat/m4-rdna2-mov-b32-inline-int`
+**Active branch:** `feat/m4-rdna2-mov-b32-literal`
 
 ## Complete
 
@@ -46,6 +46,7 @@
 - AMD-documented RDNA2 SOPP S_WAITCNT thresholds lowered to typed Shader IR/Trace semantics (#88).
 - AMD-documented RDNA2 SOP1 S_MOV_B32 plain SGPR moves lowered to typed Shader IR/Trace semantics (#92).
 - AMD-documented RDNA2 SOP1 S_MOV_B64 plain even-aligned SGPR-pair moves lowered to typed Shader IR/Trace semantics (#94).
+- AMD-documented RDNA2 S_MOV_B32 single-word integer inline sources lowered to typed Shader IR/Trace semantics (#95).
 - Public five-gate CI remains the merge requirement:
   - Linux x64
   - Windows x64
@@ -55,8 +56,8 @@
 
 ## Current frontier
 
-1. #95 — lower the AMD-documented single-word integer inline source selectors for S_MOV_B32 — in progress on this branch.
-2. Plain SGPR sources remain supported; selectors 128..208 gain only the documented integer values, while special registers, floating constants, and selector 255 literal extension remain unsupported.
+1. #98 — decode and lower the AMD-documented S_MOV_B32 selector-255 literal extension — in progress on this branch.
+2. The literal remains exact 32-bit bits; missing extension dwords fail deterministically, while S_MOV_B64 literal semantics and special/floating scalar sources remain unsupported.
 3. Sony shader ABI/container behavior, register-file execution, SPIR-V/Vulkan lowering, and `R_X86_64_RELATIVE` remain separately deferred.
 
 ## SCE metadata boundary
@@ -116,6 +117,6 @@ PS5-specific assumptions require documented evidence.
 
 ## Next action
 
-Validate #95 across the five-gate matrix. Keep the SOP1 decoder unchanged; generalize
-only S_MOV_B32 Shader IR sources so plain SGPRs and documented integer inline selectors
-are semantic, while special/floating/literal-extension selectors remain typed unsupported.
+Validate #98 across the five-gate matrix. Decode selector 255 only for S_MOV_B32 as
+a two-dword instruction, preserve the literal as exact 32-bit semantic bits/provenance,
+and leave S_MOV_B64 literals, execution, Sony ABI, SPIR-V, and Vulkan out.
