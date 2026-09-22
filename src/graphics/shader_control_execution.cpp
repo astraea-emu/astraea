@@ -673,7 +673,7 @@ run_bounded_shader_scalar_program(
             return ShaderScalarProgramExecutionResult::failure(
                 program_error(
                     ShaderScalarProgramExecutionErrorCode::
-                        block_execution_failure,
+                        execution_count_overflow,
                     current_block_index,
                     block_executions.size(),
                     completed_emission_count));
