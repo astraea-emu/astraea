@@ -681,10 +681,36 @@ trace_shader_ir_v0(
                         u64_field(
                             "destination_sgpr",
                             operation.destination.index));
-                    stable.push_back(
-                        u64_field(
-                            "source_sgpr",
-                            operation.source.index));
+                    if (std::holds_alternative<
+                            astraea::graphics::ShaderIrSgpr>(
+                            operation.source)) {
+                        stable.push_back(
+                            text_field(
+                                "source_kind",
+                                "sgpr"));
+                        stable.push_back(
+                            u64_field(
+                                "source_sgpr",
+                                std::get<
+                                    astraea::graphics::
+                                        ShaderIrSgpr>(
+                                    operation.source)
+                                    .index));
+                    } else {
+                        stable.push_back(
+                            text_field(
+                                "source_kind",
+                                "inline_integer"));
+                        stable.push_back(
+                            text_field(
+                                "source_inline_integer",
+                                std::to_string(
+                                    std::get<
+                                        astraea::graphics::
+                                            ShaderIrInlineInteger32>(
+                                        operation.source)
+                                        .value)));
+                    }
                 } else if constexpr (
                     std::is_same_v<
                         Operation,
