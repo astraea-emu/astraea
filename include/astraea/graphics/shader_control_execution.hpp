@@ -129,4 +129,53 @@ execute_shader_scalar_block(
     std::size_t block_index,
     ShaderScalarState& state);
 
+struct ShaderScalarProgramExecution {
+    std::size_t executed_block_count = 0;
+    std::size_t executed_emission_count = 0;
+    std::vector<ShaderScalarBlockExecution> block_executions;
+
+    auto operator<=>(const ShaderScalarProgramExecution&) const =
+        default;
+};
+
+enum class ShaderScalarProgramExecutionErrorCode {
+    graph_program_mismatch,
+    missing_entry_block,
+    host_allocation_failure,
+    execution_budget_exhausted,
+    block_execution_failure,
+};
+
+struct ShaderScalarProgramExecutionError {
+    ShaderScalarProgramExecutionErrorCode code =
+        ShaderScalarProgramExecutionErrorCode::
+            block_execution_failure;
+    std::size_t next_block_index = 0;
+    std::size_t completed_block_count = 0;
+    std::size_t completed_emission_count = 0;
+    std::optional<ShaderScalarBlockExecutionError> block_error;
+
+    auto operator<=>(
+        const ShaderScalarProgramExecutionError&) const = default;
+};
+
+using ShaderScalarProgramExecutionResult =
+    astraea::core::Result<
+        ShaderScalarProgramExecution,
+        ShaderScalarProgramExecutionError>;
+
+// Runs the generic scalar-control subset by repeatedly composing the one-block
+// executor from CFG block 0. max_block_executions is a hard bound checked
+// before entering each block, so self-loops and back-edges remain deterministic.
+//
+// State mutation is intentionally non-atomic across the run: completed blocks
+// and any partial writes from a failing block remain applied. This function
+// does not execute vector/wait/barrier semantics or infer PS5 shader-entry state.
+[[nodiscard]] ShaderScalarProgramExecutionResult
+run_bounded_shader_scalar_program(
+    const ShaderIrProgram& program,
+    const ShaderControlFlowGraph& graph,
+    ShaderScalarState& state,
+    std::size_t max_block_executions);
+
 }  // namespace astraea::graphics
