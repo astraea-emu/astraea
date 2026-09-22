@@ -1,9 +1,9 @@
 # Project Status
 
-**Integration gate:** V3 — Actual host GPU execution  
-**State:** V1 and first V2 SPIR-V backend complete; headless Vulkan differential proof active  
+**Integration gate:** PS5 graphics frontend after V3  
+**State:** V1/V2/V3 proof chain complete; real AGC DCB submit capture active  
 **Repository:** astraea-emu/astraea  
-**Active branch:** `feat/v3-vulkan-vector-probe`
+**Active branch:** `feat/ps5-capture-agc-submit-dcb`
 
 ## Complete
 
@@ -70,7 +70,8 @@
 - Corrected self-relative AGC context/shader register-list addressing is complete and five-gate validated (#143/#144).
 - Evidence-backed version-0x18 pixel shader-object preparation and all-write preflight/application are complete and five-gate validated (#145/#147).
 - Owned SCE-profile guest execution of the real `sceAgcCreateShader` import through generic HLE dispatch, guest shader-object preparation, `RAX=0` resume, and controlled exit is complete and five-gate validated (#148/#149). V1 is complete.
-- Deterministic Shader IR -> Vulkan-valid SPIR-V 1.6 register-state compute-probe lowering for NOP/V_MOV_B32/V_ADD_F32/END is complete and five-gate validated (#150/#151). The V2 probe contract is available for real host execution.
+- Deterministic Shader IR -> Vulkan-valid SPIR-V 1.6 register-state compute-probe lowering for NOP/V_MOV_B32/V_ADD_F32/END is complete and five-gate validated (#150/#151).
+- Headless Vulkan execution of that V2 probe is complete and five-gate validated (#152/#153); Linux CI forces Mesa Lavapipe and proves bit-for-bit readback equality with Astraea's existing interpreter. V3's first actual host-GPU semantic proof is complete.
 - Public five-gate CI remains the merge requirement:
   - Linux x64
   - Windows x64
@@ -81,11 +82,11 @@
 ## Current frontier
 
 1. V1 is complete through #148/#149.
-2. #150/#151 are complete: Astraea emits deterministic Vulkan-valid SPIR-V for the straight-line existing vector Shader IR probe and records its buffer ABI.
-3. #152 is active: execute that exact V2 module headlessly on Vulkan, dispatch one wave-sized workgroup, read the state buffer back, and compare every word bit-for-bit with the existing Astraea interpreter oracle.
-4. Vulkan compile-time portability uses pinned volk 1.4.350 + Vulkan-Headers v1.4.350; a system Vulkan SDK is not required to configure Astraea.
-5. Linux x64 CI is the mandatory execution proof and uses Mesa Lavapipe software Vulkan. Windows/macOS compile the backend in this slice without requiring a runtime device.
-6. No surfaces, swapchains, real AGC resources, PS5 command decoding, new RDNA2 instructions, or broader Shader IR semantics are pulled into #152.
+2. V2's first deterministic SPIR-V backend is complete through #150/#151.
+3. V3's first actual host-GPU proof is complete through #152/#153: controlled RDNA2 -> Shader IR -> SPIR-V -> headless Vulkan/Lavapipe -> exact readback matches the interpreter.
+4. #154 is active: capture the real `sceAgcDriverSubmitDcb` guest descriptor and exact submitted command-word stream without mutating guest memory, decoding PM4, or returning fake success.
+5. The first submit profile preserves the exact 16-byte descriptor, decodes only the evidenced pointer/count/flag fields, preserves padding opaquely, and caps the capture at the current public `0xFFFFF`-dword bound.
+6. After capture, establish only the smallest evidence-backed command-framing boundary required by an owned submission fixture. Do not broaden Vulkan/RDNA2/resources speculatively.
 
 ## SCE metadata boundary
 
@@ -144,23 +145,12 @@ PS5-specific assumptions require documented evidence.
 
 ## Next action
 
-Finish #152 on `feat/v3-vulkan-vector-probe`.
+Finish #154 on `feat/ps5-capture-agc-submit-dcb`.
 
-The required proof is:
+The bounded proof is:
 
-`existing controlled RDNA2 -> Shader IR -> V2 SPIR-V -> headless Vulkan compute -> readback == Astraea interpreter`.
+`captured HLE call -> 16-byte sceAgcDriverSubmitDcb descriptor -> checked exact guest DCB byte stream`.
 
-The V3 executor owns only:
-- dynamic Vulkan loading;
-- one compute-capable device/queue;
-- one host-visible storage buffer;
-- one descriptor set;
-- one compute pipeline;
-- one command buffer and dispatch;
-- explicit GPU-write -> host-read synchronization;
-- non-coherent flush/invalidate handling;
-- exact readback.
+The planner must preserve raw descriptor/stream provenance and perform no guest writes. It must not enter generic HLE dispatch, return native success, infer PM4 packets/registers, build GPU state, or call Vulkan.
 
-Linux CI must force Lavapipe and fail if the execution proof is skipped or differs. Other existing CI platforms must compile the same backend and remain green.
-
-After this proof, do not broaden Vulkan generically. Pull forward the smallest evidence-backed PS5 frontend/resource dependency required to replace the synthetic register-state probe with real guest graphics state.
+After merge, use the captured stream to establish the smallest evidence-backed command framing needed by an owned submission fixture. Only after Astraea can validate and consume the submitted work should the real submit HLE service resume guest execution.
