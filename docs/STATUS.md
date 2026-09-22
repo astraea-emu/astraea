@@ -1,9 +1,9 @@
 # Project Status
 
 **Milestone:** M4 — Platform/HLE expansion  
-**State:** Imported-function relocation orchestration baseline complete; bounded RDNA2 whole-stream decode/lower pipeline complete; Shader IR basic-block CFG in progress  
+**State:** Imported-function relocation orchestration baseline complete; bounded RDNA2 whole-stream decode/lower and validated Shader IR CFG complete; CFG Trace v0 adapter in progress  
 **Repository:** astraea-emu/astraea  
-**Active branch:** `feat/m4-shader-cfg`
+**Active branch:** `feat/m4-shader-cfg-trace`
 
 ## Complete
 
@@ -59,8 +59,8 @@
 
 ## Current frontier
 
-1. #108 — build a validated basic-block/control-flow graph over the ordered bounded `ShaderIrProgram` — in progress on this branch.
-2. Branch targets must resolve only to known decoded instruction starts; negative, out-of-range, non-dword-aligned, and extension-dword targets remain typed failures rather than being rounded or guessed.
+1. #110 — expose validated Shader CFG block/edge topology through Trace v0 — in progress on this branch.
+2. CFG trace stable fields describe semantic graph topology only; raw instruction encodings remain outside CFG semantic equality and continue to live at the decoder/Shader IR provenance layers.
 3. SCC/VCC/EXEC evaluation, dynamic branch execution, wave/lane semantics, Sony shader container/launch ABI, SPIR-V/Vulkan lowering, new opcodes, and `R_X86_64_RELATIVE` remain separately deferred.
 
 ## SCE metadata boundary
@@ -120,7 +120,7 @@ PS5-specific assumptions require documented evidence.
 
 ## Next action
 
-Validate #108 across the five-gate matrix. Build deterministic source-ordered basic
-blocks and typed branch/fallthrough edges from the merged bounded Shader IR program,
-reject targets that do not land on real decoded instruction starts, and keep branch
-condition execution, wave state, Sony ABI, SPIR-V, and Vulkan semantics out.
+Validate #110 across the five-gate matrix. Normalize Shader CFG blocks and edges into
+stable `shader.cfg` Trace v0 events, prove edge-kind/target changes localize through
+the existing first-divergence machinery, and keep execution, Sony ABI, SPIR-V, and
+Vulkan semantics out.
