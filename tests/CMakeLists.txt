@@ -55,6 +55,7 @@ add_executable(astraea_core_tests
     graphics/shader_program_tests.cpp
     graphics/shader_cfg_tests.cpp
     graphics/shader_scalar_execution_tests.cpp
+    graphics/shader_branch_evaluation_tests.cpp
     trace/v0_tests.cpp
     trace/diff_v0_tests.cpp
     trace/graphics_v0_tests.cpp
