@@ -465,7 +465,7 @@ TEST_CASE(
 }
 
 TEST_CASE(
-    "later mixed block failure preserves prior blocks and in-block vector progress",
+    "later unsupported exact add preserves prior blocks and in-block vector progress",
     "[graphics][shader-execution][wave-program][partial-failure]") {
     const std::array<std::uint32_t, 5> words{
         make_sop1(3, 1, 129),
@@ -487,7 +487,9 @@ TEST_CASE(
     astraea::graphics::ShaderScalarState scalar_state{};
     scalar_state.exec = 1;
     auto vector_state = wave32_state();
-    vector_state.vgprs[3][0] = 0xabcdef01U;
+    // The later V_MOV is valid and must persist, while the following exact-add
+    // rejects the denormal active-lane inputs atomically.
+    vector_state.vgprs[3][0] = 0x00000001U;
 
     const auto result =
         astraea::graphics::
@@ -512,12 +514,21 @@ TEST_CASE(
         result.error().block_error->code ==
         astraea::graphics::
             ShaderWaveBlockExecutionErrorCode::
-                unsupported_operation);
+                vector_execution_failure);
     REQUIRE(
         result.error().block_error->
             completed_emission_count == 1);
+    REQUIRE(result.error().block_error->vector_error.has_value());
+    REQUIRE(
+        result.error().block_error->vector_error->code ==
+        astraea::graphics::
+            ShaderVectorExecutionErrorCode::
+                unsupported_f32_case);
+    REQUIRE(
+        result.error().block_error->vector_error->lane_index ==
+        std::optional<std::size_t>{0});
     REQUIRE(scalar_state.sgprs[1] == 1U);
-    REQUIRE(vector_state.vgprs[2][0] == 0xabcdef01U);
+    REQUIRE(vector_state.vgprs[2][0] == 0x00000001U);
 }
 
 TEST_CASE(
