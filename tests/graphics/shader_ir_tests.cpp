@@ -183,3 +183,67 @@ TEST_CASE(
             left,
             right));
 }
+
+
+TEST_CASE(
+    "RDNA2 conditional branches lower to typed condition and signed byte delta",
+    "[graphics][shader-ir][conditional-branch]") {
+    struct Case {
+        std::uint8_t opcode;
+        astraea::graphics::ShaderIrBranchCondition condition;
+    };
+
+    constexpr std::array<Case, 6> cases{{
+        {4, astraea::graphics::ShaderIrBranchCondition::scc_zero},
+        {5, astraea::graphics::ShaderIrBranchCondition::scc_one},
+        {6, astraea::graphics::ShaderIrBranchCondition::vcc_zero},
+        {7, astraea::graphics::ShaderIrBranchCondition::vcc_nonzero},
+        {8, astraea::graphics::ShaderIrBranchCondition::exec_zero},
+        {9, astraea::graphics::ShaderIrBranchCondition::exec_nonzero},
+    }};
+
+    for (const auto& test_case : cases) {
+        const auto emission =
+            astraea::graphics::lower_rdna2_to_shader_ir(
+                decode_one(
+                    make_sopp(test_case.opcode, 4)));
+
+        REQUIRE(
+            std::holds_alternative<
+                astraea::graphics::
+                    ShaderIrConditionalRelativeBranch>(
+                emission.operation));
+        const auto& branch =
+            std::get<
+                astraea::graphics::
+                    ShaderIrConditionalRelativeBranch>(
+                emission.operation);
+        REQUIRE(branch.condition == test_case.condition);
+        REQUIRE(branch.byte_delta == 20);
+        REQUIRE(
+            emission.provenance.source_instruction.sopp
+                .has_value());
+        REQUIRE(
+            emission.provenance.source_instruction.sopp->opcode ==
+            test_case.opcode);
+    }
+}
+
+TEST_CASE(
+    "conditional branch lowering sign-extends backward displacement",
+    "[graphics][shader-ir][conditional-branch]") {
+    const auto emission =
+        astraea::graphics::lower_rdna2_to_shader_ir(
+            decode_one(make_sopp(8, 0xfffe)));
+
+    const auto& branch =
+        std::get<
+            astraea::graphics::
+                ShaderIrConditionalRelativeBranch>(
+            emission.operation);
+    REQUIRE(
+        branch.condition ==
+        astraea::graphics::ShaderIrBranchCondition::
+            exec_zero);
+    REQUIRE(branch.byte_delta == -4);
+}
