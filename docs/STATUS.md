@@ -1,9 +1,9 @@
 # Project Status
 
 **Milestone:** M4 — Platform/HLE expansion  
-**State:** First owned PS5/SCE-oriented synthetic prototype and multi-import proof complete; batch JUMP_SLOT patch construction in progress  
+**State:** First owned PS5/SCE-oriented synthetic prototype and multi-import proof complete; batch JUMP_SLOT application in progress  
 **Repository:** astraea-emu/astraea  
-**Active branch:** `feat/m4-sce-jump-slot-batch-patch`
+**Active branch:** `feat/m4-sce-jump-slot-batch-apply`
 
 ## Complete
 
@@ -33,6 +33,7 @@
 - Evidence-backed SCE program-header vocabulary classification/preservation (#61).
 - Two exact SCE imports executed end to end through write → HLE resume → exit (#63).
 - Ordered exact SCE PLT import batch planning with indexed typed failures (#66).
+- Ordered validated x86-64 JUMP_SLOT batch patch construction with explicit gate slots (#68).
 - Public five-gate CI remains the merge requirement:
   - Linux x64
   - Windows x64
@@ -42,8 +43,8 @@
 
 ## Current frontier
 
-1. #68 — batch already-supported x86-64 JUMP_SLOT patch construction with explicit gate slots — in progress on this branch.
-2. The batch layer stops before guest-memory writes and introduces no automatic gate allocation.
+1. #70 — batch apply validated JUMP_SLOT patches through GuestMemoryAccess with indexed partial-application reporting — in progress on this branch.
+2. Batch application is explicitly ordered and non-atomic; failure reports how many earlier writes completed.
 3. `R_X86_64_RELATIVE` remains deferred until Astraea has an explicit, evidence-backed image load-base / load-bias contract.
 
 ## SCE metadata boundary
@@ -103,6 +104,6 @@ PS5-specific assumptions require documented evidence.
 
 ## Next action
 
-Validate #68 across the five-gate matrix. The batch patch builder must preserve
-plan order, require explicit one-to-one gate slots, stop at the first indexed typed
-patch failure, and remain free of gate allocation or guest-memory writes.
+Validate #70 across the five-gate matrix. Batch application must reserve result
+storage before mutation, preserve ordered apply results, report the first exact
+GuestMemoryError with patch/applied counts, and document that prior writes remain.
