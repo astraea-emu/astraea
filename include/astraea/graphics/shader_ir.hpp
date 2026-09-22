@@ -61,6 +61,7 @@ using ShaderIrOperation =
         ShaderIrEndProgram,
         ShaderIrRelativeBranch,
         ShaderIrConditionalRelativeBranch,
+        ShaderIrWorkgroupBarrier,
         ShaderIrUnsupported>;
 
 struct ShaderIrProvenance {
