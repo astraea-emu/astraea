@@ -225,18 +225,20 @@ build_shader_control_flow_graph(
                 program.emissions[emission_index];
             std::optional<std::int32_t> byte_delta;
 
-            if (const auto* branch =
+            if (const auto* relative_branch =
                     std::get_if<ShaderIrRelativeBranch>(
                         &emission.operation);
-                branch != nullptr) {
-                byte_delta = branch->byte_delta;
+                relative_branch != nullptr) {
+                byte_delta =
+                    relative_branch->byte_delta;
             } else if (
-                const auto* branch =
+                const auto* conditional_branch =
                     std::get_if<
                         ShaderIrConditionalRelativeBranch>(
                         &emission.operation);
-                branch != nullptr) {
-                byte_delta = branch->byte_delta;
+                conditional_branch != nullptr) {
+                byte_delta =
+                    conditional_branch->byte_delta;
             }
 
             if (byte_delta.has_value()) {
