@@ -2,6 +2,9 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <new>
+#include <stdexcept>
+#include <utility>
 
 namespace astraea::execution {
 namespace {
@@ -131,6 +134,80 @@ build_synthetic_x86_64_glob_dat_gate_patch(
                     gate_address->value()),
             .raw_addend = plan.raw_addend,
         });
+}
+
+SceGlobDatPatchesResult
+build_synthetic_x86_64_glob_dat_gate_patches(
+    std::span<const SceImportResolutionPlan> plans,
+    const SyntheticGateRegion& gate_region,
+    std::span<const std::uint32_t> gate_slots) {
+    if (plans.size() != gate_slots.size()) {
+        return SceGlobDatPatchesResult::failure(
+            SceGlobDatBatchError{
+                .code =
+                    SceGlobDatBatchErrorCode::
+                        gate_slot_count_mismatch,
+                .plan_index = 0,
+                .plan_count = plans.size(),
+                .gate_slot_count = gate_slots.size(),
+                .patch_error = std::nullopt,
+            });
+    }
+
+    std::size_t index = 0;
+    try {
+        std::vector<SceGlobDatPatch> patches;
+        patches.reserve(plans.size());
+
+        for (; index < plans.size(); ++index) {
+            auto patch =
+                build_synthetic_x86_64_glob_dat_gate_patch(
+                    plans[index],
+                    gate_region,
+                    gate_slots[index]);
+            if (!patch.has_value()) {
+                return SceGlobDatPatchesResult::failure(
+                    SceGlobDatBatchError{
+                        .code =
+                            SceGlobDatBatchErrorCode::
+                                patch_failure,
+                        .plan_index = index,
+                        .plan_count = plans.size(),
+                        .gate_slot_count =
+                            gate_slots.size(),
+                        .patch_error = patch.error(),
+                    });
+            }
+
+            patches.push_back(
+                std::move(patch.value()));
+        }
+
+        return SceGlobDatPatchesResult::success(
+            std::move(patches));
+    } catch (const std::bad_alloc&) {
+        return SceGlobDatPatchesResult::failure(
+            SceGlobDatBatchError{
+                .code =
+                    SceGlobDatBatchErrorCode::
+                        host_allocation_failure,
+                .plan_index = index,
+                .plan_count = plans.size(),
+                .gate_slot_count = gate_slots.size(),
+                .patch_error = std::nullopt,
+            });
+    } catch (const std::length_error&) {
+        return SceGlobDatPatchesResult::failure(
+            SceGlobDatBatchError{
+                .code =
+                    SceGlobDatBatchErrorCode::
+                        host_allocation_failure,
+                .plan_index = index,
+                .plan_count = plans.size(),
+                .gate_slot_count = gate_slots.size(),
+                .patch_error = std::nullopt,
+            });
+    }
 }
 
 }  // namespace astraea::execution

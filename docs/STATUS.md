@@ -1,9 +1,9 @@
 # Project Status
 
 **Milestone:** M4 — Platform/HLE expansion  
-**State:** JUMP_SLOT and GLOB_DAT owned import paths validated end to end; table-kind-neutral exact SCE batch import planning in progress  
+**State:** JUMP_SLOT and GLOB_DAT owned import paths validated end to end; GLOB_DAT batch patch construction in progress  
 **Repository:** astraea-emu/astraea  
-**Active branch:** `feat/m4-sce-relocation-batch-plan`
+**Active branch:** `feat/m4-sce-glob-dat-batch-patch`
 
 ## Complete
 
@@ -38,6 +38,7 @@
 - Evidence-backed x86-64 R_X86_64_GLOB_DAT imported-function gate patch construction (#72).
 - Validated GLOB_DAT gate patch application through GuestMemoryAccess (#74).
 - Owned SCE-profile general-RELA GLOB_DAT import/execution proof through HLE exit 42 (#76).
+- Table-kind-neutral ordered exact-SCE batch import planning with PLT compatibility wrapper (#79).
 - Public five-gate CI remains the merge requirement:
   - Linux x64
   - Windows x64
@@ -47,8 +48,8 @@
 
 ## Current frontier
 
-1. #79 — generalize ordered exact-SCE batch import planning across validated relocation-table kinds — in progress on this branch.
-2. The planner must preserve table kind/raw relocation evidence and remain semantics-free; the PLT entry point stays as a compatibility wrapper.
+1. #81 — batch already-supported x86-64 GLOB_DAT patch construction with explicit gate slots — in progress on this branch.
+2. The batch builder stops before guest-memory writes and introduces no automatic gate allocation or new relocation semantics.
 3. `R_X86_64_RELATIVE` remains deferred until Astraea has an explicit, evidence-backed image load-base / load-bias contract.
 
 ## SCE metadata boundary
@@ -108,6 +109,6 @@ PS5-specific assumptions require documented evidence.
 
 ## Next action
 
-Validate #79 across the five-gate matrix. The generic batch planner must preserve
-relocation table kind, raw type/addend, exact SCE identity and table order while
-adding no relocation semantics, gate selection, patching, or guest-memory writes.
+Validate #81 across the five-gate matrix. The GLOB_DAT batch patch builder must
+preserve plan order, require explicit one-to-one gate slots, and stop at the first
+indexed typed patch failure without performing any guest-memory writes.
