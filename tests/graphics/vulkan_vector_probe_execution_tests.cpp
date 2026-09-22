@@ -373,10 +373,12 @@ TEST_CASE(
 
     REQUIRE_FALSE(result.has_value());
     REQUIRE(
-        result.error().code ==
-            VulkanVectorProbeExecutionErrorCode::
-                shader_module_creation_failure ||
-        result.error().code ==
-            VulkanVectorProbeExecutionErrorCode::
-                compute_pipeline_creation_failure);
+        (
+            result.error().code ==
+                VulkanVectorProbeExecutionErrorCode::
+                    shader_module_creation_failure ||
+            result.error().code ==
+                VulkanVectorProbeExecutionErrorCode::
+                    compute_pipeline_creation_failure
+        ));
 }
