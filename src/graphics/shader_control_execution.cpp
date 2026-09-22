@@ -1,6 +1,10 @@
 #include <astraea/graphics/shader_control_execution.hpp>
 
+#include <new>
+#include <stdexcept>
+#include <utility>
 #include <variant>
+#include <vector>
 
 namespace astraea::graphics {
 namespace {
@@ -21,6 +25,25 @@ namespace {
     const ShaderControlFlowGraph& graph,
     const ShaderCfgEdge& edge) noexcept {
     return edge.target_block_index < graph.blocks.size();
+}
+
+[[nodiscard]] ShaderScalarBlockExecutionError block_error(
+    ShaderScalarBlockExecutionErrorCode code,
+    std::size_t block_index,
+    std::size_t emission_index,
+    std::size_t completed_emission_count,
+    std::optional<ShaderScalarExecutionError> scalar_error =
+        std::nullopt,
+    std::optional<ShaderCfgSuccessorError> successor_error =
+        std::nullopt) noexcept {
+    return ShaderScalarBlockExecutionError{
+        .code = code,
+        .block_index = block_index,
+        .emission_index = emission_index,
+        .completed_emission_count = completed_emission_count,
+        .scalar_error = std::move(scalar_error),
+        .successor_error = std::move(successor_error),
+    };
 }
 
 }  // namespace
@@ -312,6 +335,208 @@ select_shader_cfg_successor(
     return ShaderCfgSuccessorResult::success(
         ShaderCfgSuccessorSelection{
             .edge = std::nullopt,
+        });
+}
+
+ShaderScalarBlockExecutionResult
+execute_shader_scalar_block(
+    const ShaderIrProgram& program,
+    const ShaderControlFlowGraph& graph,
+    std::size_t block_index,
+    ShaderScalarState& state) {
+    if (graph.source_word_count !=
+            program.source_word_count ||
+        graph.emission_count !=
+            program.emissions.size()) {
+        return ShaderScalarBlockExecutionResult::failure(
+            block_error(
+                ShaderScalarBlockExecutionErrorCode::
+                    graph_program_mismatch,
+                block_index,
+                0,
+                0));
+    }
+
+    if (block_index >= graph.blocks.size()) {
+        return ShaderScalarBlockExecutionResult::failure(
+            block_error(
+                ShaderScalarBlockExecutionErrorCode::
+                    block_index_out_of_bounds,
+                block_index,
+                0,
+                0));
+    }
+
+    const auto& block = graph.blocks[block_index];
+    if (block.emission_count == 0 ||
+        block.first_emission_index >
+            program.emissions.size() ||
+        block.emission_count >
+            program.emissions.size() -
+                block.first_emission_index) {
+        return ShaderScalarBlockExecutionResult::failure(
+            block_error(
+                ShaderScalarBlockExecutionErrorCode::
+                    invalid_block_extent,
+                block_index,
+                block.first_emission_index,
+                0));
+    }
+
+    const auto last_emission_index =
+        block.first_emission_index +
+        block.emission_count - 1U;
+
+    for (std::size_t emission_index =
+             block.first_emission_index;
+         emission_index < last_emission_index;
+         ++emission_index) {
+        const auto& operation =
+            program.emissions[emission_index].operation;
+        if (std::holds_alternative<
+                ShaderIrEndProgram>(
+                operation) ||
+            std::holds_alternative<
+                ShaderIrRelativeBranch>(
+                operation) ||
+            std::holds_alternative<
+                ShaderIrConditionalRelativeBranch>(
+                operation)) {
+            return ShaderScalarBlockExecutionResult::failure(
+                block_error(
+                    ShaderScalarBlockExecutionErrorCode::
+                        invalid_block_control_flow,
+                    block_index,
+                    emission_index,
+                    0));
+        }
+    }
+
+    std::vector<ShaderScalarExecutionEffect>
+        scalar_write_effects;
+    try {
+        scalar_write_effects.reserve(
+            block.emission_count);
+    } catch (const std::bad_alloc&) {
+        return ShaderScalarBlockExecutionResult::failure(
+            block_error(
+                ShaderScalarBlockExecutionErrorCode::
+                    host_allocation_failure,
+                block_index,
+                block.first_emission_index,
+                0));
+    } catch (const std::length_error&) {
+        return ShaderScalarBlockExecutionResult::failure(
+            block_error(
+                ShaderScalarBlockExecutionErrorCode::
+                    host_allocation_failure,
+                block_index,
+                block.first_emission_index,
+                0));
+    }
+
+    std::optional<ShaderBranchDecision>
+        branch_decision;
+    std::size_t completed_emission_count = 0;
+
+    for (std::size_t emission_index =
+             block.first_emission_index;
+         emission_index <= last_emission_index;
+         ++emission_index) {
+        const auto& operation =
+            program.emissions[emission_index].operation;
+
+        if (std::holds_alternative<
+                ShaderIrNop>(
+                operation) ||
+            std::holds_alternative<
+                ShaderIrRelativeBranch>(
+                operation) ||
+            std::holds_alternative<
+                ShaderIrEndProgram>(
+                operation)) {
+            ++completed_emission_count;
+            continue;
+        }
+
+        if (const auto* conditional =
+                std::get_if<
+                    ShaderIrConditionalRelativeBranch>(
+                    &operation);
+            conditional != nullptr) {
+            branch_decision =
+                evaluate_shader_branch_condition(
+                    conditional->condition,
+                    state);
+            ++completed_emission_count;
+            continue;
+        }
+
+        if (std::holds_alternative<
+                ShaderIrScalarMove32>(
+                operation) ||
+            std::holds_alternative<
+                ShaderIrScalarMove64>(
+                operation)) {
+            auto execution =
+                execute_shader_scalar_operation(
+                    operation,
+                    state);
+            if (!execution.has_value()) {
+                return ShaderScalarBlockExecutionResult::failure(
+                    block_error(
+                        ShaderScalarBlockExecutionErrorCode::
+                            scalar_execution_failure,
+                        block_index,
+                        emission_index,
+                        completed_emission_count,
+                        execution.error()));
+            }
+
+            scalar_write_effects.push_back(
+                std::move(execution).value());
+            ++completed_emission_count;
+            continue;
+        }
+
+        return ShaderScalarBlockExecutionResult::failure(
+            block_error(
+                ShaderScalarBlockExecutionErrorCode::
+                    unsupported_operation,
+                block_index,
+                emission_index,
+                completed_emission_count));
+    }
+
+    auto successor =
+        select_shader_cfg_successor(
+            program,
+            graph,
+            block_index,
+            branch_decision);
+    if (!successor.has_value()) {
+        return ShaderScalarBlockExecutionResult::failure(
+            block_error(
+                ShaderScalarBlockExecutionErrorCode::
+                    cfg_successor_failure,
+                block_index,
+                last_emission_index,
+                completed_emission_count,
+                std::nullopt,
+                successor.error()));
+    }
+
+    return ShaderScalarBlockExecutionResult::success(
+        ShaderScalarBlockExecution{
+            .block_index = block_index,
+            .executed_emission_count =
+                completed_emission_count,
+            .scalar_write_effects =
+                std::move(scalar_write_effects),
+            .branch_decision =
+                std::move(branch_decision),
+            .successor =
+                std::move(successor).value(),
         });
 }
 
