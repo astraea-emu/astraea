@@ -270,3 +270,29 @@ TEST_CASE(
     REQUIRE(result->sopp.has_value());
     REQUIRE(result->sopp->opcode == 3);
 }
+
+
+TEST_CASE(
+    "RDNA2 SOPP S_BARRIER opcode is classified exactly",
+    "[graphics][rdna2][barrier]") {
+    const std::array<std::uint32_t, 1> words{
+        make_sopp(10, 0x1234),
+    };
+
+    const auto result =
+        astraea::graphics::decode_rdna2_instruction(
+            words,
+            0);
+
+    REQUIRE(result.has_value());
+    REQUIRE(
+        result->format ==
+        astraea::graphics::Rdna2InstructionFormat::sopp);
+    REQUIRE(
+        result->kind ==
+        astraea::graphics::Rdna2InstructionKind::s_barrier);
+    REQUIRE(result->sopp.has_value());
+    REQUIRE(result->sopp->opcode == 10);
+    REQUIRE(result->sopp->simm16 == 0x1234);
+    REQUIRE(result->raw_word == words[0]);
+}
