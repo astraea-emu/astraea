@@ -1415,6 +1415,22 @@ TEST_CASE(
                 sce_agc_shader_apply_error->
                 applied_count == 0);
         REQUIRE(
+            result.error().
+                sce_agc_shader_apply_error->
+                guest_memory_error.has_value());
+        REQUIRE(
+            result.error().
+                sce_agc_shader_apply_error->
+                guest_memory_error->code ==
+            astraea::execution::
+                GuestMemoryErrorCode::
+                    guest_memory_permission_denied);
+        REQUIRE(
+            result.error().has_guest_memory_error);
+        REQUIRE(
+            result.error().guest_address ==
+            fixture.code_base);
+        REQUIRE(
             read_guest_bytes(
                 memory,
                 fixture.shader_header_address,
