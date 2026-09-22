@@ -61,9 +61,20 @@ struct ShaderIrSgpr {
     auto operator<=>(const ShaderIrSgpr&) const = default;
 };
 
+struct ShaderIrInlineInteger32 {
+    std::int32_t value = 0;
+
+    auto operator<=>(const ShaderIrInlineInteger32&) const = default;
+};
+
+using ShaderIrScalarSource32 =
+    std::variant<
+        ShaderIrSgpr,
+        ShaderIrInlineInteger32>;
+
 struct ShaderIrScalarMove32 {
     ShaderIrSgpr destination;
-    ShaderIrSgpr source;
+    ShaderIrScalarSource32 source;
 
     auto operator<=>(const ShaderIrScalarMove32&) const = default;
 };
