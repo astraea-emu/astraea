@@ -52,6 +52,11 @@ public:
         return id;
     }
 
+    void emit(spv::Op opcode) {
+        words_.push_back(
+            (1U << 16U) | word(opcode));
+    }
+
     void emit(
         spv::Op opcode,
         std::initializer_list<std::uint32_t> operands) {
@@ -599,8 +604,7 @@ lower_shader_ir_to_spirv_vector_probe(
                      repeat < nop->repeat_count;
                      ++repeat) {
                     builder.emit(
-                        spv::Op::OpNop,
-                        {});
+                        spv::Op::OpNop);
                 }
                 continue;
             }
@@ -706,15 +710,13 @@ lower_shader_ir_to_spirv_vector_probe(
             if (std::holds_alternative<
                     ShaderIrEndProgram>(operation)) {
                 builder.emit(
-                    spv::Op::OpReturn,
-                    {});
+                    spv::Op::OpReturn);
                 continue;
             }
         }
 
         builder.emit(
-            spv::Op::OpFunctionEnd,
-            {});
+            spv::Op::OpFunctionEnd);
 
         const auto vgpr_count =
             required_vgpr_count(shape);
