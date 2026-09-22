@@ -26,6 +26,8 @@ struct ShaderVectorState {
         std::array<std::uint32_t, kShaderMaxWaveLaneCount>,
         kShaderVectorGprCount>
         vgprs{};
+
+    auto operator<=>(const ShaderVectorState&) const = default;
 };
 
 struct ShaderVectorMove32Effect {
