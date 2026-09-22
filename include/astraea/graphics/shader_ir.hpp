@@ -61,6 +61,23 @@ struct ShaderIrSgpr {
     auto operator<=>(const ShaderIrSgpr&) const = default;
 };
 
+enum class ShaderIrSpecialScalarSourceKind32 {
+    vcc_lo,
+    vcc_hi,
+    m0,
+    null_register,
+    exec_lo,
+    exec_hi,
+};
+
+struct ShaderIrSpecialScalarSource32 {
+    ShaderIrSpecialScalarSourceKind32 kind =
+        ShaderIrSpecialScalarSourceKind32::vcc_lo;
+
+    auto operator<=>(
+        const ShaderIrSpecialScalarSource32&) const = default;
+};
+
 struct ShaderIrInlineInteger32 {
     std::int32_t value = 0;
 
@@ -76,6 +93,7 @@ struct ShaderIrLiteral32 {
 using ShaderIrScalarSource32 =
     std::variant<
         ShaderIrSgpr,
+        ShaderIrSpecialScalarSource32,
         ShaderIrInlineInteger32,
         ShaderIrLiteral32>;
 

@@ -450,8 +450,8 @@ TEST_CASE(
     "S_MOV_B32 unsupported scalar selectors remain typed unsupported",
     "[graphics][shader-ir][sop1][mov]") {
     constexpr std::array<std::uint8_t, 6> sources{
-        106,
-        127,
+        108,
+        123,
         209,
         250,
         251,
@@ -676,6 +676,83 @@ TEST_CASE(
     const auto different =
         astraea::graphics::lower_rdna2_to_shader_ir(
             decode_one(make_sop1(4, 6, 16)));
+
+    REQUIRE(
+        astraea::graphics::shader_ir_semantically_equal(
+            left,
+            same));
+    REQUIRE_FALSE(
+        astraea::graphics::shader_ir_semantically_equal(
+            left,
+            different));
+}
+
+
+TEST_CASE(
+    "S_MOV_B32 documented special scalar sources lower exactly",
+    "[graphics][shader-ir][sop1][mov][special-source]") {
+    using Kind =
+        astraea::graphics::ShaderIrSpecialScalarSourceKind32;
+
+    struct Case {
+        std::uint8_t selector;
+        Kind kind;
+    };
+
+    constexpr std::array<Case, 6> cases{{
+        {106, Kind::vcc_lo},
+        {107, Kind::vcc_hi},
+        {124, Kind::m0},
+        {125, Kind::null_register},
+        {126, Kind::exec_lo},
+        {127, Kind::exec_hi},
+    }};
+
+    for (const auto& test_case : cases) {
+        const auto emission =
+            astraea::graphics::lower_rdna2_to_shader_ir(
+                decode_one(
+                    make_sop1(
+                        3,
+                        5,
+                        test_case.selector)));
+
+        REQUIRE(
+            std::holds_alternative<
+                astraea::graphics::ShaderIrScalarMove32>(
+                emission.operation));
+
+        const auto& move =
+            std::get<
+                astraea::graphics::ShaderIrScalarMove32>(
+                emission.operation);
+        REQUIRE(move.destination.index == 5);
+        REQUIRE(
+            std::holds_alternative<
+                astraea::graphics::
+                    ShaderIrSpecialScalarSource32>(
+                move.source));
+        REQUIRE(
+            std::get<
+                astraea::graphics::
+                    ShaderIrSpecialScalarSource32>(
+                move.source)
+                .kind == test_case.kind);
+    }
+}
+
+TEST_CASE(
+    "S_MOV_B32 special scalar source identity participates in semantic equality",
+    "[graphics][shader-ir][sop1][mov][special-source]") {
+    const auto left =
+        astraea::graphics::lower_rdna2_to_shader_ir(
+            decode_one(make_sop1(3, 5, 106)));
+    const auto same =
+        astraea::graphics::lower_rdna2_to_shader_ir(
+            decode_one(make_sop1(3, 5, 106)));
+    const auto different =
+        astraea::graphics::lower_rdna2_to_shader_ir(
+            decode_one(make_sop1(3, 5, 107)));
 
     REQUIRE(
         astraea::graphics::shader_ir_semantically_equal(

@@ -1045,3 +1045,69 @@ TEST_CASE(
             event->stable[0].value) ==
         "unsupported_scalar_operand");
 }
+
+
+TEST_CASE(
+    "S_MOV_B32 special scalar source trace exposes named source semantics",
+    "[trace][graphics][v0][sop1][mov][special-source]") {
+    const auto ir =
+        astraea::graphics::lower_rdna2_to_shader_ir(
+            decode_one(make_sop1(3, 5, 126)));
+
+    auto event =
+        astraea::trace::trace_shader_ir_v0(
+            110,
+            ir);
+
+    REQUIRE(event.has_value());
+    REQUIRE(event->subsystem == "shader.ir");
+    REQUIRE(event->type == "scalar_move_32");
+    REQUIRE(event->stable.size() == 3);
+    REQUIRE(event->stable[1].name == "source_kind");
+    REQUIRE(
+        std::get<std::string>(
+            event->stable[1].value) ==
+        "special_register");
+    REQUIRE(
+        event->stable[2].name ==
+        "source_special_register");
+    REQUIRE(
+        std::get<std::string>(
+            event->stable[2].value) ==
+        "exec_lo");
+    REQUIRE(event->diagnostics.size() == 2);
+}
+
+TEST_CASE(
+    "S_MOV_B32 special scalar source participates in trace divergence",
+    "[trace][graphics][v0][sop1][mov][special-source]") {
+    auto left =
+        astraea::trace::trace_shader_ir_v0(
+            111,
+            astraea::graphics::lower_rdna2_to_shader_ir(
+                decode_one(make_sop1(3, 5, 106))));
+    auto right =
+        astraea::trace::trace_shader_ir_v0(
+            111,
+            astraea::graphics::lower_rdna2_to_shader_ir(
+                decode_one(make_sop1(3, 5, 107))));
+
+    REQUIRE(left.has_value());
+    REQUIRE(right.has_value());
+
+    auto diff =
+        astraea::trace::diff_trace_v0(
+            document(std::move(left).value()),
+            document(std::move(right).value()));
+
+    REQUIRE(diff.has_value());
+    REQUIRE_FALSE(diff->equivalent);
+    REQUIRE(
+        diff->first_divergence->kind ==
+        astraea::trace::TraceDivergenceKindV0::
+            stable_field_value_mismatch);
+    REQUIRE(
+        diff->first_divergence->field_name ==
+        std::optional<std::string>{
+            "source_special_register"});
+}
