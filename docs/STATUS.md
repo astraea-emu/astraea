@@ -1,9 +1,9 @@
 # Project Status
 
 **Milestone:** M4 — Platform/HLE expansion  
-**State:** Imported-function relocation orchestration baseline complete; generic RDNA2 SOP1 S_MOV_B32 SGPR slice in progress  
+**State:** Imported-function relocation orchestration baseline complete; generic RDNA2 SOP1 S_MOV_B64 SGPR-pair slice in progress  
 **Repository:** astraea-emu/astraea  
-**Active branch:** `feat/m4-rdna2-sop1-mov-b32`
+**Active branch:** `feat/m4-rdna2-sop1-mov-b64`
 
 ## Complete
 
@@ -44,6 +44,7 @@
 - AMD-documented RDNA2 SOPP conditional branches 4-9 lowered to typed Shader IR and Trace semantics (#85).
 - AMD-documented RDNA2 SOPP S_BARRIER lowered to a typed workgroup-barrier Shader IR/Trace marker (#87).
 - AMD-documented RDNA2 SOPP S_WAITCNT thresholds lowered to typed Shader IR/Trace semantics (#88).
+- AMD-documented RDNA2 SOP1 S_MOV_B32 plain SGPR moves lowered to typed Shader IR/Trace semantics (#92).
 - Public five-gate CI remains the merge requirement:
   - Linux x64
   - Windows x64
@@ -53,8 +54,8 @@
 
 ## Current frontier
 
-1. #92 — add generic RDNA2 SOP1 base-word decoding and lower S_MOV_B32 plain SGPR-to-SGPR moves — in progress on this branch.
-2. Special scalar registers, inline constants, literal-extension decoding, execution/register-file state, and host lowering remain explicitly unsupported.
+1. #94 — lower generic RDNA2 SOP1 S_MOV_B64 plain even-aligned SGPR-pair moves — in progress on this branch.
+2. Odd/out-of-range pairs, special scalar registers, inline constants, literal-extension decoding, execution/register-file state, and host lowering remain explicitly unsupported.
 3. Sony shader ABI/container behavior, SPIR-V/Vulkan lowering, and `R_X86_64_RELATIVE` remain separately deferred.
 
 ## SCE metadata boundary
@@ -114,6 +115,6 @@ PS5-specific assumptions require documented evidence.
 
 ## Next action
 
-Validate #92 across the five-gate matrix. Keep the slice generic-RDNA2 only:
-decode SOP1 base fields, lower only S_MOV_B32 SGPR-to-SGPR semantics, preserve raw
-selectors/provenance, and leave special/literal operands plus execution/backend behavior out.
+Validate #94 across the five-gate matrix. Keep the slice generic-RDNA2 only:
+classify S_MOV_B64 and lower only even-aligned SGPR-pair to SGPR-pair semantics,
+preserving raw selectors/provenance and leaving literals/execution/backend behavior out.
