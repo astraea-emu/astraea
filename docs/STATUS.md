@@ -1,9 +1,9 @@
 # Project Status
 
 **Integration gate:** V1 — Guest-created shader object  
-**State:** V0 PS5 shader ingestion is complete; dependency-driven architecture/roadmap refresh in progress before V1 implementation  
+**State:** Dependency-driven architecture is merged; V1 runtime AGC shader-pair validation is active  
 **Repository:** astraea-emu/astraea  
-**Active branch:** `docs/architecture-roadmap-refresh`
+**Active branch:** `feat/v1-agc-runtime-shader-pair`
 
 ## Complete
 
@@ -65,6 +65,7 @@
 - Mode-independent exact finite-normal V_ADD_F32 lane cases execute with integer-only semantics, atomic active-lane prevalidation, and Trace v0 effects (#130).
 - Exact V_ADD_F32 execution composes with mixed scalar/vector block execution and bounded CFG traversal while preserving ordered effects and typed nested failures (#132).
 - Evidence-backed PS5 AGC shader-container ingestion validates the bounded container envelope, preserves opaque provenance, extracts the documented RDNA2 program prefix, feeds the existing RDNA2 -> Shader IR path end to end, and executes a dedicated fuzz smoke in CI (#134/#135).
+- Dependency-driven vertical integration and the V0–V5 architecture gates are adopted as the project planning model (ADR 0006, #136/#137).
 - Public five-gate CI remains the merge requirement:
   - Linux x64
   - Windows x64
@@ -74,11 +75,11 @@
 
 ## Current frontier
 
-1. #136 — replace the obsolete HLE-then-graphics waterfall with ADR 0006's dependency-driven vertical integration model.
-2. V0 is complete: PS5 AGC container -> bounded RDNA2 -> Shader IR is now a tested, fuzzed PS5-specific path in main.
-3. V1 is next: an Astraea-owned SCE guest probe should reach the AGC shader-creation boundary and produce a guest-domain Astraea shader object with validated program/stage/provenance state and no Vulkan dependency.
-4. The first missing dependency on V1 will be selected only after the architecture refresh is merged. Exact ABI/object semantics must be supported by public evidence or identified as an explicit evidence blocker.
-5. SPIR-V/Vulkan work is V2/V3. Broad RDNA2 opcode expansion, broad platform HLE, resource decoding, and command-buffer coverage are pulled forward only by a concrete gate workload.
+1. #138 — canonicalize the raw AGC runtime shader-header + shader-text pair used at the `sceAgcCreateShader` boundary.
+2. The new `AgcShaderBinary` parser validates the publicly evidenced raw header fields, bounded context/shader register lists, current trailer/program extent, and opaque provenance without mutating guest memory.
+3. The existing AGC ELF/container parser delegates header/text semantics to that canonical parser, preventing a second divergent interpretation of the same PS5 shader data.
+4. The next missing V1 dependency after #138 is the real guest HLE boundary for `libSceAgc:sceAgcCreateShader` (NID `f3dg2CSgRKY`): safe guest-memory access, guest-domain shader identity/lifetime, and evidenced preparation semantics. It must still not create Vulkan objects.
+5. SPIR-V/Vulkan remain V2/V3. New RDNA2 opcodes, descriptors/resources, command decoding, and broader HLE are pulled forward only by a concrete vertical-gate workload.
 
 ## SCE metadata boundary
 
@@ -137,16 +138,18 @@ PS5-specific assumptions require documented evidence.
 
 ## Next action
 
-Merge #136 after its exact documentation-only head passes the five-gate CI
-matrix. Then create the smallest V1 implementation issue for a guest-domain
-AGC shader object / shader-creation boundary.
+Finish #138 and merge only after its immutable PR head passes all five public
+CI gates, including a real smoke execution of the new raw AGC shader-binary
+fuzzer.
 
-The V1 issue must first resolve the exact public evidence for the input/output
-ABI and guest-memory/object-lifetime contract. It must not introduce Vulkan
-handles, decode unrelated AGC resource/register fields, or guess mutable header
-semantics. If the exact public evidence is insufficient, split out a bounded
-research/probe issue and record that blocker explicitly.
+Then open the next bounded V1 slice around the real
+`libSceAgc:sceAgcCreateShader` boundary. The owned SCE guest proof should
+reach the exact import/HLE gate with RDI = out pointer, RSI = writable raw
+shader header, and RDX = code address; the handler should validate guest memory
+through the canonical #138 parser and produce a guest-domain shader object.
+Header preparation mutations must be implemented only where public evidence is
+strong enough, with unsupported preparation state reported explicitly rather
+than guessed.
 
-After V1, proceed to V2 with a concrete Shader IR subset chosen by an owned
-workload and lower it to validated Vulkan-environment SPIR-V. RDNA2 coverage is
-demand-driven by that workload rather than expanded for its own sake.
+Do not introduce SPIR-V/Vulkan handles into V1. V2 begins only after the
+guest-created shader object boundary is real and tested end to end.
