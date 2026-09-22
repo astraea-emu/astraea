@@ -1,9 +1,9 @@
 # Project Status
 
 **Milestone:** M4 — Platform/HLE expansion  
-**State:** Imported-function relocation orchestration baseline complete; bounded RDNA2 whole-stream decode/lower and validated Shader IR CFG complete; CFG Trace v0 adapter in progress  
+**State:** Imported-function relocation orchestration baseline complete; bounded RDNA2 stream, validated Shader IR CFG, and CFG Trace v0 complete; scalar Shader IR execution in progress  
 **Repository:** astraea-emu/astraea  
-**Active branch:** `feat/m4-shader-cfg-trace`
+**Active branch:** `feat/m4-shader-scalar-execution`
 
 ## Complete
 
@@ -59,9 +59,9 @@
 
 ## Current frontier
 
-1. #110 — expose validated Shader CFG block/edge topology through Trace v0 — in progress on this branch.
-2. CFG trace stable fields describe semantic graph topology only; raw instruction encodings remain outside CFG semantic equality and continue to live at the decoder/Shader IR provenance layers.
-3. SCC/VCC/EXEC evaluation, dynamic branch execution, wave/lane semantics, Sony shader container/launch ABI, SPIR-V/Vulkan lowering, new opcodes, and `R_X86_64_RELATIVE` remain separately deferred.
+1. #112 — execute the already-lowered scalar move Shader IR against explicit caller-supplied generic RDNA2 scalar state — in progress on this branch.
+2. S_MOV_B32/B64 execution may read the typed SGPR/VCC/M0/NULL/EXEC/inline/literal sources already represented in Shader IR, but it must not infer PS5 shader-entry register values or wave launch state.
+3. Dynamic CFG execution, vector lanes/VGPR execution, floating-point mode semantics, barriers/waits, Sony shader container/launch ABI, SPIR-V/Vulkan lowering, new opcodes, and `R_X86_64_RELATIVE` remain separately deferred.
 
 ## SCE metadata boundary
 
@@ -120,7 +120,7 @@ PS5-specific assumptions require documented evidence.
 
 ## Next action
 
-Validate #110 across the five-gate matrix. Normalize Shader CFG blocks and edges into
-stable `shader.cfg` Trace v0 events, prove edge-kind/target changes localize through
-the existing first-divergence machinery, and keep execution, Sony ABI, SPIR-V, and
-Vulkan semantics out.
+Validate #112 across the five-gate matrix. Execute only the currently-typed scalar
+move operations against explicit generic RDNA2 scalar state, preserve SCC and other
+unwritten special state, trace the resulting SGPR write effects, and keep CFG/vector
+execution, PS5 launch ABI, SPIR-V, and Vulkan semantics out.
