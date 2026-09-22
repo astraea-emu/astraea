@@ -324,7 +324,7 @@ TEST_CASE(
 }
 
 TEST_CASE(
-    "mixed block preserves prior scalar and vector writes before unsupported V_ADD_F32",
+    "mixed block preserves prior writes before unsupported exact V_ADD_F32 case",
     "[graphics][shader-execution][wave-block][partial-failure]") {
     const std::array<std::uint32_t, 4> words{
         make_sop1(3, 9, 131),
@@ -345,7 +345,9 @@ TEST_CASE(
     astraea::graphics::ShaderScalarState scalar_state{};
     scalar_state.exec = 1;
     auto vector_state = wave32_state();
-    vector_state.vgprs[11][0] = 0xabcdef01U;
+    // V_MOV copies a denormal bit pattern into VGPR10. The following add uses
+    // VGPR10 + VGPR11, so the exact-add subset must reject the active lane.
+    vector_state.vgprs[11][0] = 0x00000001U;
 
     const auto result =
         astraea::graphics::execute_shader_wave_block(
@@ -360,13 +362,21 @@ TEST_CASE(
         result.error().code ==
         astraea::graphics::
             ShaderWaveBlockExecutionErrorCode::
-                unsupported_operation);
+                vector_execution_failure);
     REQUIRE(result.error().emission_index == 2);
     REQUIRE(result.error().completed_emission_count == 2);
     REQUIRE(scalar_state.sgprs[9] == 3U);
-    REQUIRE(vector_state.vgprs[10][0] == 0xabcdef01U);
+    REQUIRE(vector_state.vgprs[10][0] == 0x00000001U);
     REQUIRE_FALSE(result.error().scalar_error.has_value());
-    REQUIRE_FALSE(result.error().vector_error.has_value());
+    REQUIRE(result.error().vector_error.has_value());
+    REQUIRE(
+        result.error().vector_error->code ==
+        astraea::graphics::
+            ShaderVectorExecutionErrorCode::
+                unsupported_f32_case);
+    REQUIRE(
+        result.error().vector_error->lane_index ==
+        std::optional<std::size_t>{0});
 }
 
 TEST_CASE(
