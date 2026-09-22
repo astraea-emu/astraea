@@ -55,8 +55,23 @@ struct ShaderIrWaitCount {
     auto operator<=>(const ShaderIrWaitCount&) const = default;
 };
 
+struct ShaderIrSgpr {
+    std::uint8_t index = 0;
+
+    auto operator<=>(const ShaderIrSgpr&) const = default;
+};
+
+struct ShaderIrScalarMove32 {
+    ShaderIrSgpr destination;
+    ShaderIrSgpr source;
+
+    auto operator<=>(const ShaderIrScalarMove32&) const = default;
+};
+
 enum class ShaderIrUnsupportedReason {
     unknown_sopp_opcode,
+    unknown_sop1_opcode,
+    unsupported_scalar_operand,
     unsupported_encoding,
     invalid_decoded_instruction,
 };
@@ -76,6 +91,7 @@ using ShaderIrOperation =
         ShaderIrConditionalRelativeBranch,
         ShaderIrWorkgroupBarrier,
         ShaderIrWaitCount,
+        ShaderIrScalarMove32,
         ShaderIrUnsupported>;
 
 struct ShaderIrProvenance {
