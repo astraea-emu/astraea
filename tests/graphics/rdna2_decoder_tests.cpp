@@ -390,7 +390,7 @@ TEST_CASE(
     "unknown SOP1 opcode remains typed and preserves selectors",
     "[graphics][rdna2][sop1]") {
     const std::array<std::uint32_t, 1> words{
-        make_sop1(4, 7, 9),
+        make_sop1(5, 7, 9),
     };
 
     const auto result =
@@ -407,7 +407,7 @@ TEST_CASE(
         astraea::graphics::Rdna2InstructionKind::
             unknown_sop1_opcode);
     REQUIRE(result->sop1.has_value());
-    REQUIRE(result->sop1->opcode == 4);
+    REQUIRE(result->sop1->opcode == 5);
     REQUIRE(result->sop1->destination_selector == 7);
     REQUIRE(result->sop1->source_selector == 9);
 }
@@ -430,4 +430,32 @@ TEST_CASE(
         astraea::graphics::Rdna2InstructionKind::s_mov_b32);
     REQUIRE(result->sop1.has_value());
     REQUIRE(result->sop1->source_selector == 255);
+}
+
+
+TEST_CASE(
+    "RDNA2 SOP1 S_MOV_B64 preserves base-word fields",
+    "[graphics][rdna2][sop1][mov64]") {
+    const std::array<std::uint32_t, 1> words{
+        make_sop1(4, 4, 16),
+    };
+
+    const auto result =
+        astraea::graphics::decode_rdna2_instruction(
+            words,
+            0);
+
+    REQUIRE(result.has_value());
+    REQUIRE(
+        result->format ==
+        astraea::graphics::Rdna2InstructionFormat::sop1);
+    REQUIRE(
+        result->kind ==
+        astraea::graphics::Rdna2InstructionKind::s_mov_b64);
+    REQUIRE_FALSE(result->sopp.has_value());
+    REQUIRE(result->sop1.has_value());
+    REQUIRE(result->sop1->opcode == 4);
+    REQUIRE(result->sop1->destination_selector == 4);
+    REQUIRE(result->sop1->source_selector == 16);
+    REQUIRE(result->raw_word == words[0]);
 }
