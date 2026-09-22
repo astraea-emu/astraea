@@ -173,6 +173,14 @@ TEST_CASE(
             astraea::graphics::AgcShaderStage::
                 pixel});
 
+    REQUIRE(
+        result->context_register_list_header_offset ==
+        std::optional<std::uint64_t>{
+            kContextRegistersOffset});
+    REQUIRE(
+        result->shader_register_list_header_offset ==
+        std::optional<std::uint64_t>{
+            kShaderRegistersOffset});
     REQUIRE(result->context_registers.size() == 1);
     REQUIRE(
         result->context_registers[0] ==
@@ -316,6 +324,10 @@ TEST_CASE(
                 fixture.text);
 
     REQUIRE(result.has_value());
+    REQUIRE_FALSE(
+        result->context_register_list_header_offset.has_value());
+    REQUIRE_FALSE(
+        result->shader_register_list_header_offset.has_value());
     REQUIRE(result->context_registers.empty());
     REQUIRE(result->shader_registers.empty());
 }
