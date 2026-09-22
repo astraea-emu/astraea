@@ -251,6 +251,14 @@ namespace {
         return "unknown_sopp_opcode";
     case astraea::graphics::
         ShaderIrUnsupportedReason::
+            unknown_sop1_opcode:
+        return "unknown_sop1_opcode";
+    case astraea::graphics::
+        ShaderIrUnsupportedReason::
+            unsupported_scalar_operand:
+        return "unsupported_scalar_operand";
+    case astraea::graphics::
+        ShaderIrUnsupportedReason::
             unsupported_encoding:
         return "unsupported_encoding";
     case astraea::graphics::
