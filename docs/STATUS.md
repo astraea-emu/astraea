@@ -1,9 +1,9 @@
 # Project Status
 
 **Milestone:** M4 — Platform/HLE expansion  
-**State:** JUMP_SLOT and GLOB_DAT owned import paths validated end to end; GLOB_DAT batch patch construction in progress  
+**State:** JUMP_SLOT and GLOB_DAT owned import paths validated end to end; GLOB_DAT batch application in progress  
 **Repository:** astraea-emu/astraea  
-**Active branch:** `feat/m4-sce-glob-dat-batch-patch`
+**Active branch:** `feat/m4-sce-glob-dat-batch-apply`
 
 ## Complete
 
@@ -39,6 +39,7 @@
 - Validated GLOB_DAT gate patch application through GuestMemoryAccess (#74).
 - Owned SCE-profile general-RELA GLOB_DAT import/execution proof through HLE exit 42 (#76).
 - Table-kind-neutral ordered exact-SCE batch import planning with PLT compatibility wrapper (#79).
+- Ordered validated x86-64 GLOB_DAT batch patch construction with explicit gate slots (#81).
 - Public five-gate CI remains the merge requirement:
   - Linux x64
   - Windows x64
@@ -48,8 +49,8 @@
 
 ## Current frontier
 
-1. #81 — batch already-supported x86-64 GLOB_DAT patch construction with explicit gate slots — in progress on this branch.
-2. The batch builder stops before guest-memory writes and introduces no automatic gate allocation or new relocation semantics.
+1. #83 — batch apply already-validated GLOB_DAT patches through GuestMemoryAccess — in progress on this branch.
+2. Batch application is ordered and intentionally non-atomic, with indexed partial-failure reporting and exact GuestMemoryError preservation.
 3. `R_X86_64_RELATIVE` remains deferred until Astraea has an explicit, evidence-backed image load-base / load-bias contract.
 
 ## SCE metadata boundary
@@ -109,6 +110,6 @@ PS5-specific assumptions require documented evidence.
 
 ## Next action
 
-Validate #81 across the five-gate matrix. The GLOB_DAT batch patch builder must
-preserve plan order, require explicit one-to-one gate slots, and stop at the first
-indexed typed patch failure without performing any guest-memory writes.
+Validate #83 across the five-gate matrix. GLOB_DAT batch application must reserve
+result storage before writes, apply in order through GuestMemoryAccess, preserve exact
+memory errors, and report partial progress without rollback.
