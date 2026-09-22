@@ -242,6 +242,7 @@ Rdna2DecodeResult decode_rdna2_instruction(
                     },
                 .sop1 = std::nullopt,
                 .vop1 = std::nullopt,
+                .vop2 = std::nullopt,
             });
     }
 
@@ -296,6 +297,7 @@ Rdna2DecodeResult decode_rdna2_instruction(
                         .literal_constant = literal_constant,
                     },
                 .vop1 = std::nullopt,
+                .vop2 = std::nullopt,
             });
     }
 
@@ -350,6 +352,7 @@ Rdna2DecodeResult decode_rdna2_instruction(
                         .source_selector = source,
                         .source_extension = source_extension,
                     },
+                .vop2 = std::nullopt,
             });
     }
 
