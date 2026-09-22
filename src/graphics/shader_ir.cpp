@@ -240,7 +240,8 @@ ShaderIrEmission lower_rdna2_to_shader_ir(
     case Rdna2InstructionKind::unsupported_encoding:
         if (instruction.format ==
                 Rdna2InstructionFormat::unsupported &&
-            !instruction.sopp.has_value()) {
+            !instruction.sopp.has_value() &&
+            !instruction.sop1.has_value()) {
             operation =
                 unsupported(
                     ShaderIrUnsupportedReason::
