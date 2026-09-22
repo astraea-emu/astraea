@@ -194,3 +194,53 @@ The creation behavior used by #145 is intentionally split into three layers:
 The supported first profile does not claim universal AGC semantics. Other
 shader stages, versions, resource payload interpretation, command buffers, and
 host GPU objects remain separate dependencies.
+
+
+## Exact import identity used by the final V1 probe
+
+The final V1 integration slice uses the public `sceAgcCreateShader` NID
+`f3dg2CSgRKY` and an owned SCE-profile guest fixture.
+
+A current public SharpProspero linker shows that the long-form dynamic symbol
+suffix is not a fixed spelling of the library and module names. Imports are
+encoded as:
+
+```text
+<NID>#<encoded-library-id>#<encoded-module-id>
+```
+
+where library and module IDs are assigned within the importing image. The
+public linker numbers libraries from zero and imported modules from one, then
+encodes those numeric IDs with the PS5 long-form alphabet. Consequently, for
+an owned fixture in which `libSceAgc` is the first and only imported
+library/module:
+
+- library ID 0 encodes as `A`;
+- module ID 1 encodes as `B`;
+- the exact symbol is `f3dg2CSgRKY#A#B`.
+
+This does **not** mean that `#A#B` universally identifies `libSceAgc`.
+Astraea continues to resolve the complete opaque long-form identity exactly.
+
+The same public linker records SCE module/library imports with packed values:
+
+```text
+name_string_offset | (version << 32) | (id << 48)
+```
+
+and the current public libSceAgc stub/catalog uses:
+
+- module name `libSceAgc`;
+- soname `libSceAgc.prx`;
+- module version `0x0101`;
+- library version `0x0001`.
+
+For the final V1 owned probe, Astraea preserves and checks the corresponding
+raw `DT_SCE_NEEDED_MODULE`, `DT_SCE_IMPORT_LIBRARY`, and import-library
+attribute records, while the ordinary `DT_NEEDED` string independently
+resolves to `libSceAgc.prx`.
+
+This slice deliberately does not add a general decoder from packed SCE
+dynamic-record values back to library/module names. The existing loader keeps
+those values as evidence until a later dependency requires stronger typed
+semantics.

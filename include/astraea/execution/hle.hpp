@@ -1,5 +1,6 @@
 #pragma once
 
+#include <array>
 #include <compare>
 #include <cstddef>
 #include <cstdint>
@@ -25,6 +26,19 @@ struct HleFunctionId {
     std::uint32_t value = 0;
 
     auto operator<=>(const HleFunctionId&) const = default;
+};
+
+// Captured SysV x86-64 HLE call state. This lives at the generic HLE layer so
+// concrete services can consume guest arguments without depending on the
+// runtime dispatch implementation.
+struct HleCall {
+    HleFunctionId function_id;
+    std::uint32_t gate_slot = 0;
+    std::uint64_t guest_rip = 0;
+    std::uint64_t guest_rsp = 0;
+    std::array<std::uint64_t, 6> arguments{};
+
+    auto operator<=>(const HleCall&) const = default;
 };
 
 struct HleFunctionDescriptor {

@@ -6,7 +6,7 @@
 
 #include <astraea/core/result.hpp>
 #include <astraea/execution/guest_memory.hpp>
-#include <astraea/execution/hle_runtime.hpp>
+#include <astraea/execution/hle.hpp>
 #include <astraea/graphics/agc_shader_binary.hpp>
 #include <astraea/memory/guest_address.hpp>
 

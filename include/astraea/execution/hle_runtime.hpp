@@ -4,27 +4,20 @@
 #include <compare>
 #include <cstddef>
 #include <cstdint>
+#include <optional>
 #include <vector>
 
 #include <astraea/core/result.hpp>
 #include <astraea/execution/context.hpp>
 #include <astraea/execution/guest_memory.hpp>
 #include <astraea/execution/hle.hpp>
+#include <astraea/execution/sce_agc_create_shader.hpp>
+#include <astraea/execution/sce_agc_shader_preparation.hpp>
 
 namespace astraea::execution {
 
 inline constexpr HleFunctionId kSyntheticTestWriteId{1};
 inline constexpr HleFunctionId kSyntheticTestExitId{2};
-
-struct HleCall {
-    HleFunctionId function_id;
-    std::uint32_t gate_slot = 0;
-    std::uint64_t guest_rip = 0;
-    std::uint64_t guest_rsp = 0;
-    std::array<std::uint64_t, 6> arguments{};
-
-    auto operator<=>(const HleCall&) const = default;
-};
 
 enum class HleRuntimeErrorCode {
     invalid_execution_stop,
@@ -36,6 +29,9 @@ enum class HleRuntimeErrorCode {
     guest_memory_failure,
     guest_stack_pointer_overflow,
     guest_return_address_not_executable,
+    sce_agc_create_shader_plan_failure,
+    sce_agc_shader_preparation_failure,
+    sce_agc_shader_apply_failure,
 };
 
 struct HleRuntimeError {
@@ -49,6 +45,12 @@ struct HleRuntimeError {
     std::uint64_t guest_address = 0;
     bool has_guest_memory_error = false;
     GuestMemoryError guest_memory_error;
+    std::optional<SceAgcCreateShaderPlanError>
+        sce_agc_create_shader_plan_error;
+    std::optional<SceAgcShaderPreparationError>
+        sce_agc_shader_preparation_error;
+    std::optional<SceAgcShaderApplyError>
+        sce_agc_shader_apply_error;
 
     auto operator<=>(const HleRuntimeError&) const = default;
 };
@@ -65,15 +67,28 @@ struct HleHandlerResult {
     auto operator<=>(const HleHandlerResult&) const = default;
 };
 
-struct SyntheticHleTranscript {
+struct HleDispatchState {
+    // Test-only write-service output currently uses this buffer. Real services
+    // do not depend on it.
     std::vector<std::byte> output;
 };
+
+// Compatibility name retained for existing synthetic-service tests.
+using SyntheticHleTranscript = HleDispatchState;
 
 using HleDispatchResult =
     astraea::core::Result<HleHandlerResult, HleRuntimeError>;
 using HleResumeResult =
     astraea::core::Result<GuestCpuContext, HleRuntimeError>;
 
+[[nodiscard]] HleDispatchResult dispatch_hle(
+    const HleRegistry& registry,
+    const SyntheticGateRegion& gate_region,
+    const ExecutionStop& stop,
+    const GuestMemoryAccess& guest_memory,
+    HleDispatchState& state);
+
+// Compatibility wrapper for the pre-V1 synthetic test surface.
 [[nodiscard]] HleDispatchResult dispatch_synthetic_hle(
     const HleRegistry& registry,
     const SyntheticGateRegion& gate_region,
@@ -81,6 +96,12 @@ using HleResumeResult =
     const GuestMemoryAccess& guest_memory,
     SyntheticHleTranscript& transcript);
 
+[[nodiscard]] HleResumeResult apply_hle_resume(
+    GuestCpuContext context,
+    const HleHandlerResult& handler_result,
+    const GuestMemoryAccess& guest_memory);
+
+// Compatibility wrapper for existing synthetic-session tests.
 [[nodiscard]] HleResumeResult apply_synthetic_hle_resume(
     GuestCpuContext context,
     const HleHandlerResult& handler_result,
