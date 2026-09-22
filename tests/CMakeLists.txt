@@ -46,6 +46,7 @@ add_executable(astraea_core_tests
     execution/sce_prototype_tests.cpp
     execution/sce_multi_import_prototype_tests.cpp
     execution/hle_runtime_tests.cpp
+    execution/sce_agc_create_shader_tests.cpp
     probe/hello_tests.cpp
     probe/reference_tests.cpp
     graphics/agc_shader_binary_tests.cpp

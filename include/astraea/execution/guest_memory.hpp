@@ -8,6 +8,8 @@
 
 #include <astraea/core/result.hpp>
 #include <astraea/execution/linux_memory.hpp>
+#include <astraea/execution/memory_plan.hpp>
+#include <astraea/execution/windows_memory.hpp>
 #include <astraea/loader/guest_image.hpp>
 #include <astraea/memory/guest_address.hpp>
 
@@ -38,7 +40,15 @@ public:
         const astraea::loader::GuestImage& image,
         const LinuxPreparedMemory& prepared_memory) noexcept
         : image_(&image),
-          prepared_memory_(&prepared_memory) {}
+          prepared_plan_(&prepared_memory.plan()),
+          prepared_memory_available_(!prepared_memory.empty()) {}
+
+    GuestMemoryAccess(
+        const astraea::loader::GuestImage& image,
+        const WindowsPreparedMemory& prepared_memory) noexcept
+        : image_(&image),
+          prepared_plan_(&prepared_memory.plan()),
+          prepared_memory_available_(!prepared_memory.empty()) {}
 
     using CopyResult =
         astraea::core::Result<std::size_t, GuestMemoryError>;
@@ -75,7 +85,8 @@ private:
         AccessKind access) const noexcept;
 
     const astraea::loader::GuestImage* image_ = nullptr;
-    const LinuxPreparedMemory* prepared_memory_ = nullptr;
+    const ExecutionMemoryPlan* prepared_plan_ = nullptr;
+    bool prepared_memory_available_ = false;
 };
 
 }  // namespace astraea::execution

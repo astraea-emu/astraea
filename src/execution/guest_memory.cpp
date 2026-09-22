@@ -40,8 +40,8 @@ GuestMemoryAccess::CopyResult GuestMemoryAccess::validate(
     std::size_t byte_count,
     AccessKind access) const noexcept {
     if (image_ == nullptr ||
-        prepared_memory_ == nullptr ||
-        prepared_memory_->empty()) {
+        prepared_plan_ == nullptr ||
+        !prepared_memory_available_) {
         return CopyResult::failure(
             memory_error(
                 GuestMemoryErrorCode::
@@ -152,7 +152,7 @@ GuestMemoryAccess::CopyResult GuestMemoryAccess::validate(
         std::uint64_t prepared_coverage = 0;
         bool prepared_without_permission = false;
         for (const auto& region :
-             prepared_memory_->plan().regions) {
+             prepared_plan_->regions) {
             if (!region.range.contains(cursor_address)) {
                 continue;
             }
@@ -345,8 +345,8 @@ GuestMemoryAccess::read_c_string(
 bool GuestMemoryAccess::is_exact_executable_address(
     astraea::memory::GuestAddress address) const noexcept {
     if (image_ == nullptr ||
-        prepared_memory_ == nullptr ||
-        prepared_memory_->empty()) {
+        prepared_plan_ == nullptr ||
+        !prepared_memory_available_) {
         return false;
     }
 
