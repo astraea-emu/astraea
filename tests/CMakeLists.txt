@@ -65,6 +65,7 @@ add_executable(astraea_core_tests
     graphics/shader_vector_execution_tests.cpp
     graphics/shader_wave_block_execution_tests.cpp
     graphics/shader_wave_program_execution_tests.cpp
+    graphics/spirv_vector_probe_tests.cpp
     trace/v0_tests.cpp
     trace/diff_v0_tests.cpp
     trace/graphics_v0_tests.cpp
@@ -73,6 +74,7 @@ add_executable(astraea_core_tests
 target_link_libraries(astraea_core_tests PRIVATE
     Astraea::core
     Catch2::Catch2WithMain
+    SPIRV-Tools
 )
 astraea_set_project_warnings(astraea_core_tests)
 astraea_enable_sanitizers(astraea_core_tests)
