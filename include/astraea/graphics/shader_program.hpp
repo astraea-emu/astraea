@@ -2,6 +2,7 @@
 
 #include <compare>
 #include <cstddef>
+#include <cstdint>
 #include <optional>
 #include <span>
 #include <vector>
@@ -15,8 +16,6 @@ namespace astraea::graphics {
 struct ShaderIrProgram {
     std::size_t source_word_count = 0;
     std::vector<ShaderIrEmission> emissions;
-
-    auto operator<=>(const ShaderIrProgram&) const = default;
 };
 
 enum class ShaderIrProgramErrorCode {
