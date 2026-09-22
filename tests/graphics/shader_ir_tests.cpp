@@ -371,15 +371,76 @@ TEST_CASE(
             astraea::graphics::ShaderIrScalarMove32>(
             emission.operation);
     REQUIRE(move.destination.index == 5);
-    REQUIRE(move.source.index == 17);
+    REQUIRE(
+        std::holds_alternative<
+            astraea::graphics::ShaderIrSgpr>(
+            move.source));
+    REQUIRE(
+        std::get<astraea::graphics::ShaderIrSgpr>(
+            move.source)
+            .index == 17);
 }
 
 TEST_CASE(
-    "S_MOV_B32 non-SGPR operands remain typed unsupported",
+    "S_MOV_B32 documented inline integer sources lower exactly",
+    "[graphics][shader-ir][sop1][mov][inline-integer]") {
+    struct Case {
+        std::uint8_t selector;
+        std::int32_t value;
+    };
+
+    constexpr std::array<Case, 5> cases{{
+        {128, 0},
+        {129, 1},
+        {192, 64},
+        {193, -1},
+        {208, -16},
+    }};
+
+    for (const auto& test_case : cases) {
+        const auto emission =
+            astraea::graphics::lower_rdna2_to_shader_ir(
+                decode_one(
+                    make_sop1(
+                        3,
+                        5,
+                        test_case.selector)));
+
+        REQUIRE(
+            std::holds_alternative<
+                astraea::graphics::
+                    ShaderIrScalarMove32>(
+                emission.operation));
+        const auto& move =
+            std::get<
+                astraea::graphics::
+                    ShaderIrScalarMove32>(
+                emission.operation);
+        REQUIRE(move.destination.index == 5);
+        REQUIRE(
+            std::holds_alternative<
+                astraea::graphics::
+                    ShaderIrInlineInteger32>(
+                move.source));
+        REQUIRE(
+            std::get<
+                astraea::graphics::
+                    ShaderIrInlineInteger32>(
+                move.source)
+                .value == test_case.value);
+    }
+}
+
+TEST_CASE(
+    "S_MOV_B32 unsupported scalar selectors remain typed unsupported",
     "[graphics][shader-ir][sop1][mov]") {
-    constexpr std::array<std::uint8_t, 3> sources{
+    constexpr std::array<std::uint8_t, 7> sources{
         106,
-        128,
+        127,
+        209,
+        250,
+        251,
+        254,
         255,
     };
 
@@ -436,6 +497,36 @@ TEST_CASE(
         astraea::graphics::shader_ir_semantically_equal(
             left,
             different));
+}
+
+TEST_CASE(
+    "S_MOV_B32 inline integer value participates in semantic equality",
+    "[graphics][shader-ir][sop1][mov][inline-integer]") {
+    const auto zero =
+        astraea::graphics::lower_rdna2_to_shader_ir(
+            decode_one(make_sop1(3, 5, 128)));
+    const auto same_zero =
+        astraea::graphics::lower_rdna2_to_shader_ir(
+            decode_one(make_sop1(3, 5, 128)));
+    const auto one =
+        astraea::graphics::lower_rdna2_to_shader_ir(
+            decode_one(make_sop1(3, 5, 129)));
+    const auto sgpr =
+        astraea::graphics::lower_rdna2_to_shader_ir(
+            decode_one(make_sop1(3, 5, 0)));
+
+    REQUIRE(
+        astraea::graphics::shader_ir_semantically_equal(
+            zero,
+            same_zero));
+    REQUIRE_FALSE(
+        astraea::graphics::shader_ir_semantically_equal(
+            zero,
+            one));
+    REQUIRE_FALSE(
+        astraea::graphics::shader_ir_semantically_equal(
+            zero,
+            sgpr));
 }
 
 
