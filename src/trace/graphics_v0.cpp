@@ -264,6 +264,29 @@ namespace {
     return "scc_zero";
 }
 
+[[nodiscard]] std::string shader_ir_special_scalar_source_text(
+    astraea::graphics::ShaderIrSpecialScalarSourceKind32 kind) {
+    using Kind =
+        astraea::graphics::ShaderIrSpecialScalarSourceKind32;
+
+    switch (kind) {
+    case Kind::vcc_lo:
+        return "vcc_lo";
+    case Kind::vcc_hi:
+        return "vcc_hi";
+    case Kind::m0:
+        return "m0";
+    case Kind::null_register:
+        return "null";
+    case Kind::exec_lo:
+        return "exec_lo";
+    case Kind::exec_hi:
+        return "exec_hi";
+    }
+
+    return "vcc_lo";
+}
+
 [[nodiscard]] std::string shader_ir_reason_text(
     astraea::graphics::ShaderIrUnsupportedReason
         reason) {
@@ -724,6 +747,23 @@ trace_shader_ir_v0(
                                         ShaderIrSgpr>(
                                     operation.source)
                                     .index));
+                    } else if (std::holds_alternative<
+                                   astraea::graphics::
+                                       ShaderIrSpecialScalarSource32>(
+                                   operation.source)) {
+                        stable.push_back(
+                            text_field(
+                                "source_kind",
+                                "special_register"));
+                        stable.push_back(
+                            text_field(
+                                "source_special_register",
+                                shader_ir_special_scalar_source_text(
+                                    std::get<
+                                        astraea::graphics::
+                                            ShaderIrSpecialScalarSource32>(
+                                        operation.source)
+                                        .kind)));
                     } else if (std::holds_alternative<
                                    astraea::graphics::
                                        ShaderIrInlineInteger32>(
