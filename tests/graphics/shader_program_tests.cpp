@@ -3,6 +3,7 @@
 #include <array>
 #include <cstdint>
 #include <optional>
+#include <span>
 #include <variant>
 
 #include <catch2/catch_test_macros.hpp>
@@ -57,7 +58,7 @@ constexpr std::uint32_t make_vop2(
 TEST_CASE(
     "empty RDNA2 stream lowers to empty Shader IR program",
     "[graphics][shader-program]") {
-    const std::array<std::uint32_t, 0> words{};
+    const std::span<const std::uint32_t> words{};
 
     const auto result =
         astraea::graphics::
