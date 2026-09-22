@@ -373,7 +373,7 @@ TEST_CASE(
     const auto words_address =
         layout.data_base + 0x100U;
 
-    const std::array command_bytes{
+    constexpr std::array command_bytes{
         std::byte{0x11},
         std::byte{0x22},
         std::byte{0x33},
@@ -434,9 +434,9 @@ TEST_CASE(
     REQUIRE(result->opaque_padding == padding);
     REQUIRE(
         result->command_buffer_bytes ==
-        std::vector<std::byte>{
+        std::vector<std::byte>(
             command_bytes.begin(),
-            command_bytes.end()});
+            command_bytes.end()));
     REQUIRE(
         result->command_buffer_bytes.size() %
             4U ==
