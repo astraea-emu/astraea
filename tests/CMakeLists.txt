@@ -52,6 +52,7 @@ add_executable(astraea_core_tests
     graphics/graphics_ir_tests.cpp
     graphics/rdna2_decoder_tests.cpp
     graphics/shader_ir_tests.cpp
+    graphics/shader_program_tests.cpp
     trace/v0_tests.cpp
     trace/diff_v0_tests.cpp
     trace/graphics_v0_tests.cpp
