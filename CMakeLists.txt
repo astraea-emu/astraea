@@ -77,6 +77,7 @@ add_library(astraea_core STATIC
     src/graphics/shader_program_execution.cpp
     src/graphics/shader_vector_execution.cpp
     src/graphics/shader_wave_block_execution.cpp
+    src/graphics/shader_wave_program_execution.cpp
     src/trace/v0.cpp
     src/trace/diff_v0.cpp
     src/trace/graphics_v0.cpp
