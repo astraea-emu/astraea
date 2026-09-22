@@ -11,6 +11,7 @@ namespace {
 
 constexpr std::uint32_t kSoppBase = 0xbf800000U;
 constexpr std::uint32_t kSop1Base = 0xbe800000U;
+constexpr std::uint32_t kVop1Base = 0x7e000000U;
 
 constexpr std::uint32_t make_sopp(
     std::uint8_t opcode,
@@ -54,6 +55,31 @@ constexpr std::uint32_t make_sop1(
            (static_cast<std::uint32_t>(destination) << 16U) |
            (static_cast<std::uint32_t>(opcode) << 8U) |
            static_cast<std::uint32_t>(source);
+}
+
+constexpr std::uint32_t make_vop1(
+    std::uint8_t opcode,
+    std::uint8_t destination,
+    std::uint16_t source) {
+    return kVop1Base |
+           (static_cast<std::uint32_t>(destination) << 17U) |
+           (static_cast<std::uint32_t>(opcode) << 9U) |
+           static_cast<std::uint32_t>(source);
+}
+
+astraea::graphics::Rdna2Instruction decode_vop1_extension(
+    std::uint32_t word,
+    std::uint32_t extension) {
+    const std::array<std::uint32_t, 2> words{
+        word,
+        extension,
+    };
+    auto result =
+        astraea::graphics::decode_rdna2_instruction(
+            words,
+            0);
+    REQUIRE(result.has_value());
+    return std::move(result).value();
 }
 
 }  // namespace
@@ -753,6 +779,110 @@ TEST_CASE(
     const auto different =
         astraea::graphics::lower_rdna2_to_shader_ir(
             decode_one(make_sop1(3, 5, 107)));
+
+    REQUIRE(
+        astraea::graphics::shader_ir_semantically_equal(
+            left,
+            same));
+    REQUIRE_FALSE(
+        astraea::graphics::shader_ir_semantically_equal(
+            left,
+            different));
+}
+
+
+TEST_CASE(
+    "RDNA2 V_MOV_B32 lowers plain VGPR move",
+    "[graphics][shader-ir][vop1][mov]") {
+    const auto emission =
+        astraea::graphics::lower_rdna2_to_shader_ir(
+            decode_one(make_vop1(1, 5, 273)));
+
+    REQUIRE(
+        std::holds_alternative<
+            astraea::graphics::ShaderIrVectorMove32>(
+            emission.operation));
+    const auto& move =
+        std::get<
+            astraea::graphics::ShaderIrVectorMove32>(
+            emission.operation);
+    REQUIRE(move.destination.index == 5);
+    REQUIRE(move.source.index == 17);
+}
+
+TEST_CASE(
+    "V_MOV_B32 VGPR source boundaries lower exactly",
+    "[graphics][shader-ir][vop1][mov]") {
+    const auto first =
+        astraea::graphics::lower_rdna2_to_shader_ir(
+            decode_one(make_vop1(1, 0, 256)));
+    const auto last =
+        astraea::graphics::lower_rdna2_to_shader_ir(
+            decode_one(make_vop1(1, 255, 511)));
+
+    REQUIRE(
+        std::get<astraea::graphics::ShaderIrVectorMove32>(
+            first.operation)
+            .source.index == 0);
+    REQUIRE(
+        std::get<astraea::graphics::ShaderIrVectorMove32>(
+            last.operation)
+            .source.index == 255);
+    REQUIRE(
+        std::get<astraea::graphics::ShaderIrVectorMove32>(
+            last.operation)
+            .destination.index == 255);
+}
+
+TEST_CASE(
+    "V_MOV_B32 non-VGPR source forms remain typed unsupported",
+    "[graphics][shader-ir][vop1][mov]") {
+    const auto scalar =
+        astraea::graphics::lower_rdna2_to_shader_ir(
+            decode_one(make_vop1(1, 5, 17)));
+    const auto dpp =
+        astraea::graphics::lower_rdna2_to_shader_ir(
+            decode_vop1_extension(
+                make_vop1(1, 5, 250),
+                0x12345678U));
+    const auto literal =
+        astraea::graphics::lower_rdna2_to_shader_ir(
+            decode_vop1_extension(
+                make_vop1(1, 5, 255),
+                0xdeadbeefU));
+
+    for (const auto* emission :
+         std::array{
+             &scalar,
+             &dpp,
+             &literal,
+         }) {
+        REQUIRE(
+            std::holds_alternative<
+                astraea::graphics::ShaderIrUnsupported>(
+                emission->operation));
+        REQUIRE(
+            std::get<
+                astraea::graphics::ShaderIrUnsupported>(
+                emission->operation)
+                .reason ==
+            astraea::graphics::ShaderIrUnsupportedReason::
+                unsupported_vector_operand);
+    }
+}
+
+TEST_CASE(
+    "V_MOV_B32 VGPR identities participate in semantic equality",
+    "[graphics][shader-ir][vop1][mov]") {
+    const auto left =
+        astraea::graphics::lower_rdna2_to_shader_ir(
+            decode_one(make_vop1(1, 5, 273)));
+    const auto same =
+        astraea::graphics::lower_rdna2_to_shader_ir(
+            decode_one(make_vop1(1, 5, 273)));
+    const auto different =
+        astraea::graphics::lower_rdna2_to_shader_ir(
+            decode_one(make_vop1(1, 6, 273)));
 
     REQUIRE(
         astraea::graphics::shader_ir_semantically_equal(
