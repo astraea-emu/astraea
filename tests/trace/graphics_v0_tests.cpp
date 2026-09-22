@@ -350,7 +350,7 @@ TEST_CASE(
             decode_one(0x80000000U));
     const auto right_ir =
         astraea::graphics::lower_rdna2_to_shader_ir(
-            decode_one(0x07654321U));
+            decode_one(0x87654321U));
 
     auto left =
         astraea::trace::trace_shader_ir_v0(
