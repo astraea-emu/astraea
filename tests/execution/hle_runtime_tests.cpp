@@ -464,6 +464,125 @@ TEST_CASE(
             prepared_memory_unavailable);
 }
 
+
+TEST_CASE(
+    "batch JUMP_SLOT application reports unavailable memory at index zero",
+    "[execution][sce-jump-slot-apply][batch]") {
+    GuestImage image{
+        .image_bytes = {},
+        .elf =
+            ElfImage{
+                .header = {},
+                .program_headers = {},
+            },
+        .mappings = {},
+        .dynamic_table = std::nullopt,
+        .dynamic_strings = std::nullopt,
+        .dynamic_symbols = std::nullopt,
+        .general_relocations =
+            GeneralDynamicRelocationMetadata{
+                .rel = std::nullopt,
+                .rela = std::nullopt,
+            },
+        .plt_relocations = std::nullopt,
+        .tls = std::nullopt,
+        .initial_stack =
+            InitialStackImage{
+                .storage = range(0, 0),
+                .used_range = range(0, 0),
+                .rsp = GuestAddress{0},
+                .bytes = {},
+            },
+    };
+    astraea::execution::LinuxPreparedMemory prepared;
+    GuestMemoryAccess memory{image, prepared};
+
+    const std::array patches{
+        astraea::execution::SceJumpSlotPatch{
+            .relocation_target = GuestAddress{0x1000},
+            .gate_destination = GuestAddress{0x600000},
+            .gate_slot = 0,
+            .function_id = HleFunctionId{1},
+            .bytes = {},
+            .raw_addend = std::nullopt,
+        },
+        astraea::execution::SceJumpSlotPatch{
+            .relocation_target = GuestAddress{0x1008},
+            .gate_destination = GuestAddress{0x600010},
+            .gate_slot = 1,
+            .function_id = HleFunctionId{2},
+            .bytes = {},
+            .raw_addend = std::nullopt,
+        },
+    };
+
+    const auto result =
+        astraea::execution::
+            apply_synthetic_jump_slot_patches(
+                patches,
+                memory);
+
+    REQUIRE_FALSE(result.has_value());
+    REQUIRE(
+        result.error().code ==
+        astraea::execution::
+            SceJumpSlotApplyBatchErrorCode::
+                apply_failure);
+    REQUIRE(result.error().patch_index == 0);
+    REQUIRE(result.error().patch_count == 2);
+    REQUIRE(result.error().applied_count == 0);
+    REQUIRE(result.error().memory_error.has_value());
+    REQUIRE(
+        result.error().memory_error->code ==
+        GuestMemoryErrorCode::
+            prepared_memory_unavailable);
+}
+
+TEST_CASE(
+    "empty JUMP_SLOT application batch succeeds without prepared memory",
+    "[execution][sce-jump-slot-apply][batch]") {
+    GuestImage image{
+        .image_bytes = {},
+        .elf =
+            ElfImage{
+                .header = {},
+                .program_headers = {},
+            },
+        .mappings = {},
+        .dynamic_table = std::nullopt,
+        .dynamic_strings = std::nullopt,
+        .dynamic_symbols = std::nullopt,
+        .general_relocations =
+            GeneralDynamicRelocationMetadata{
+                .rel = std::nullopt,
+                .rela = std::nullopt,
+            },
+        .plt_relocations = std::nullopt,
+        .tls = std::nullopt,
+        .initial_stack =
+            InitialStackImage{
+                .storage = range(0, 0),
+                .used_range = range(0, 0),
+                .rsp = GuestAddress{0},
+                .bytes = {},
+            },
+    };
+    astraea::execution::LinuxPreparedMemory prepared;
+    GuestMemoryAccess memory{image, prepared};
+    const std::vector<
+        astraea::execution::SceJumpSlotPatch>
+        patches;
+
+    const auto result =
+        astraea::execution::
+            apply_synthetic_jump_slot_patches(
+                patches,
+                memory);
+
+    REQUIRE(result.has_value());
+    REQUIRE(result->empty());
+}
+
 #if defined(__linux__) && defined(__x86_64__) && defined(MAP_FIXED_NOREPLACE)
 
 TEST_CASE(
@@ -1248,6 +1367,218 @@ TEST_CASE(
         applied.error().code ==
         GuestMemoryErrorCode::
             guest_memory_unmapped);
+}
+
+
+TEST_CASE(
+    "batch JUMP_SLOT application writes two ordered patches exactly",
+    "[execution][sce-jump-slot-apply][batch]") {
+    constexpr auto kRead =
+        static_cast<std::uint8_t>(
+            GuestPermission::read);
+    constexpr auto kWrite =
+        static_cast<std::uint8_t>(
+            GuestPermission::write);
+
+    auto layout =
+        make_layout(
+            std::vector<std::byte>{
+                std::byte{0x0f},
+                std::byte{0x0b},
+            },
+            std::vector<std::byte>(
+                16,
+                std::byte{0}),
+            permissions(kRead | kWrite));
+    auto prepared =
+        astraea::execution::
+            prepare_linux_guest_memory(
+                layout.image);
+    REQUIRE(prepared.has_value());
+    GuestMemoryAccess memory{
+        layout.image,
+        prepared.value()};
+
+    const auto encode =
+        [](std::uint64_t value) {
+            std::array<std::byte, 8> bytes{};
+            for (std::size_t index = 0;
+                 index < bytes.size();
+                 ++index) {
+                bytes[index] =
+                    static_cast<std::byte>(
+                        (value >> (index * 8U)) &
+                        0xffU);
+            }
+            return bytes;
+        };
+
+    const std::array patches{
+        astraea::execution::SceJumpSlotPatch{
+            .relocation_target =
+                GuestAddress{layout.data_base},
+            .gate_destination =
+                GuestAddress{layout.gate_base},
+            .gate_slot = 0,
+            .function_id =
+                astraea::execution::
+                    kSyntheticTestWriteId,
+            .bytes = encode(layout.gate_base),
+            .raw_addend = std::int64_t{-3},
+        },
+        astraea::execution::SceJumpSlotPatch{
+            .relocation_target =
+                GuestAddress{
+                    layout.data_base + 8U},
+            .gate_destination =
+                GuestAddress{
+                    layout.gate_base +
+                    astraea::execution::
+                        kSyntheticGateStride},
+            .gate_slot = 1,
+            .function_id =
+                astraea::execution::
+                    kSyntheticTestExitId,
+            .bytes =
+                encode(
+                    layout.gate_base +
+                    astraea::execution::
+                        kSyntheticGateStride),
+            .raw_addend = std::int64_t{7},
+        },
+    };
+
+    const auto applied =
+        astraea::execution::
+            apply_synthetic_jump_slot_patches(
+                patches,
+                memory);
+
+    REQUIRE(applied.has_value());
+    REQUIRE(applied->size() == 2);
+    REQUIRE(
+        applied->at(0).relocation_target ==
+        patches[0].relocation_target);
+    REQUIRE(
+        applied->at(1).relocation_target ==
+        patches[1].relocation_target);
+    REQUIRE(applied->at(0).gate_slot == 0);
+    REQUIRE(applied->at(1).gate_slot == 1);
+
+    std::array<std::byte, 8> first{};
+    std::array<std::byte, 8> second{};
+    REQUIRE(
+        memory.read(
+            GuestAddress{layout.data_base},
+            first)
+            .has_value());
+    REQUIRE(
+        memory.read(
+            GuestAddress{
+                layout.data_base + 8U},
+            second)
+            .has_value());
+    REQUIRE(first == patches[0].bytes);
+    REQUIRE(second == patches[1].bytes);
+}
+
+TEST_CASE(
+    "batch JUMP_SLOT failure reports partial application without rollback",
+    "[execution][sce-jump-slot-apply][batch]") {
+    constexpr auto kRead =
+        static_cast<std::uint8_t>(
+            GuestPermission::read);
+    constexpr auto kWrite =
+        static_cast<std::uint8_t>(
+            GuestPermission::write);
+
+    auto layout =
+        make_layout(
+            std::vector<std::byte>{
+                std::byte{0x0f},
+                std::byte{0x0b},
+            },
+            std::vector<std::byte>(
+                8,
+                std::byte{0}),
+            permissions(kRead | kWrite));
+    auto prepared =
+        astraea::execution::
+            prepare_linux_guest_memory(
+                layout.image);
+    REQUIRE(prepared.has_value());
+    GuestMemoryAccess memory{
+        layout.image,
+        prepared.value()};
+
+    const std::array<std::byte, 8> first_bytes{
+        std::byte{0x11},
+        std::byte{0x22},
+        std::byte{0x33},
+        std::byte{0x44},
+        std::byte{0x55},
+        std::byte{0x66},
+        std::byte{0x77},
+        std::byte{0x88},
+    };
+    const std::array patches{
+        astraea::execution::SceJumpSlotPatch{
+            .relocation_target =
+                GuestAddress{layout.data_base},
+            .gate_destination =
+                GuestAddress{layout.gate_base},
+            .gate_slot = 0,
+            .function_id =
+                astraea::execution::
+                    kSyntheticTestWriteId,
+            .bytes = first_bytes,
+            .raw_addend = std::nullopt,
+        },
+        astraea::execution::SceJumpSlotPatch{
+            .relocation_target =
+                GuestAddress{layout.gate_base},
+            .gate_destination =
+                GuestAddress{
+                    layout.gate_base +
+                    astraea::execution::
+                        kSyntheticGateStride},
+            .gate_slot = 1,
+            .function_id =
+                astraea::execution::
+                    kSyntheticTestExitId,
+            .bytes = {},
+            .raw_addend = std::nullopt,
+        },
+    };
+
+    const auto applied =
+        astraea::execution::
+            apply_synthetic_jump_slot_patches(
+                patches,
+                memory);
+
+    REQUIRE_FALSE(applied.has_value());
+    REQUIRE(
+        applied.error().code ==
+        astraea::execution::
+            SceJumpSlotApplyBatchErrorCode::
+                apply_failure);
+    REQUIRE(applied.error().patch_index == 1);
+    REQUIRE(applied.error().patch_count == 2);
+    REQUIRE(applied.error().applied_count == 1);
+    REQUIRE(applied.error().memory_error.has_value());
+    REQUIRE(
+        applied.error().memory_error->code ==
+        GuestMemoryErrorCode::
+            guest_memory_unmapped);
+
+    std::array<std::byte, 8> read_back{};
+    REQUIRE(
+        memory.read(
+            GuestAddress{layout.data_base},
+            read_back)
+            .has_value());
+    REQUIRE(read_back == first_bytes);
 }
 
 #endif
