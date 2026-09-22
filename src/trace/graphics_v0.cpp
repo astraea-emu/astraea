@@ -398,6 +398,21 @@ namespace {
     return "linear_fallthrough";
 }
 
+[[nodiscard]] std::string shader_branch_decision_kind_text(
+    astraea::graphics::ShaderBranchDecisionKind kind) {
+    using Kind =
+        astraea::graphics::ShaderBranchDecisionKind;
+
+    switch (kind) {
+    case Kind::unconditional:
+        return "unconditional";
+    case Kind::conditional:
+        return "conditional";
+    }
+
+    return "unconditional";
+}
+
 [[nodiscard]] std::uint64_t shader_scalar_write_width_bits(
     astraea::graphics::ShaderScalarWriteWidth width) noexcept {
     switch (width) {
@@ -1182,6 +1197,62 @@ trace_shader_scalar_execution_v0(
                 .id = event_id,
                 .subsystem = "shader.execute",
                 .type = "scalar_write",
+                .guest = std::nullopt,
+                .stable = std::move(stable),
+                .diagnostics = {},
+            });
+    } catch (const std::bad_alloc&) {
+        return GraphicsTraceEventResultV0::failure(
+            adapter_error(
+                GraphicsTraceAdapterErrorCodeV0::
+                    host_allocation_failure));
+    } catch (const std::length_error&) {
+        return GraphicsTraceEventResultV0::failure(
+            adapter_error(
+                GraphicsTraceAdapterErrorCodeV0::
+                    host_allocation_failure));
+    }
+}
+
+GraphicsTraceEventResultV0
+trace_shader_branch_decision_v0(
+    std::uint64_t event_id,
+    const astraea::graphics::ShaderBranchDecision&
+        decision) {
+    try {
+        std::vector<TraceFieldV0> stable{
+            text_field(
+                "kind",
+                shader_branch_decision_kind_text(
+                    decision.kind)),
+        };
+
+        if (decision.condition.has_value()) {
+            stable.push_back(
+                text_field(
+                    "condition",
+                    shader_ir_branch_condition_text(
+                        decision.condition.value())));
+        }
+
+        stable.push_back(
+            text_field(
+                "byte_delta",
+                std::to_string(
+                    decision.byte_delta)));
+        stable.push_back(
+            TraceFieldV0{
+                .name = "taken",
+                .value =
+                    TraceValueV0{
+                        decision.taken},
+            });
+
+        return GraphicsTraceEventResultV0::success(
+            TraceEventV0{
+                .id = event_id,
+                .subsystem = "shader.execute",
+                .type = "branch_decision",
                 .guest = std::nullopt,
                 .stable = std::move(stable),
                 .diagnostics = {},
