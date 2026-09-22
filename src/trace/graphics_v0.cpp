@@ -197,6 +197,9 @@ namespace {
         Rdna2InstructionKind::s_cbranch_execnz:
         return "s_cbranch_execnz";
     case astraea::graphics::
+        Rdna2InstructionKind::s_barrier:
+        return "s_barrier";
+    case astraea::graphics::
         Rdna2InstructionKind::unknown_sopp_opcode:
         return "unknown_sopp_opcode";
     case astraea::graphics::
@@ -605,6 +608,12 @@ trace_shader_ir_v0(
                             "byte_delta",
                             std::to_string(
                                 operation.byte_delta)));
+                } else if constexpr (
+                    std::is_same_v<
+                        Operation,
+                        astraea::graphics::
+                            ShaderIrWorkgroupBarrier>) {
+                    event_type = "workgroup_barrier";
                 } else if constexpr (
                     std::is_same_v<
                         Operation,
