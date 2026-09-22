@@ -97,14 +97,16 @@ std::string validate_and_disassemble(
 
     const bool valid =
         tools.Validate(module.words);
-    REQUIRE_INFO(valid, diagnostics);
+    INFO(diagnostics);
+    REQUIRE(valid);
 
     std::string text;
     const bool disassembled =
         tools.Disassemble(
             module.words,
             &text);
-    REQUIRE_INFO(disassembled, diagnostics);
+    INFO(diagnostics);
+    REQUIRE(disassembled);
     return text;
 }
 
