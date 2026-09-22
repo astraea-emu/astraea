@@ -52,14 +52,14 @@ namespace {
     std::size_t next_block_index,
     std::size_t completed_block_count,
     std::size_t completed_emission_count,
-    std::optional<ShaderScalarBlockExecutionError> block_error =
-        std::nullopt) noexcept {
+    std::optional<ShaderScalarBlockExecutionError>
+        underlying_block_error = std::nullopt) noexcept {
     return ShaderScalarProgramExecutionError{
         .code = code,
         .next_block_index = next_block_index,
         .completed_block_count = completed_block_count,
         .completed_emission_count = completed_emission_count,
-        .block_error = std::move(block_error),
+        .block_error = std::move(underlying_block_error),
     };
 }
 
