@@ -199,6 +199,7 @@ TEST_CASE(
                         Rdna2InstructionKind::s_branch,
                 .sopp = std::nullopt,
                 .sop1 = std::nullopt,
+                .vop1 = std::nullopt,
             });
 
     REQUIRE(
