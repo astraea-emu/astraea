@@ -1,9 +1,9 @@
 # Project Status
 
 **Milestone:** M4 — Platform/HLE expansion  
-**State:** Imported-function relocation orchestration baseline complete; AMD-documented RDNA2 SOPP conditional-branch slice in progress  
+**State:** Imported-function relocation orchestration baseline complete; AMD-documented RDNA2 S_BARRIER slice in progress  
 **Repository:** astraea-emu/astraea  
-**Active branch:** `feat/m4-rdna2-conditional-sopp`
+**Active branch:** `feat/m4-rdna2-s-barrier`
 
 ## Complete
 
@@ -41,6 +41,7 @@
 - Table-kind-neutral ordered exact-SCE batch import planning with PLT compatibility wrapper (#79).
 - Ordered validated x86-64 GLOB_DAT batch patch construction with explicit gate slots (#81).
 - Ordered non-atomic GLOB_DAT batch application with indexed partial-failure reporting (#83).
+- AMD-documented RDNA2 SOPP conditional branches 4-9 lowered to typed Shader IR and Trace semantics (#85).
 - Public five-gate CI remains the merge requirement:
   - Linux x64
   - Windows x64
@@ -50,9 +51,9 @@
 
 ## Current frontier
 
-1. #85 — decode AMD-documented RDNA2 SOPP conditional branches 4-9 and lower them to typed conditional Shader IR — in progress on this branch.
-2. Trace v0 must expose branch condition/displacement as stable semantics while raw instruction bytes remain diagnostic provenance.
-3. Sony shader-container/launch semantics and `R_X86_64_RELATIVE` remain explicitly deferred.
+1. #87 — classify AMD-documented RDNA2 SOPP opcode 10 S_BARRIER and lower it to a typed workgroup-barrier Shader IR marker — in progress on this branch.
+2. The barrier is semantic/trace data only; wave scheduling, barrier execution, SPIR-V/Vulkan lowering, and Sony launch semantics remain unsupported.
+3. S_WAITCNT and later SOPP synchronization/control operations remain separately scoped; `R_X86_64_RELATIVE` remains deferred.
 
 ## SCE metadata boundary
 
@@ -111,6 +112,6 @@ PS5-specific assumptions require documented evidence.
 
 ## Next action
 
-Validate #85 across the five-gate matrix. Keep the slice generic-RDNA2 only:
-classify SOPP opcodes 4-9, lower condition plus signed relative byte delta, preserve
-raw provenance, and leave wave execution / Sony shader ABI / SPIR-V behavior out.
+Validate #87 across the five-gate matrix. Keep the slice generic-RDNA2 only:
+classify opcode 10, lower a workgroup-barrier semantic marker, preserve raw provenance,
+and leave barrier execution / Sony shader ABI / SPIR-V / Vulkan behavior out.
