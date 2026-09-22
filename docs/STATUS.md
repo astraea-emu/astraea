@@ -1,9 +1,9 @@
 # Project Status
 
 **Milestone:** M4 — Platform/HLE expansion  
-**State:** First owned PS5/SCE-oriented synthetic prototype and multi-import proof complete; batch JUMP_SLOT application in progress  
+**State:** Multi-import JUMP_SLOT path productionized; evidence-backed x86-64 GLOB_DAT gate patching in progress  
 **Repository:** astraea-emu/astraea  
-**Active branch:** `feat/m4-sce-jump-slot-batch-apply`
+**Active branch:** `feat/m4-sce-glob-dat-gate-patch`
 
 ## Complete
 
@@ -34,6 +34,7 @@
 - Two exact SCE imports executed end to end through write → HLE resume → exit (#63).
 - Ordered exact SCE PLT import batch planning with indexed typed failures (#66).
 - Ordered validated x86-64 JUMP_SLOT batch patch construction with explicit gate slots (#68).
+- Ordered non-atomic JUMP_SLOT batch application with indexed partial-failure reporting (#70).
 - Public five-gate CI remains the merge requirement:
   - Linux x64
   - Windows x64
@@ -43,8 +44,8 @@
 
 ## Current frontier
 
-1. #70 — batch apply validated JUMP_SLOT patches through GuestMemoryAccess with indexed partial-application reporting — in progress on this branch.
-2. Batch application is explicitly ordered and non-atomic; failure reports how many earlier writes completed.
+1. #72 — add the evidence-backed x86-64 R_X86_64_GLOB_DAT imported-function gate patch builder — in progress on this branch.
+2. GLOB_DAT is limited to general RELA type 6 and explicit exact-SCE import → HLE gate resolution; raw addend remains evidence only.
 3. `R_X86_64_RELATIVE` remains deferred until Astraea has an explicit, evidence-backed image load-base / load-bias contract.
 
 ## SCE metadata boundary
@@ -104,6 +105,7 @@ PS5-specific assumptions require documented evidence.
 
 ## Next action
 
-Validate #70 across the five-gate matrix. Batch application must reserve result
-storage before mutation, preserve ordered apply results, report the first exact
-GuestMemoryError with patch/applied counts, and document that prior writes remain.
+Validate #72 across the five-gate matrix. The GLOB_DAT builder must require
+an existing general RELA plan with raw type 6, an explicitly selected matching
+HLE gate, emit exactly S as an 8-byte little-endian value, and never apply the
+raw addend or broaden into arbitrary data-symbol or load-bias semantics.
