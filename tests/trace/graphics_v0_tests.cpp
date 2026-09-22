@@ -705,3 +705,28 @@ TEST_CASE(
         diff->first_divergence->field_name ==
         std::optional<std::string>{"destination_sgpr"});
 }
+
+
+TEST_CASE(
+    "S_MOV_B32 literal source remains typed unsupported in Shader IR trace",
+    "[trace][graphics][v0][sop1][mov]") {
+    const auto ir =
+        astraea::graphics::lower_rdna2_to_shader_ir(
+            decode_one(make_sop1(3, 5, 255)));
+
+    auto event =
+        astraea::trace::trace_shader_ir_v0(
+            100,
+            ir);
+
+    REQUIRE(event.has_value());
+    REQUIRE(event->subsystem == "shader.ir");
+    REQUIRE(event->type == "unsupported");
+    REQUIRE(event->stable.size() == 1);
+    REQUIRE(event->stable[0].name == "reason");
+    REQUIRE(
+        std::get<std::string>(
+            event->stable[0].value) ==
+        "unsupported_scalar_operand");
+    REQUIRE(event->diagnostics.size() == 2);
+}
