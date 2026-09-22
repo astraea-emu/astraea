@@ -71,9 +71,9 @@ The program prefix must fit wholly before the trailer and be an integral
 number of 32-bit dwords before Astraea exposes it to the generic RDNA2
 decoder.
 
-## Deliberately *not* encoded yet
+## Deliberately *not* encoded by the #134 slice
 
-The current parser does not assign semantics to:
+At the #134 merge, the parser did not assign semantics to:
 
 - ELF `e_type`, OSABI, ABI version, or AGC header version values beyond
   preserving them where useful;
@@ -89,6 +89,12 @@ The current parser does not assign semantics to:
 
 Those fields require stronger public evidence or controlled observation before
 they become emulator behavior.
+
+Issue #138 later adds only the independently evidenced context/shader
+register-list envelope (header-relative offsets, counts, and 8-byte register
+records) in the canonical runtime header/text parser. Resource tables,
+descriptors, prepared pointers, and the other unknown fields remain outside
+that scope.
 
 ## Clean-room implementation rule
 
