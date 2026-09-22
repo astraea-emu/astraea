@@ -294,6 +294,8 @@ std::uint32_t patch_u32(
         patch.bytes);
 }
 
+#if defined(__linux__) && defined(__x86_64__) && defined(MAP_FIXED_NOREPLACE)
+
 GuestRange range(
     std::uint64_t base,
     std::uint64_t size) {
@@ -304,8 +306,6 @@ GuestRange range(
     REQUIRE(result.has_value());
     return result.value();
 }
-
-#if defined(__linux__) && defined(__x86_64__) && defined(MAP_FIXED_NOREPLACE)
 
 GuestPermissions permissions(std::uint8_t bits) {
     auto result =
