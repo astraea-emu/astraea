@@ -3,6 +3,7 @@
 #include <astraea/graphics/rdna2_decoder.hpp>
 #include <astraea/graphics/shader_cfg.hpp>
 #include <astraea/graphics/shader_ir.hpp>
+#include <astraea/graphics/shader_scalar_execution.hpp>
 #include <astraea/trace/diff_v0.hpp>
 #include <astraea/trace/graphics_v0.hpp>
 #include <astraea/trace/v0.hpp>
@@ -1601,4 +1602,173 @@ TEST_CASE(
     REQUIRE(
         diff->first_divergence->field_name ==
         std::optional<std::string>{"kind"});
+}
+
+
+TEST_CASE(
+    "scalar execution Trace v0 exposes 32-bit SGPR write semantics",
+    "[trace][graphics][v0][shader-execution][scalar]") {
+    astraea::graphics::ShaderScalarState state{};
+    state.sgprs[2] = 0xdeadbeefU;
+
+    const astraea::graphics::ShaderIrOperation operation =
+        astraea::graphics::ShaderIrScalarMove32{
+            .destination =
+                astraea::graphics::ShaderIrSgpr{
+                    .index = 5,
+                },
+            .source =
+                astraea::graphics::ShaderIrSgpr{
+                    .index = 2,
+                },
+        };
+
+    const auto execution =
+        astraea::graphics::
+            execute_shader_scalar_operation(
+                operation,
+                state);
+    REQUIRE(execution.has_value());
+
+    auto event =
+        astraea::trace::
+            trace_shader_scalar_execution_v0(
+                124,
+                execution.value());
+
+    REQUIRE(event.has_value());
+    REQUIRE(event->subsystem == "shader.execute");
+    REQUIRE(event->type == "scalar_write");
+    REQUIRE_FALSE(event->guest.has_value());
+    REQUIRE(event->stable.size() == 3);
+    REQUIRE(
+        event->stable[0].name ==
+        "destination_first_sgpr");
+    REQUIRE(
+        std::get<std::uint64_t>(
+            event->stable[0].value) == 5);
+    REQUIRE(
+        event->stable[1].name ==
+        "write_width_bits");
+    REQUIRE(
+        std::get<std::uint64_t>(
+            event->stable[1].value) == 32);
+    REQUIRE(
+        event->stable[2].name ==
+        "written_value0_bits");
+    REQUIRE(
+        std::get<std::uint64_t>(
+            event->stable[2].value) ==
+        0xdeadbeefULL);
+    REQUIRE(event->diagnostics.empty());
+}
+
+TEST_CASE(
+    "scalar execution Trace v0 exposes both 64-bit SGPR dwords",
+    "[trace][graphics][v0][shader-execution][scalar]") {
+    astraea::graphics::ShaderScalarState state{};
+    state.sgprs[2] = 0x01234567U;
+    state.sgprs[3] = 0x89abcdefU;
+
+    const astraea::graphics::ShaderIrOperation operation =
+        astraea::graphics::ShaderIrScalarMove64{
+            .destination =
+                astraea::graphics::ShaderIrSgprPair{
+                    .first_index = 8,
+                },
+            .source =
+                astraea::graphics::ShaderIrSgprPair{
+                    .first_index = 2,
+                },
+        };
+
+    const auto execution =
+        astraea::graphics::
+            execute_shader_scalar_operation(
+                operation,
+                state);
+    REQUIRE(execution.has_value());
+
+    auto event =
+        astraea::trace::
+            trace_shader_scalar_execution_v0(
+                125,
+                execution.value());
+
+    REQUIRE(event.has_value());
+    REQUIRE(event->stable.size() == 4);
+    REQUIRE(
+        std::get<std::uint64_t>(
+            event->stable[0].value) == 8);
+    REQUIRE(
+        std::get<std::uint64_t>(
+            event->stable[1].value) == 64);
+    REQUIRE(
+        std::get<std::uint64_t>(
+            event->stable[2].value) ==
+        0x01234567ULL);
+    REQUIRE(
+        event->stable[3].name ==
+        "written_value1_bits");
+    REQUIRE(
+        std::get<std::uint64_t>(
+            event->stable[3].value) ==
+        0x89abcdefULL);
+}
+
+TEST_CASE(
+    "scalar execution write value participates in trace divergence",
+    "[trace][graphics][v0][shader-execution][scalar][diff]") {
+    const auto make_event =
+        [](std::uint32_t source_value) {
+            astraea::graphics::ShaderScalarState state{};
+            state.sgprs[2] = source_value;
+
+            const astraea::graphics::ShaderIrOperation
+                operation =
+                    astraea::graphics::
+                        ShaderIrScalarMove32{
+                            .destination =
+                                astraea::graphics::
+                                    ShaderIrSgpr{
+                                        .index = 5,
+                                    },
+                            .source =
+                                astraea::graphics::
+                                    ShaderIrSgpr{
+                                        .index = 2,
+                                    },
+                        };
+
+            const auto execution =
+                astraea::graphics::
+                    execute_shader_scalar_operation(
+                        operation,
+                        state);
+            REQUIRE(execution.has_value());
+
+            auto event =
+                astraea::trace::
+                    trace_shader_scalar_execution_v0(
+                        126,
+                        execution.value());
+            REQUIRE(event.has_value());
+            return std::move(event).value();
+        };
+
+    auto diff =
+        astraea::trace::diff_trace_v0(
+            document(make_event(0x11111111U)),
+            document(make_event(0x22222222U)));
+
+    REQUIRE(diff.has_value());
+    REQUIRE_FALSE(diff->equivalent);
+    REQUIRE(
+        diff->first_divergence->kind ==
+        astraea::trace::TraceDivergenceKindV0::
+            stable_field_value_mismatch);
+    REQUIRE(
+        diff->first_divergence->field_name ==
+        std::optional<std::string>{
+            "written_value0_bits"});
 }
