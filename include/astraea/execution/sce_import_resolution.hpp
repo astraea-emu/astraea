@@ -52,16 +52,16 @@ using SceImportResolutionPlanResult =
         SceImportResolutionPlan,
         SceImportResolutionPlanError>;
 
-enum class ScePltImportPlanErrorCode {
+enum class SceImportBatchPlanErrorCode {
     relocation_failure,
     symbol_failure,
     resolution_failure,
     host_allocation_failure,
 };
 
-struct ScePltImportPlanError {
-    ScePltImportPlanErrorCode code =
-        ScePltImportPlanErrorCode::host_allocation_failure;
+struct SceImportBatchPlanError {
+    SceImportBatchPlanErrorCode code =
+        SceImportBatchPlanErrorCode::host_allocation_failure;
     std::uint64_t relocation_index = 0;
     std::optional<astraea::loader::DynamicRelocationError>
         relocation_error;
@@ -71,10 +71,18 @@ struct ScePltImportPlanError {
         resolution_error;
 };
 
-using ScePltImportPlansResult =
+using SceImportBatchPlansResult =
     astraea::core::Result<
         std::vector<SceImportResolutionPlan>,
-        ScePltImportPlanError>;
+        SceImportBatchPlanError>;
+
+// Compatibility aliases for the original PLT-specific API.
+using ScePltImportPlanErrorCode =
+    SceImportBatchPlanErrorCode;
+using ScePltImportPlanError =
+    SceImportBatchPlanError;
+using ScePltImportPlansResult =
+    SceImportBatchPlansResult;
 
 // Composes already-validated loader/HLE data without applying relocation
 // semantics. Relocation type and addend are preserved as raw evidence only.
@@ -84,10 +92,20 @@ plan_sce_import_resolution(
     const astraea::loader::SceDynamicSymbolRecord& symbol,
     const SceImportBindingRegistry& bindings);
 
-// Plans every already-validated PLT relocation in table order. This composes
+// Plans every already-validated relocation in table order. This composes
 // parsing, exact SCE symbol materialization, and exact HLE binding only.
+// Table kind, relocation type, and addend are preserved as evidence.
 // Relocation semantics, gate selection, patch construction, and guest-memory
 // writes remain separate later stages.
+[[nodiscard]] SceImportBatchPlansResult
+plan_sce_imports(
+    const astraea::loader::DynamicRelocationTableDescriptor& relocations,
+    const astraea::loader::DynamicSymbolTableDescriptor& symbols,
+    const astraea::loader::DynamicStringTableDescriptor& strings,
+    const astraea::memory::InitializedImageView& image_view,
+    const SceImportBindingRegistry& bindings);
+
+// Compatibility wrapper for the original PLT-oriented entry point.
 [[nodiscard]] ScePltImportPlansResult
 plan_sce_plt_imports(
     const astraea::loader::DynamicRelocationTableDescriptor& relocations,
