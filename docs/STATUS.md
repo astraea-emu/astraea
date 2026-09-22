@@ -1,9 +1,9 @@
 # Project Status
 
-**Integration gate:** V1 — Guest-created shader object  
-**State:** V1 end-to-end sceAgcCreateShader integration active  
+**Integration gate:** V2 — Host shader generation  
+**State:** V1 complete; first validated SPIR-V backend slice active  
 **Repository:** astraea-emu/astraea  
-**Active branch:** `feat/v1-sce-agc-create-shader-e2e`
+**Active branch:** `feat/v2-spirv-vector-probe`
 
 ## Complete
 
@@ -69,6 +69,7 @@
 - Canonical guest `sceAgcCreateShader` call materialization and backend-neutral guest-memory validation are complete (#140/#141).
 - Corrected self-relative AGC context/shader register-list addressing is complete and five-gate validated (#143/#144).
 - Evidence-backed version-0x18 pixel shader-object preparation and all-write preflight/application are complete and five-gate validated (#145/#147).
+- Owned SCE-profile guest execution of the real `sceAgcCreateShader` import through generic HLE dispatch, guest shader-object preparation, `RAX=0` resume, and controlled exit is complete and five-gate validated (#148/#149). V1 is complete.
 - Public five-gate CI remains the merge requirement:
   - Linux x64
   - Windows x64
@@ -78,13 +79,12 @@
 
 ## Current frontier
 
-1. #140/#141 are complete: the real three-pointer `sceAgcCreateShader` ABI is safely materialized from guest memory.
-2. #143/#144 are complete: raw non-empty context/shader register lists use corrected field-relative addressing.
-3. #145/#147 are complete: Astraea prepares and atomically applies one evidence-backed version-0x18 pixel AGC guest shader-object profile.
-4. #148 is active: execute the exact `sceAgcCreateShader` import from an owned SCE-profile guest, pass RDI/RSI/RDX through generic HLE dispatch, prepare the guest shader object, return `RAX=0`, resume guest code, and reach controlled exit.
-5. The owned probe uses the exact public NID `f3dg2CSgRKY`. Its `#A#B` long-form suffix is intentionally scoped to a fixture where `libSceAgc` is the first/only imported library/module; those tokens are per-image IDs, not global library names.
-6. #148 does not add resource descriptor interpretation, command submission, new RDNA2 instructions, SPIR-V, or Vulkan.
-7. When #148 merges with all five gates green, V1 is complete. V2 starts immediately with the smallest workload-driven Shader IR -> validated SPIR-V proof.
+1. V1 is complete through #148/#149: an owned SCE-profile guest resolves the exact `sceAgcCreateShader` identity, enters generic HLE dispatch, prepares the evidence-scoped AGC pixel shader object, returns success in RAX, resumes guest code, and exits under control.
+2. #150 is active: lower only the straight-line existing Shader IR vector subset (NOP, V_MOV_B32, exact-profile V_ADD_F32, END) to a deterministic Vulkan-valid SPIR-V compute probe.
+3. The probe ABI is explicitly a register-state compiler/execution harness, not a claim that real PS5 VGPR state is represented by a Vulkan storage buffer.
+4. SPIRV-Headers is pinned to `29981f65241605e08b0ede4cfeb999fe3b723c6a`; SPIRV-Tools is pinned to release `v2026.3` and used through public APIs for Vulkan 1.3 validation/disassembly.
+5. V2 does not call Vulkan, map real AGC descriptors/resources, lower branches/scalar state/EXEC masks, broaden floating-point semantics, or add RDNA2 instructions.
+6. After #150, V3 begins with one headless Vulkan compute execution of the exact probe buffer contract and a bit-for-bit comparison against Astraea's existing interpreter fixture.
 
 ## SCE metadata boundary
 
@@ -143,22 +143,27 @@ PS5-specific assumptions require documented evidence.
 
 ## Next action
 
-Finish #148 on `feat/v1-sce-agc-create-shader-e2e`.
+Finish #150 on `feat/v2-spirv-vector-probe`.
 
-The exit criterion is a real guest execution proof:
+The first host-shader profile is deliberately narrow:
 
-`owned SCE-profile ELF -> exact f3dg2CSgRKY import -> JUMP_SLOT host gate -> generic HLE dispatch -> sceAgcCreateShader plan/preparation/apply -> RAX=0 -> guest resume -> controlled exit`.
+- GLCompute entry point targeting Vulkan 1.3 / SPIR-V 1.6;
+- wave32 or wave64 local size;
+- descriptor set 0 / binding 0 storage buffer of uint32 words;
+- flattened probe layout `vgpr_index * wave_size + lane`;
+- local invocation index as the lane selector;
+- V_MOV_B32 as exact uint32 load/store;
+- V_ADD_F32 as uint32 load -> float bitcast -> OpFAdd -> uint32 bitcast -> store;
+- all lanes active; partial EXEC is unsupported;
+- exactly one terminal END;
+- every unsupported existing Shader IR operation fails explicitly.
 
-The test must also preserve negative-path evidence:
-- malformed raw AGC state reports nested parser provenance;
-- unsupported preparation profile reports the exact preparation failure;
-- unwritable publication/output memory fails during preflight with no partial header mutation;
-- an exact-NID symbol with mismatched library/module identity remains unresolved.
+Production code emits deterministic binary words directly using public SPIRV-Headers enums. Tests validate and disassemble with public SPIRV-Tools APIs under `SPV_ENV_VULKAN_1_3`.
 
 Merge only the exact immutable PR head after Linux x64, Windows x64, macOS ARM64, Linux ASan+UBSan, and Linux Clang fuzz smoke are green.
 
-After merge:
-1. mark V1 complete;
-2. open the first V2 issue;
-3. lower only the smallest already-needed Shader IR subset to valid SPIR-V;
-4. validate emitted modules with SPIR-V Tools and compare semantics against Astraea's existing interpreter/oracle before introducing Vulkan execution.
+After merge, V3 is the next dependency:
+
+`same controlled vector Shader IR -> V2 SPIR-V -> headless Vulkan compute -> readback -> bit-for-bit comparison with Astraea interpreter state`.
+
+Do not pull broader shader/resource/command semantics forward until that concrete workload requires them.
