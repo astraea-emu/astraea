@@ -1,9 +1,9 @@
 # Project Status
 
 **Milestone:** M4 — Platform/HLE expansion  
-**State:** JUMP_SLOT and GLOB_DAT owned import paths validated end to end; M4 platform/HLE expansion continues from this baseline  
+**State:** JUMP_SLOT and GLOB_DAT owned import paths validated end to end; table-kind-neutral exact SCE batch import planning in progress  
 **Repository:** astraea-emu/astraea  
-**Active branch:** `main`
+**Active branch:** `feat/m4-sce-relocation-batch-plan`
 
 ## Complete
 
@@ -47,8 +47,8 @@
 
 ## Current frontier
 
-1. The owned JUMP_SLOT and general-RELA GLOB_DAT imported-function paths are both validated end to end on `main`.
-2. The next M4 slice should be selected from an evidence-backed unsupported platform/HLE or graphics dependency, not by broadening relocation semantics speculatively.
+1. #79 — generalize ordered exact-SCE batch import planning across validated relocation-table kinds — in progress on this branch.
+2. The planner must preserve table kind/raw relocation evidence and remain semantics-free; the PLT entry point stays as a compatibility wrapper.
 3. `R_X86_64_RELATIVE` remains deferred until Astraea has an explicit, evidence-backed image load-base / load-bias contract.
 
 ## SCE metadata boundary
@@ -108,6 +108,6 @@ PS5-specific assumptions require documented evidence.
 
 ## Next action
 
-Select the next post-GLOB_DAT M4 slice from the first unsupported, evidence-backed
-platform/HLE or graphics dependency. Preserve exact provenance and typed failures,
-and keep R_X86_64_RELATIVE deferred until the image load-base contract is explicit.
+Validate #79 across the five-gate matrix. The generic batch planner must preserve
+relocation table kind, raw type/addend, exact SCE identity and table order while
+adding no relocation semantics, gate selection, patching, or guest-memory writes.
