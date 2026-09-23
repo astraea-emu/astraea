@@ -1,11 +1,13 @@
 #pragma once
 
+#include <array>
 #include <compare>
 #include <cstddef>
 #include <cstdint>
 #include <optional>
 
 #include <astraea/core/result.hpp>
+#include <astraea/execution/guest_memory.hpp>
 #include <astraea/execution/hle.hpp>
 #include <astraea/execution/sce_agc_shader_registry.hpp>
 #include <astraea/graphics/agc_shader_binary.hpp>
@@ -114,5 +116,125 @@ using SceAgcLinkShadersPlanResult =
 plan_sce_agc_link_shaders(
     const HleCall& call,
     const CreatedAgcShaderRegistry& shader_registry) noexcept;
+
+inline constexpr std::size_t
+    kSceAgcLinkShadersMeasuredInterpolantRecordCount = 32;
+inline constexpr std::size_t
+    kSceAgcLinkShadersMeasuredInterpolantByteCount =
+        kSceAgcLinkShadersMeasuredInterpolantRecordCount *
+        kSceAgcLinkShadersRegisterRecordSize;
+inline constexpr std::uint64_t
+    kSceAgcLinkShadersUnmeasuredContextByteOffset = 0x100U;
+inline constexpr std::uint64_t
+    kSceAgcLinkShadersMeasuredRoutingByteOffset = 0x108U;
+
+struct SceAgcLinkShadersRegisterRecord {
+    std::uint32_t offset = 0;
+    std::uint32_t value = 0;
+
+    auto operator<=>(
+        const SceAgcLinkShadersRegisterRecord&) const = default;
+};
+
+enum class SceAgcLinkShadersOutputCompleteness {
+    measured_partial,
+};
+
+enum class SceAgcLinkShadersMeasuredPatchKind {
+    interpolant_table,
+    gs_out_primitive_type,
+};
+
+struct SceAgcLinkShadersMeasuredOutputPlan {
+    SceAgcLinkShadersOutputCompleteness completeness =
+        SceAgcLinkShadersOutputCompleteness::measured_partial;
+    astraea::memory::GuestAddress interpolant_output_address;
+    astraea::memory::GuestRange interpolant_output_range;
+    astraea::memory::GuestAddress routing_output_address;
+    astraea::memory::GuestRange routing_output_range;
+    astraea::memory::GuestAddress preserved_user_config_address;
+    std::array<
+        SceAgcLinkShadersRegisterRecord,
+        kSceAgcLinkShadersMeasuredInterpolantRecordCount>
+        interpolant_records{};
+    SceAgcLinkShadersRegisterRecord routing_record;
+
+    auto operator<=>(
+        const SceAgcLinkShadersMeasuredOutputPlan&) const = default;
+};
+
+enum class SceAgcLinkShadersMeasuredOutputPlanErrorCode {
+    measured_output_address_overflow,
+};
+
+struct SceAgcLinkShadersMeasuredOutputPlanError {
+    SceAgcLinkShadersMeasuredOutputPlanErrorCode code =
+        SceAgcLinkShadersMeasuredOutputPlanErrorCode::
+            measured_output_address_overflow;
+    std::optional<astraea::memory::GuestAddress>
+        base_address;
+    std::uint64_t byte_offset = 0;
+
+    auto operator<=>(
+        const SceAgcLinkShadersMeasuredOutputPlanError&) const = default;
+};
+
+using SceAgcLinkShadersMeasuredOutputPlanResult =
+    astraea::core::Result<
+        SceAgcLinkShadersMeasuredOutputPlan,
+        SceAgcLinkShadersMeasuredOutputPlanError>;
+
+// Materializes only the currently measured LinkShaders output subset. The
+// context record at +0x100 and every user-config record remain intentionally
+// absent from this plan.
+[[nodiscard]] SceAgcLinkShadersMeasuredOutputPlanResult
+materialize_sce_agc_link_shaders_measured_output(
+    const SceAgcLinkShadersPlan& plan) noexcept;
+
+enum class SceAgcLinkShadersMeasuredApplyErrorCode {
+    guest_memory_preflight_failure,
+    guest_memory_write_failure,
+};
+
+struct SceAgcLinkShadersMeasuredApplyError {
+    SceAgcLinkShadersMeasuredApplyErrorCode code =
+        SceAgcLinkShadersMeasuredApplyErrorCode::
+            guest_memory_preflight_failure;
+    SceAgcLinkShadersMeasuredPatchKind patch_kind =
+        SceAgcLinkShadersMeasuredPatchKind::
+            interpolant_table;
+    std::size_t patch_index = 0;
+    std::size_t patch_count = 2;
+    std::size_t applied_patch_count = 0;
+    std::size_t applied_record_count = 0;
+    std::optional<GuestMemoryError> guest_memory_error;
+
+    auto operator<=>(
+        const SceAgcLinkShadersMeasuredApplyError&) const = default;
+};
+
+struct SceAgcLinkShadersMeasuredApplyReport {
+    SceAgcLinkShadersOutputCompleteness completeness =
+        SceAgcLinkShadersOutputCompleteness::measured_partial;
+    std::size_t applied_patch_count = 0;
+    std::size_t applied_context_record_count = 0;
+    std::size_t applied_user_config_record_count = 0;
+
+    auto operator<=>(
+        const SceAgcLinkShadersMeasuredApplyReport&) const = default;
+};
+
+using SceAgcLinkShadersMeasuredApplyResult =
+    astraea::core::Result<
+        SceAgcLinkShadersMeasuredApplyReport,
+        SceAgcLinkShadersMeasuredApplyError>;
+
+// Preflights both measured context write ranges before the first mutation.
+// The unmeasured context record at +0x100 and the entire user-config block are
+// never touched by this function.
+[[nodiscard]] SceAgcLinkShadersMeasuredApplyResult
+apply_sce_agc_link_shaders_measured_output(
+    const SceAgcLinkShadersMeasuredOutputPlan& plan,
+    const GuestMemoryAccess& guest_memory) noexcept;
 
 }  // namespace astraea::execution
