@@ -1,7 +1,9 @@
 #pragma once
 
 #include <compare>
+#include <cstdint>
 #include <variant>
+#include <vector>
 
 #include <astraea/graphics/packet.hpp>
 
@@ -18,8 +20,18 @@ struct GraphicsIrUnsupported {
     auto operator<=>(const GraphicsIrUnsupported&) const = default;
 };
 
+struct GraphicsIrShaderRegisterWriteRange {
+    std::uint16_t start_offset = 0;
+    std::vector<std::uint32_t> values;
+
+    auto operator<=>(const GraphicsIrShaderRegisterWriteRange&) const =
+        default;
+};
+
 using GraphicsIrOperation =
-    std::variant<GraphicsIrUnsupported>;
+    std::variant<
+        GraphicsIrUnsupported,
+        GraphicsIrShaderRegisterWriteRange>;
 
 struct GraphicsIrProvenance {
     RawPacket source_packet;

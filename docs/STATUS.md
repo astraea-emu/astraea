@@ -1,9 +1,9 @@
 # Project Status
 
 **Integration gate:** PS5 graphics frontend after V3  
-**State:** V1/V2/V3 proof chain complete; AGC submit capture complete; generic Type-3 framing active  
+**State:** V1/V2/V3 proof chain complete; AGC submit capture and Type-3 framing complete; SET_SH_REG Graphics IR active  
 **Repository:** astraea-emu/astraea  
-**Active branch:** `feat/ps5-frame-agc-dcb-type3`
+**Active branch:** `feat/ps5-pm4-set-sh-reg-ir`
 
 ## Complete
 
@@ -73,6 +73,7 @@
 - Deterministic Shader IR -> Vulkan-valid SPIR-V 1.6 register-state compute-probe lowering for NOP/V_MOV_B32/V_ADD_F32/END is complete and five-gate validated (#150/#151).
 - Headless Vulkan execution of that V2 probe is complete and five-gate validated (#152/#153); Linux CI forces Mesa Lavapipe and proves bit-for-bit readback equality with Astraea's existing interpreter. V3's first actual host-GPU semantic proof is complete.
 - Immutable `sceAgcDriverSubmitDcb` guest-memory capture is complete and five-gate validated (#154/#155): exact 16-byte descriptor plus bounded raw DCB stream, with no guest writes, PM4 decode, fake success, or Vulkan dispatch.
+- Generic AMD PM4 Type-3 framing of captured DCB streams is complete and five-gate validated (#156/#157), preserving opcode/control fields structurally and exact RawPacket provenance without assigning opcode behavior.
 - Public five-gate CI remains the merge requirement:
   - Linux x64
   - Windows x64
@@ -85,9 +86,10 @@
 1. V1 is complete through #148/#149.
 2. V2's first deterministic SPIR-V backend is complete through #150/#151.
 3. V3's first actual host-GPU proof is complete through #152/#153.
-4. #154/#155 are complete: Astraea can safely capture a real `sceAgcDriverSubmitDcb` descriptor and exact submitted DCB bytes without claiming execution.
-5. #156 is active: frame that captured byte stream using only the generic AMD PM4 Type-3 header/count contract, preserving exact RawPacket provenance and leaving opcode/low-control semantics uninterpreted.
-6. The stale pre-architecture PM4 branch is not being revived; current framing uses fresh evidence and the current packet/provenance model.
+4. #154/#155 capture a real SubmitDcb descriptor/stream without claiming execution.
+5. #156/#157 deterministically frame that stream as generic AMD PM4 Type-3 packets without opcode semantics.
+6. #158 is active: lower the workload-driven generic AMD SET_SH_REG packet (0x76) to typed Graphics IR as a consecutive relative shader-register write range.
+7. Stage identity, register names, resource meaning, persistent GPU state, submit success/resume, and Vulkan execution remain out of scope until later evidence-driven slices.
 
 ## SCE metadata boundary
 
@@ -146,14 +148,12 @@ PS5-specific assumptions require documented evidence.
 
 ## Next action
 
-Finish #156 on `feat/ps5-frame-agc-dcb-type3`.
+Finish #158 on `feat/ps5-pm4-set-sh-reg-ir`.
 
 The bounded proof is:
 
-`#154 raw DCB bytes -> deterministic generic AMD PM4 Type-3 extents -> exact RawPacket provenance`.
+`captured DCB -> Type-3 frame -> opcode 0x76 -> typed GraphicsIrShaderRegisterWriteRange`.
 
-Only header framing is in scope: type 3, 14-bit count, opcode field preservation, opaque low control bits, checked extent walking, and exact raw bytes.
+AMD/Linux evidence defines the generic opcode, relative shader-register window, and offset/value layout. The first profile requires the offset word's upper control bits to be zero rather than guessing their meaning.
 
-Do not classify opcodes, decode registers, recurse indirect buffers, build GPU state, return submit success, or invoke Vulkan in this slice.
-
-After merge, select the smallest packet semantic actually present in an Astraea-owned submission fixture and implement only that state/effect.
+Do not infer shader stage, register names, descriptors, draw behavior, or host Vulkan state. After #158, add only the smallest persistent shader-register state application required to connect prepared AGC shader state to the existing shader/Vulkan path.
