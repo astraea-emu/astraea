@@ -1,9 +1,9 @@
 # Project Status
 
-**Integration gate:** PS5 graphics frontend after V3  
-**State:** V1/V2/V3 proof chain complete; created-shader registry complete; transactional sceAgcCreateShader registration active  
+**Integration gate:** V3 — submitted guest GPU state/resources -> Vulkan -> deterministic result  
+**State:** V0/V1/V2 complete; V3 active; host-GPU semantic proof complete; next dependency is submission-side created-shader binding  
 **Repository:** astraea-emu/astraea  
-**Active branch:** `feat/v1-register-created-shaders-transactionally`
+**In-flight work:** inspect live open GitHub PRs/issues; this file describes the expected merged frontier on `main`.
 
 ## Complete
 
@@ -77,6 +77,8 @@
 - Workload-driven generic AMD SET_SH_REG (0x76) lowering to typed consecutive relative shader-register Graphics IR is complete and five-gate validated (#158/#159), with unsupported control bits and out-of-window ranges failing explicitly.
 - Persistent shader-register state with explicit initialized-vs-zero semantics plus evidence-scoped pixel PGM_LO/PGM_HI GPU-address reconstruction is complete and five-gate validated (#160/#161).
 - Created pixel shader materialization plus duplicate-safe not-found/unique/ambiguous lookup by typed program GPU address is complete and five-gate validated (#162/#163).
+- Transactional created-shader registration in the real `sceAgcCreateShader` HLE path is complete and five-gate validated (#164/#165), including typed materialization/registration failures and exact-last-entry rollback if guest publication fails.
+- Post-V1/V2/V3 architecture synchronization and the separate semantic-IR/compiler-IR contract are complete (#166/#167, ADR 0007).
 - Public five-gate CI remains the merge requirement:
   - Linux x64
   - Windows x64
@@ -86,7 +88,7 @@
 
 ## Current frontier
 
-1. V1 is complete through #148/#149.
+1. V1 guest execution is proven through #148/#149 and persistent created-shader identity/transactional publication is complete through #162-#165.
 2. V2's first deterministic SPIR-V backend is complete through #150/#151.
 3. V3's first actual host-GPU proof is complete through #152/#153.
 4. #154/#155 capture a real SubmitDcb descriptor/stream.
@@ -94,8 +96,9 @@
 6. #158/#159 lower SET_SH_REG to typed shader-register Graphics IR.
 7. #160/#161 persist shader-register state and reconstruct the existing pixel program GPU address.
 8. #162/#163 materialize validated created pixel shaders and provide duplicate-safe lookup by that address.
-9. #164 is active: integrate created-shader registration transactionally into the real sceAgcCreateShader HLE path, rolling back the exact temporary record if guest preparation fails.
-10. Submission-side shader binding, draw/dispatch semantics, resource meaning, other shader stages, and real guest-resource Vulkan execution remain later dependencies.
+9. #164/#165 register those created shaders transactionally in the real `sceAgcCreateShader` HLE path.
+10. #166/#167 reconcile durable V1/V2/V3 documentation and record the semantic-IR/compiler-IR boundary after the rapid proof-chain merges.
+11. The next code dependency is submission-side shader binding; draw/dispatch semantics, resource meaning, other shader stages, and real guest-resource Vulkan execution remain later workload-driven dependencies.
 
 ## SCE metadata boundary
 
@@ -129,7 +132,8 @@ The completed #9 evidence map supports separating:
 - Graphics IR
 - shader-container parsing
 - generic RDNA2 instruction decoding
-- Shader IR
+- semantic Shader IR / interpreter oracle
+- workload-driven compiler/value IR when required
 - SPIR-V lowering
 - Vulkan host backend
 
@@ -154,16 +158,24 @@ PS5-specific assumptions require documented evidence.
 
 ## Next action
 
-Finish #164 on `feat/v1-register-created-shaders-transactionally`.
+Create the smallest owned V3 submission-side created-shader binding issue.
 
-The service transaction is:
-
-`plan create -> plan preparation -> materialize record -> register record -> apply guest patches -> resume`.
-
-If guest application fails, roll back exactly the just-added final registry entry before surfacing the existing apply failure. Materialization and registration failures must happen before guest publication and preserve typed nested provenance.
-
-Do not process SubmitDcb in HLE runtime, resolve submitted pixel state here, add destruction/lifetime APIs, decode resources/descriptors, interpret draw packets, call Vulkan, or add RDNA2 instructions.
-
-After merge, build the smallest owned submission-side bridge:
+The bounded proof is:
 
 `captured DCB -> Type-3 framing -> SET_SH_REG IR -> persistent shader state -> pixel program address -> unique created-shader lookup`.
+
+The first owned DCB profile should contain only packet semantics already
+supported by this proof. Unknown/state-changing packet semantics must fail
+explicitly rather than being silently skipped.
+
+The binding result must retain enough provenance to identify the final
+PGM_LO/PGM_HI source frame/word offsets while the captured DCB remains the raw
+byte source of truth. Do not build a speculative full-register provenance
+framework solely for this slice.
+
+Do not claim SubmitDcb success, interpret draw/dispatch packets, decode
+resources/descriptors, call Vulkan, or add unrelated RDNA2 coverage.
+
+Separately, add PM4 Type-3 stream and bounded RDNA2 stream fuzz-smoke coverage
+as a hardening follow-up when it can proceed without displacing the V3
+critical path.

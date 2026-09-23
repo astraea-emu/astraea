@@ -18,9 +18,12 @@ integration**.
 
 GitHub is authoritative.
 
-- `docs/PROJECT_PLAN.md` — strategy, architectural workstreams, and vertical
-  integration gates.
-- `docs/STATUS.md` — current state, active issue, blockers, and next decision.
+- `docs/PROJECT_PLAN.md` — durable strategy, architectural workstreams, and
+  vertical integration gate definitions.
+- `docs/STATUS.md` — the canonical **merged frontier**: completed state,
+  blockers, and exact next dependency/action expected on `main`.
+- Open GitHub issues / pull requests — authoritative in-flight work and branch
+  state. Unmerged PR behavior is not completed project behavior.
 - `docs/CHAT_HANDOFF.md` — procedure for moving to a fresh AI conversation.
 - `docs/adr/` — durable architecture decisions and their evidence.
 - `docs/research/` — evidence notes and bounded format/behavior research.
@@ -86,8 +89,13 @@ of the backend. MoltenVK may provide portability coverage on macOS, but native
 Vulkan behavior on Linux/Windows remains the primary backend target.
 
 SPIR-V is the first host shader IR because Vulkan consumes SPIR-V shader
-modules. Astraea's Shader IR stays independent of SPIR-V so guest semantics
-can be tested without a Vulkan device.
+modules. Astraea's existing Shader IR remains the guest-semantic/oracle layer
+and stays independent of SPIR-V so guest semantics can be tested without a
+Vulkan device. When a concrete workload first requires SSA/value dataflow,
+structured control flow, resource operations, or stage I/O, Astraea introduces
+the smallest separate compiler/value IR required by that workload. That layer
+also remains free of Vulkan handles and preserves provenance back to semantic
+Shader IR/RDNA2. See ADR 0007.
 
 ## 5. Stable architectural workstreams
 
@@ -139,17 +147,21 @@ synchronization, and presentation state.
 
 ### H. RDNA2 shader semantics
 
-AMD-documented instruction decoding, Shader IR, CFG, state semantics, exact
-oracle execution where useful, floating-point modes, memory/image/export
-semantics, and other instruction families pulled by real workloads.
+AMD-documented instruction decoding, semantic Shader IR, CFG, state semantics,
+exact oracle execution where useful, floating-point modes,
+memory/image/export semantics, and other instruction families pulled by real
+workloads.
 
 "Generic RDNA2" means AMD-defined guest ISA semantics shared by the hardware
 family. It is required emulator behavior, not placeholder data.
 
 ### I. Shader compiler and host GPU backend
 
-Shader IR -> SPIR-V lowering and validation, Vulkan device/resource/pipeline
-management, synchronization mapping, headless execution, then presentation.
+Semantic Shader IR -> workload-driven compiler/value IR -> SPIR-V lowering and
+validation, followed by Vulkan device/resource/pipeline management,
+synchronization mapping, headless execution, then presentation. The current
+straight-line vector-probe emitter remains a valid narrow proof and does not
+need a speculative rewrite before a workload requires the compiler IR.
 
 ### J. User experience
 
@@ -194,82 +206,86 @@ AGC shader container
     -> validated PS5-specific envelope
     -> bounded RDNA2 words
     -> existing RDNA2 decoder
-    -> Shader IR
+    -> semantic Shader IR
 ```
 
 Completed by #134/#135 with owned synthetic fixtures, opaque provenance
 preservation, malformed-input tests, and dedicated fuzz smoke.
 
-### V1 — Guest-created shader object — next
-
-Goal:
+### V1 — Guest-created shader object — complete
 
 ```text
 owned SCE guest probe
     -> exact import/HLE boundary
-    -> AGC shader creation
-    -> Astraea guest-domain shader object
-    -> validated stage/program/provenance state
+    -> sceAgcCreateShader
+    -> validated/prepared guest-domain shader
+    -> persistent created-shader identity
 ```
 
-The object must not contain Vulkan handles or depend on a Vulkan device.
+Completed through #140/#141, #145/#147, #148/#149, #162/#163, and
+#164/#165. The real owned SCE guest now reaches `sceAgcCreateShader`, prepares
+the evidence-scoped pixel object, materializes/retains its canonical AGC +
+RDNA2 + semantic Shader IR record, and publishes guest state transactionally
+without Vulkan dependency.
 
-Likely dependencies, to be confirmed by the implementation issue:
+Program GPU addresses are treated as typed guest GPU-domain identity and are
+not assumed globally unique.
 
-- exact public evidence for the shader-creation import/ABI;
-- safe guest-memory access to header/code inputs;
-- a stable Astraea AGC shader-object representation;
-- explicit handling of unknown/mutable header fields;
-- traceable object identity/lifetime.
-
-Do **not** decode all AGC resources/registers merely because they are nearby.
-Only pull metadata required to establish the object boundary.
-
-### V2 — Validated host shader module
-
-Goal:
+### V2 — Validated host shader module — complete
 
 ```text
-supported Shader IR
-    -> deterministic SPIR-V module
+supported semantic Shader IR
+    -> deterministic SPIR-V 1.6 module
     -> Vulkan-environment validation
 ```
 
-The first subset should be chosen from a concrete owned workload. The existing
-wave interpreter remains the semantic oracle for the subset; it is not the
-production rendering engine.
+Completed through #150/#151 for the bounded straight-line vector probe
+(NOP/V_MOV_B32/V_ADD_F32/END). The generated module is validated with
+SPIRV-Tools for the Vulkan 1.3 environment and remains deterministic.
 
-Likely dependencies:
+This bounded gate does not mean every semantic Shader IR operation is
+compilable. New compiler coverage remains workload-driven, and the existing
+wave interpreter remains the semantic oracle rather than the production
+rendering engine.
 
-- Shader IR type/value semantics required by the selected workload;
-- structured control-flow lowering;
-- shader stage inputs/outputs;
-- exact handling or explicit rejection of modes the subset cannot preserve;
-- SPIR-V validation in CI.
+### V3 — Headless GPU execution — active
 
-### V3 — Headless GPU execution
-
-Goal:
+Full gate:
 
 ```text
 controlled guest-domain GPU workload
     -> AGC command/state frontend
     -> guest resources
-    -> Shader IR / SPIR-V
+    -> semantic Shader IR / compiler lowering / SPIR-V
     -> Vulkan
     -> deterministic host-visible result
 ```
 
-This gate will pull the smallest required set of:
+The first host-GPU semantic/backend proof is complete through #152/#153:
+Linux CI forces Mesa Lavapipe, executes the V2 module headlessly on Vulkan,
+and requires bit-for-bit state-buffer equality with Astraea's semantic
+interpreter.
 
-- command/register decoding;
-- guest buffer/image/sampler state;
-- descriptor/resource binding;
-- memory/image/export shader instructions;
-- synchronization;
-- Vulkan resource and pipeline materialization.
+That proof is intentionally narrower than the full V3 gate. The remaining V3
+path is pulled in slices:
 
-The workload chooses the coverage. Coverage does not choose the workload.
+1. **Submission-side shader binding** — captured DCB -> Type-3 framing ->
+   SET_SH_REG IR -> persistent shader state -> pixel program GPU address ->
+   unique created-shader lookup.
+2. **First guest resource-backed workload** — add only the command,
+   descriptor/resource, memory/export, synchronization, and backend behavior
+   demanded by one owned deterministic workload.
+3. Continue expanding by first missing dependency, never by raw opcode/API
+   coverage.
+
+Guest GPU virtual addresses are guest-domain identifiers. They must resolve
+through Astraea's guest GPU memory/resource model and must not be cast to CPU
+guest pointers, host pointers, Vulkan handles, or `VkDeviceAddress` values.
+
+Submission provenance must remain traceable from raw DCB bytes/word offsets
+through packet/state effects, selected guest shader identity, compiler
+lowering, emitted SPIR-V, and backend-visible evidence. Unknown packet/state
+semantics remain explicit blockers rather than silently ignored behavior.
 
 ### V4 — Controlled PS5 differential
 
@@ -413,7 +429,10 @@ The normal public merge gate remains:
 5. Linux Clang fuzz smoke
 
 Parser work must ensure the relevant fuzz target is actually executed by the
-fuzz-smoke job, not merely compiled.
+fuzz-smoke job, not merely compiled. The newer PM4 Type-3 stream framer and
+bounded RDNA2 stream decoder/lowerer should receive dedicated fuzz-smoke
+coverage as a hardening follow-up; that work is independent of the active V3
+critical path.
 
 ## 14. Efficiency rules
 
@@ -433,21 +452,24 @@ fuzz-smoke job, not merely compiled.
 
 ## 15. Current critical path
 
+The durable dependency order is:
+
 ```text
 completed foundation
     |
     v
-V0  AGC container -> RDNA2 -> Shader IR                    COMPLETE
+V0  AGC container -> RDNA2 -> semantic Shader IR            COMPLETE
     |
     v
-V1  owned guest -> AGC shader object                       NEXT
+V1  owned guest -> persistent AGC shader identity            COMPLETE
     |
     v
-V2  supported Shader IR -> validated SPIR-V
+V2  supported semantic Shader IR -> validated SPIR-V         COMPLETE
     |
     v
-V3  guest GPU state/resources -> Vulkan -> headless result
-    |
+V3  submitted guest state/resources -> Vulkan -> result      ACTIVE
+    |   host-GPU semantic proof complete (#153)
+    |   next slice: submission-side created-shader binding
     v
 V4  controlled PS5 differential when evidence requires it
     |
@@ -455,6 +477,10 @@ V4  controlled PS5 differential when evidence requires it
 V5  guest flip/VideoOut -> host presentation
 ```
 
-Platform HLE, RDNA2 coverage, GPU commands/resources, and verification tooling
-feed this path when a gate requires them. They are not separate finish-all
-phases.
+Platform HLE, RDNA2 coverage, GPU commands/resources, compiler lowering, and
+verification tooling feed this path only when the next owned workload requires
+them. They are not separate finish-all phases.
+
+The merged next dependency/action is recorded in `docs/STATUS.md`.
+Any in-flight branch/issue is discovered from live open GitHub PRs/issues
+rather than hard-coded into durable roadmap text.

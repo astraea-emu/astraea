@@ -6,15 +6,25 @@ Astraea is expected to outlive any individual ChatGPT/Codex/Claude conversation.
 
 ## Source-of-truth order
 
-When starting a fresh chat, trust sources in this order:
+When starting a fresh chat:
 
-1. merged repository state
-2. `docs/STATUS.md`
-3. ADRs/specifications
-4. open GitHub issues and PRs
-5. the previous chat summary
+1. trust merged repository state for completed behavior;
+2. inspect live open GitHub pull requests/issues for in-flight work and its
+   exact branch/head;
+3. read `docs/STATUS.md` for the last merged frontier, blockers, and next
+   intended dependency/action;
+4. read relevant ADRs/specifications for durable contracts;
+5. use the previous chat summary only as working context.
 
-If a chat conflicts with merged repository documentation, stop and resolve the discrepancy explicitly.
+An open PR is evidence of in-flight work, not completed project behavior. If a
+chat or STATUS conflicts with merged code, stop and resolve the discrepancy
+explicitly.
+
+README.md and docs/PROJECT_PLAN.md intentionally describe durable
+architecture/gates and must not be used to infer the current in-flight branch.
+Do not hard-code ephemeral PR branch names into merged STATUS. A STATUS change
+inside a PR should describe the expected **post-merge** frontier; live GitHub
+PR/issue state supplies the branch while work is in flight.
 
 ## When to roll to a new chat
 
@@ -39,10 +49,11 @@ The assistant cannot measure the ChatGPT UI's latency or exact remaining context
 Before recommending a new chat:
 
 1. merge or clearly identify all active work
-2. update `docs/STATUS.md`
-3. record any new architectural decision in an ADR
-4. record unresolved research questions
-5. list active PRs/issues and exact next action
+2. inspect live open GitHub PRs/issues and record their exact heads in the
+   handoff when work remains unmerged
+3. update `docs/STATUS.md` to the expected post-merge frontier/next dependency
+4. record any new architectural decision in an ADR
+5. record unresolved research questions
 6. ensure no important conclusion exists only in the chat
 7. produce a concise handoff prompt pointing the next chat to the repository
 
@@ -64,9 +75,14 @@ The new chat should retrieve current GitHub state instead of trusting a pasted h
 
 Update `docs/STATUS.md`:
 - after every meaningful merge
+- when the merged next dependency changes
 - when a blocker changes
 - after hardware/probe findings
 - before a chat handoff
-- when milestone state changes
+- when milestone/gate state changes
 
-The status file should stay concise enough to read in under two minutes.
+STATUS committed in a PR should describe the intended state **after that PR
+merges**, not the PR's ephemeral head branch. Discover in-flight branch/issue
+state from live GitHub. Do not duplicate either source into README.md or
+docs/PROJECT_PLAN.md. The status file should stay concise enough to read in
+under two minutes.
