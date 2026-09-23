@@ -781,3 +781,142 @@ TEST_CASE(
     REQUIRE_FALSE(
         registry.rollback_last_registration(0U));
 }
+
+
+TEST_CASE(
+    "stage-qualified shader lookup isolates Pixel and Geometry at the same code address",
+    "[execution][agc][shader-registry][stage-lookup]") {
+    astraea::execution::CreatedAgcShaderRegistry registry;
+
+    auto pixel =
+        require_created(
+            0x00100000ULL,
+            0x00200000ULL,
+            0x00100000ULL);
+    auto geometry =
+        require_geometry_created(
+            0x00110000ULL,
+            0x00200000ULL,
+            0x00110000ULL);
+
+    REQUIRE(
+        registry.register_shader(
+            std::move(pixel))
+            .has_value());
+    REQUIRE(
+        registry.register_shader(
+            std::move(geometry))
+            .has_value());
+
+    const auto pixel_lookup =
+        registry.lookup_unique_by_stage_and_code(
+            astraea::graphics::GpuVirtualAddress{
+                .value = 0x00200000ULL},
+            astraea::graphics::AgcShaderStage::pixel);
+    const auto geometry_lookup =
+        registry.lookup_unique_by_stage_and_code(
+            astraea::graphics::GpuVirtualAddress{
+                .value = 0x00200000ULL},
+            astraea::graphics::AgcShaderStage::geometry);
+
+    REQUIRE(pixel_lookup.has_value());
+    REQUIRE(geometry_lookup.has_value());
+    REQUIRE(
+        pixel_lookup.value().get().shader_handle ==
+        astraea::memory::GuestAddress{
+            0x00100000ULL});
+    REQUIRE(
+        geometry_lookup.value().get().shader_handle ==
+        astraea::memory::GuestAddress{
+            0x00110000ULL});
+}
+
+TEST_CASE(
+    "stage-qualified shader lookup reports only same-stage duplicates",
+    "[execution][agc][shader-registry][stage-lookup][duplicate]") {
+    astraea::execution::CreatedAgcShaderRegistry registry;
+
+    auto first =
+        require_geometry_created(
+            0x00110000ULL,
+            0x00300000ULL,
+            0x00110000ULL);
+    auto second =
+        require_geometry_created(
+            0x00120000ULL,
+            0x00300000ULL,
+            0x00120000ULL);
+    auto pixel =
+        require_created(
+            0x00130000ULL,
+            0x00300000ULL,
+            0x00130000ULL);
+
+    REQUIRE(
+        registry.register_shader(
+            std::move(first))
+            .has_value());
+    REQUIRE(
+        registry.register_shader(
+            std::move(second))
+            .has_value());
+    REQUIRE(
+        registry.register_shader(
+            std::move(pixel))
+            .has_value());
+
+    const auto geometry_lookup =
+        registry.lookup_unique_by_stage_and_code(
+            astraea::graphics::GpuVirtualAddress{
+                .value = 0x00300000ULL},
+            astraea::graphics::AgcShaderStage::geometry);
+    REQUIRE_FALSE(geometry_lookup.has_value());
+    REQUIRE(
+        geometry_lookup.error().code ==
+        astraea::execution::
+            CreatedAgcShaderStageLookupErrorCode::
+                ambiguous);
+    REQUIRE(
+        geometry_lookup.error().program_address ==
+        astraea::graphics::GpuVirtualAddress{
+            .value = 0x00300000ULL});
+    REQUIRE(
+        geometry_lookup.error().stage ==
+        astraea::graphics::AgcShaderStage::geometry);
+    REQUIRE(
+        geometry_lookup.error().match_count == 2U);
+
+    const auto pixel_lookup =
+        registry.lookup_unique_by_stage_and_code(
+            astraea::graphics::GpuVirtualAddress{
+                .value = 0x00300000ULL},
+            astraea::graphics::AgcShaderStage::pixel);
+    REQUIRE(pixel_lookup.has_value());
+}
+
+TEST_CASE(
+    "stage-qualified shader lookup preserves requested stage on missing result",
+    "[execution][agc][shader-registry][stage-lookup][negative]") {
+    astraea::execution::CreatedAgcShaderRegistry registry;
+
+    const auto result =
+        registry.lookup_unique_by_stage_and_code(
+            astraea::graphics::GpuVirtualAddress{
+                .value = 0x00900000ULL},
+            astraea::graphics::AgcShaderStage::geometry);
+
+    REQUIRE_FALSE(result.has_value());
+    REQUIRE(
+        result.error().code ==
+        astraea::execution::
+            CreatedAgcShaderStageLookupErrorCode::
+                not_found);
+    REQUIRE(
+        result.error().program_address ==
+        astraea::graphics::GpuVirtualAddress{
+            .value = 0x00900000ULL});
+    REQUIRE(
+        result.error().stage ==
+        astraea::graphics::AgcShaderStage::geometry);
+    REQUIRE(result.error().match_count == 0U);
+}
