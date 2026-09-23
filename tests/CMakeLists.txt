@@ -58,6 +58,7 @@ add_executable(astraea_core_tests
     graphics/pm4_type3_framing_tests.cpp
     graphics/pm4_set_sh_reg_ir_tests.cpp
     graphics/graphics_ir_tests.cpp
+    graphics/shader_register_state_tests.cpp
     graphics/rdna2_decoder_tests.cpp
     graphics/shader_ir_tests.cpp
     graphics/shader_program_tests.cpp

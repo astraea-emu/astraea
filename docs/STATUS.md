@@ -1,9 +1,9 @@
 # Project Status
 
 **Integration gate:** PS5 graphics frontend after V3  
-**State:** V1/V2/V3 proof chain complete; AGC submit capture and Type-3 framing complete; SET_SH_REG Graphics IR active  
+**State:** V1/V2/V3 proof chain complete; AGC submit capture, Type-3 framing, and SET_SH_REG Graphics IR complete; persistent shader-register state active  
 **Repository:** astraea-emu/astraea  
-**Active branch:** `feat/ps5-pm4-set-sh-reg-ir`
+**Active branch:** `feat/ps5-shader-register-state`
 
 ## Complete
 
@@ -74,6 +74,7 @@
 - Headless Vulkan execution of that V2 probe is complete and five-gate validated (#152/#153); Linux CI forces Mesa Lavapipe and proves bit-for-bit readback equality with Astraea's existing interpreter. V3's first actual host-GPU semantic proof is complete.
 - Immutable `sceAgcDriverSubmitDcb` guest-memory capture is complete and five-gate validated (#154/#155): exact 16-byte descriptor plus bounded raw DCB stream, with no guest writes, PM4 decode, fake success, or Vulkan dispatch.
 - Generic AMD PM4 Type-3 framing of captured DCB streams is complete and five-gate validated (#156/#157), preserving opcode/control fields structurally and exact RawPacket provenance without assigning opcode behavior.
+- Workload-driven generic AMD SET_SH_REG (0x76) lowering to typed consecutive relative shader-register Graphics IR is complete and five-gate validated (#158/#159), with unsupported control bits and out-of-window ranges failing explicitly.
 - Public five-gate CI remains the merge requirement:
   - Linux x64
   - Windows x64
@@ -88,8 +89,9 @@
 3. V3's first actual host-GPU proof is complete through #152/#153.
 4. #154/#155 capture a real SubmitDcb descriptor/stream without claiming execution.
 5. #156/#157 deterministically frame that stream as generic AMD PM4 Type-3 packets without opcode semantics.
-6. #158 is active: lower the workload-driven generic AMD SET_SH_REG packet (0x76) to typed Graphics IR as a consecutive relative shader-register write range.
-7. Stage identity, register names, resource meaning, persistent GPU state, submit success/resume, and Vulkan execution remain out of scope until later evidence-driven slices.
+6. #158/#159 lower workload-driven SET_SH_REG packets to typed consecutive shader-register Graphics IR.
+7. #160 is active: apply those ranges to persistent shader-register state while preserving initialized-vs-zero semantics, and resolve only the already-evidenced pixel PGM_LO/PGM_HI pair to a typed GPU virtual address.
+8. Shader lookup, resource meaning, other stage identities, draw/dispatch semantics, submit success/resume, and real guest-resource Vulkan execution remain later dependencies.
 
 ## SCE metadata boundary
 
@@ -148,12 +150,14 @@ PS5-specific assumptions require documented evidence.
 
 ## Next action
 
-Finish #158 on `feat/ps5-pm4-set-sh-reg-ir`.
+Finish #160 on `feat/ps5-shader-register-state`.
 
 The bounded proof is:
 
-`captured DCB -> Type-3 frame -> opcode 0x76 -> typed GraphicsIrShaderRegisterWriteRange`.
+`SET_SH_REG Graphics IR -> atomic persistent shader-register state -> pixel-profile PGM_LO/PGM_HI -> typed GPU virtual address`.
 
-AMD/Linux evidence defines the generic opcode, relative shader-register window, and offset/value layout. The first profile requires the offset word's upper control bits to be zero rather than guessing their meaning.
+Persistent state must distinguish uninitialized registers from registers explicitly written with zero. Range application must prevalidate the complete write before mutation. The pixel resolver is limited to relative offsets 0x08/0x09 already established by #145/#147 and must reject unsupported upper PGM_HI bits.
 
-Do not infer shader stage, register names, descriptors, draw behavior, or host Vulkan state. After #158, add only the smallest persistent shader-register state application required to connect prepared AGC shader state to the existing shader/Vulkan path.
+Do not infer other stages/register meanings, decode descriptors, process draw packets, wire SubmitDcb success/resume, look up or read shader code yet, or call Vulkan.
+
+After merge, add only the smallest created-shader registry/lookup bridge required to match the resolved pixel program GPU address to the existing validated sceAgcCreateShader object and AGC/RDNA2/Shader IR payload.
