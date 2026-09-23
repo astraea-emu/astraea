@@ -1,7 +1,7 @@
 # Project Status
 
 **Integration gate:** V3 — submitted guest GPU state/resources -> Vulkan -> deterministic result  
-**State:** V0/V1/V2 complete; V3 active; host-GPU semantic proof and submission-side created-shader binding complete; next dependency is the first owned deterministic resource-backed workload  
+**State:** V0/V1/V2 complete; V3 active; host-GPU semantic proof and submission-side shader binding complete; owned offscreen graphics workload selected; next dependency is generic SET_CONTEXT_REG state  
 **Repository:** astraea-emu/astraea  
 **In-flight work:** inspect live open GitHub PRs/issues; this file describes the expected merged frontier on `main`.
 
@@ -80,6 +80,7 @@
 - Transactional created-shader registration in the real `sceAgcCreateShader` HLE path is complete and five-gate validated (#164/#165), including typed materialization/registration failures and exact-last-entry rollback if guest publication fails.
 - Post-V1/V2/V3 architecture synchronization and the separate semantic-IR/compiler-IR contract are complete (#166/#167, ADR 0007).
 - Evidence-bounded submitted pixel-shader binding is complete (#169): flag-zero captured DCB -> zero-control Type-3 frames -> SET_SH_REG Graphics IR -> fresh shader-register state -> typed pixel program GPU address -> duplicate-safe unique created-shader selection, with final PGM_LO/PGM_HI DCB word provenance and no fake SubmitDcb success or Vulkan work.
+- The first resource-backed V3 target is selected (#172): an Astraea-owned offscreen 4x4 uniform-color graphics workload with no depth/blend/MSAA/textures/presentation; the first missing dependency is generic submitted context-register transport/state (#173).
 - Public five-gate CI remains the merge requirement:
   - Linux x64
   - Windows x64
@@ -100,7 +101,8 @@
 9. #164/#165 register those created shaders transactionally in the real `sceAgcCreateShader` HLE path.
 10. #166/#167 reconcile durable V1/V2/V3 documentation and record the semantic-IR/compiler-IR boundary after the rapid proof-chain merges.
 11. #169 composes the captured DCB/state path through final pixel-program address resolution and unique created-shader selection with exact PGM source provenance.
-12. The next code dependency must come from one owned deterministic resource-backed V3 workload; draw/dispatch semantics, resource meaning, other shader stages, and real guest-resource Vulkan execution remain workload-driven dependencies rather than coverage goals.
+12. #172 selects the first resource-backed V3 workload: a tiny owned offscreen uniform-color graphics proof, deliberately excluding presentation.
+13. #173 is the next code dependency: generic PM4 SET_CONTEXT_REG lowering plus persistent initialized-vs-zero context-register state. PS5-specific render-target/viewport meanings remain later workload-driven dependencies.
 
 ## SCE metadata boundary
 
@@ -160,24 +162,24 @@ PS5-specific assumptions require documented evidence.
 
 ## Next action
 
-Specify one **owned deterministic resource-backed V3 workload** and trace its
-shortest end-to-end path from the now-connected submitted pixel-shader binding
-toward a deterministic host-visible Vulkan result.
+Implement #173: the generic submitted context-register boundary required by
+the #172 offscreen graphics workload.
 
-The workload specification must identify:
+The bounded path is:
 
-- the exact owned guest command/state/resource setup;
-- the expected deterministic result;
-- which already-supported shader subset it uses;
-- the first missing PM4/resource/descriptor/memory/export/synchronization
-  dependency on that path;
-- the evidence source for that dependency, or an explicit evidence blocker if
-  public evidence is insufficient.
+`PM4 Type-3 SET_CONTEXT_REG (0x69) -> GraphicsIrContextRegisterWriteRange -> ContextRegisterState`.
 
-Do not choose the next task by raw opcode/API coverage. Do not wire
-`sceAgcDriverSubmitDcb` to fake success merely because shader selection is now
-connected. Do not invent descriptor/resource semantics or treat guest GPU
-addresses as host/Vulkan addresses.
+Preserve RawPacket provenance and explicit initialized-vs-zero state. Validate
+the full destination range before mutation. Support only the generic
+consecutive-write envelope justified by AMD/public-driver evidence and reject
+unsupported control/index bits explicitly.
+
+Do **not** assign PS5 meaning to any context-register offset yet. Do not decode
+render-target/viewport/scissor/blend/depth fields, implement draw packets,
+resolve guest resources, call Vulkan, or return fake SubmitDcb success.
+
+The selected V3 workload and its deferred dependency questions are recorded in
+`docs/research/v3_offscreen_graphics_workload.md`.
 
 Separately, add PM4 Type-3 stream and bounded RDNA2 stream fuzz-smoke coverage
 as a hardening follow-up when it can proceed without displacing the V3
