@@ -58,6 +58,11 @@ astraea::execution::SceAgcDcbSubmission make_submission(
             astraea::memory::GuestAddress{0U},
         .command_words_address =
             astraea::memory::GuestAddress{0U},
+        .word_count = 0U,
+        .flag = 0U,
+        .raw_submit_description = {},
+        .opaque_padding = {},
+        .command_buffer_bytes = {},
     };
     submission.submit_description_address =
         astraea::memory::GuestAddress{0x00100000ULL};
@@ -615,6 +620,11 @@ TEST_CASE(
             astraea::memory::GuestAddress{0U},
         .command_words_address =
             astraea::memory::GuestAddress{0U},
+        .word_count = 0U,
+        .flag = 0U,
+        .raw_submit_description = {},
+        .opaque_padding = {},
+        .command_buffer_bytes = {},
     };
         submission.flag = 0U;
         submission.command_buffer_bytes = {
