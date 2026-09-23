@@ -51,7 +51,7 @@ GuestRange range(
     return result.value();
 }
 
-SceAgcLinkShadersPlan make_link_plan(
+[[maybe_unused]] SceAgcLinkShadersPlan make_link_plan(
     std::uint64_t context_output,
     std::uint64_t user_config_output) {
     return SceAgcLinkShadersPlan{
@@ -106,7 +106,7 @@ SceAgcLinkShadersPlan make_link_plan(
     };
 }
 
-std::array<std::byte, 8> record_bytes(
+[[maybe_unused]] std::array<std::byte, 8> record_bytes(
     std::uint32_t offset,
     std::uint32_t value) {
     std::array<std::byte, 8> bytes{};
