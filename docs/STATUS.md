@@ -1,10 +1,9 @@
 # Project Status
 
 **Integration gate:** V3 — submitted guest GPU state/resources -> Vulkan -> deterministic result  
-**State:** V0/V1/V2 complete; V3 host-GPU semantic proof complete; post-#165 architecture synchronization active  
+**State:** V0/V1/V2 complete; V3 active; host-GPU semantic proof complete; next dependency is submission-side created-shader binding  
 **Repository:** astraea-emu/astraea  
-**Active branch:** `docs/post-v3-architecture-sync`  
-**Active issue:** #166
+**In-flight work:** inspect live open GitHub PRs/issues; this file describes the expected merged frontier on `main`.
 
 ## Complete
 
@@ -79,6 +78,7 @@
 - Persistent shader-register state with explicit initialized-vs-zero semantics plus evidence-scoped pixel PGM_LO/PGM_HI GPU-address reconstruction is complete and five-gate validated (#160/#161).
 - Created pixel shader materialization plus duplicate-safe not-found/unique/ambiguous lookup by typed program GPU address is complete and five-gate validated (#162/#163).
 - Transactional created-shader registration in the real `sceAgcCreateShader` HLE path is complete and five-gate validated (#164/#165), including typed materialization/registration failures and exact-last-entry rollback if guest publication fails.
+- Post-V1/V2/V3 architecture synchronization and the separate semantic-IR/compiler-IR contract are complete (#166/#167, ADR 0007).
 - Public five-gate CI remains the merge requirement:
   - Linux x64
   - Windows x64
@@ -97,7 +97,7 @@
 7. #160/#161 persist shader-register state and reconstruct the existing pixel program GPU address.
 8. #162/#163 materialize validated created pixel shaders and provide duplicate-safe lookup by that address.
 9. #164/#165 register those created shaders transactionally in the real `sceAgcCreateShader` HLE path.
-10. #166 is active only to reconcile durable V1/V2/V3 documentation and record the semantic-IR/compiler-IR boundary after the rapid proof-chain merges.
+10. #166/#167 reconcile durable V1/V2/V3 documentation and record the semantic-IR/compiler-IR boundary after the rapid proof-chain merges.
 11. The next code dependency is submission-side shader binding; draw/dispatch semantics, resource meaning, other shader stages, and real guest-resource Vulkan execution remain later workload-driven dependencies.
 
 ## SCE metadata boundary
@@ -158,24 +158,24 @@ PS5-specific assumptions require documented evidence.
 
 ## Next action
 
-Finish #166 on `docs/post-v3-architecture-sync`.
+Create the smallest owned V3 submission-side created-shader binding issue.
 
-This is a documentation/architecture synchronization only. It must not change
-production code. The durable result is:
-
-- README/PROJECT_PLAN describe stable architecture and completed proof gates;
-- STATUS alone owns the volatile active branch/issue/next-action pointer;
-- existing Shader IR remains the guest-semantic/oracle layer;
-- a separate compiler/value IR is introduced only when a concrete workload
-  needs SSA/value dataflow, structured CFG, resources, or stage I/O;
-- guest GPU virtual addresses/resource identity remain above Vulkan;
-- provenance remains traceable across submission/state/shader/compiler/backend
-  boundaries.
-
-After #166 merges, create the smallest owned V3 submission-side binding issue:
+The bounded proof is:
 
 `captured DCB -> Type-3 framing -> SET_SH_REG IR -> persistent shader state -> pixel program address -> unique created-shader lookup`.
 
-That next slice must not claim SubmitDcb success, interpret draw/dispatch
-packets, decode resources/descriptors, silently ignore state-changing unknown
-packets, call Vulkan, or add unrelated RDNA2 coverage.
+The first owned DCB profile should contain only packet semantics already
+supported by this proof. Unknown/state-changing packet semantics must fail
+explicitly rather than being silently skipped.
+
+The binding result must retain enough provenance to identify the final
+PGM_LO/PGM_HI source frame/word offsets while the captured DCB remains the raw
+byte source of truth. Do not build a speculative full-register provenance
+framework solely for this slice.
+
+Do not claim SubmitDcb success, interpret draw/dispatch packets, decode
+resources/descriptors, call Vulkan, or add unrelated RDNA2 coverage.
+
+Separately, add PM4 Type-3 stream and bounded RDNA2 stream fuzz-smoke coverage
+as a hardening follow-up when it can proceed without displacing the V3
+critical path.
