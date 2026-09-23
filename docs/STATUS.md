@@ -1,7 +1,7 @@
 # Project Status
 
 **Integration gate:** V3 — submitted guest GPU state/resources -> Vulkan -> deterministic result  
-**State:** V0/V1/V2 complete; V3 active; shader/context frontend proofs and bounded WRITE_DATA semantics complete; next dependency is #175 W1 guest GPU buffer address-space resolution  
+**State:** V0/V1/V2 complete; V3 active; bounded WRITE_DATA semantics and guest GPU buffer range resolution complete; next dependency is #175 W2 Vulkan buffer execution/readback  
 **Repository:** astraea-emu/astraea  
 **In-flight work:** inspect live open GitHub PRs/issues; this file describes the expected merged frontier on `main`.
 
@@ -83,6 +83,7 @@
 - The first resource-backed V3 target is selected (#172): an Astraea-owned offscreen 4x4 uniform-color graphics workload with no depth/blend/MSAA/textures/presentation; the first missing dependency is generic submitted context-register transport/state (#173).
 - Generic AMD SET_CONTEXT_REG (0x69) lowering plus separate persistent initialized-vs-zero ContextRegisterState is complete (#173), with exact RawPacket provenance, explicit control/range failures, Trace v0 semantics, and no PS5-specific register meanings.
 - #175 W0 bounded WRITE_DATA memory profile is complete (#177): exact first-profile PM4 0x37 control, typed guest GpuVirtualAddress + ordered inline payload Graphics IR, exact RawPacket provenance, and Trace v0 semantics, with no resource lookup, memory mutation, or Vulkan dependency.
+- #175 W1 guest GPU buffer address-space resolution is complete (#179): explicitly registered non-overlapping GPU-domain buffer regions, stable logical buffer IDs, checked half-open range lookup, exact byte offsets/counts, and W0 payload-range composition with no backing memory or Vulkan identity.
 - Public five-gate CI remains the merge requirement:
   - Linux x64
   - Windows x64
@@ -107,7 +108,8 @@
 13. #173 adds generic PM4 SET_CONTEXT_REG lowering plus a separate persistent initialized-vs-zero ContextRegisterState without assigning PS5 meanings.
 14. #175 inserts a bounded WRITE_DATA guest-buffer micro-gate before further raster orchestration so Astraea can establish guest GPU address/resource resolution independently of shader linkage, draw, export, and render-target semantics.
 15. #177 completes #175 W0: ordinary AMD PM4 WRITE_DATA (0x37) direct-memory profile -> typed guest-GPU memory-write Graphics IR, preserving destination/payload semantics and packet provenance without resolving or mutating memory.
-16. The next dependency is #175 W1: resolve a checked guest GPU address range against explicitly registered Astraea-owned guest buffers while keeping guest allocation identity independent from CPU pointers and Vulkan objects.
+16. #179 completes #175 W1: non-overlapping predeclared guest GPU buffer regions resolve checked W0 write ranges to stable guest buffer IDs plus byte offsets/counts without backing-memory mutation or backend identity.
+17. The next dependency is #175 W2: materialize one explicitly registered guest buffer through the Vulkan backend, apply one resolved W0 write through a bounded backend contract, and require exact readback in mandatory Linux Lavapipe CI while preserving guest buffer identity separately from Vulkan objects.
 
 ## SCE metadata boundary
 
@@ -167,34 +169,44 @@ PS5-specific assumptions require documented evidence.
 
 ## Next action
 
-Define and implement **#175 W1**: the smallest predeclared guest GPU buffer
-address space needed to resolve W0's typed `GraphicsIrGpuMemoryWrite`.
+Define and implement **#175 W2**: the smallest real Vulkan-backed buffer proof
+for the already-typed and already-resolved WRITE_DATA workload.
 
-W1 must:
+W2 must take:
 
-- register explicit Astraea-owned guest GPU buffer regions using
-  `GpuVirtualAddress` plus checked byte size;
-- resolve a requested half-open GPU range
-  `[address, address + byte_count)` using checked arithmetic;
-- return stable guest buffer identity plus byte offset within that buffer;
-- reject unmapped, partially mapped, overflowed, and ambiguous/overlapping
-  mappings explicitly;
-- keep guest GPU identity separate from CPU guest pointers, host pointers,
-  Vulkan handles, and `VkDeviceAddress`;
-- remain backend-independent and perform no memory mutation.
+- one explicitly registered Astraea-owned guest GPU buffer region;
+- its stable `GuestGpuBufferId`;
+- one successful W1 `GuestGpuBufferResolution`;
+- W0's ordered dword payload;
 
-Use W0's payload length to derive the requested byte range, but do not execute
-the write in W1.
+and prove:
 
-Do not guess PS5 OS GPU-VA allocation policy, page tables, tiling, descriptors,
-or resource lifetime. The first W1 registry is for explicitly declared
-Astraea-owned buffers only.
+```text
+guest buffer identity + resolved byte range + typed payload
+    -> host Vulkan buffer materialization
+    -> bounded backend write
+    -> explicit submit/wait contract
+    -> host-visible readback
+    -> exact expected bytes
+```
 
-Only after W1 is proven should #175 W2 materialize one resolved buffer through
-the Vulkan backend and require deterministic readback.
+The backend mapping record may associate a `GuestGpuBufferId` with Vulkan
+resources, but Vulkan handles and `VkDeviceAddress` must never replace or
+leak into the guest semantic identity.
 
-After #175 W0-W2, return to the #172 offscreen raster workload and select its
-next first missing dependency from actual evidence.
+The first W2 proof remains Astraea-owned and deterministic. It must reject
+buffer/range mismatches explicitly and must not execute arbitrary guest
+commands or make `sceAgcDriverSubmitDcb` return guest-visible success.
+
+Use mandatory Linux Lavapipe CI as the deterministic oracle. Keep Windows and
+macOS build/tests portable, but do not require a hardware GPU.
+
+Do not infer PS5 page tables, allocation policy, cache behavior beyond the
+bounded W0 profile, descriptors, images, tiling, or resource lifetime.
+
+After W2 is proven, close the #175 resource micro-gate and return to the #172
+offscreen raster workload to select its next first missing dependency from
+actual evidence.
 
 Separately, add PM4 Type-3 stream and bounded RDNA2 stream fuzz-smoke coverage
 as a hardening follow-up when it can proceed without displacing the V3
