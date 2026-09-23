@@ -172,34 +172,24 @@ PS5-specific assumptions require documented evidence.
 
 ## Next action
 
-Implement **#186**: extend the created-shader materialization/registry boundary
-just enough for the new #184 type-2 Geometry/fused-pre-raster preparation
-profile to reach the real `sceAgcCreateShader` service transactionally.
+After #186, define the smallest evidence-bounded `sceAgcLinkShaders` contract
+that consumes stable created-shader handles and materializes only the linkage
+outputs required by #172's owned offscreen raster proof.
 
-The next slice must preserve existing pixel submission behavior while adding a
-stage-aware persistent identity suitable for later `sceAgcLinkShaders`.
+Public evidence currently indicates that LinkShaders consumes the created
+pre-raster and pixel shader handles and writes two register-record blocks:
 
-Before code, define the smallest representation that can hold both current
-pixel and type-2 pre-raster created shaders without mislabeling ES addresses as
-`PixelProgramGpuAddress`.
+- 34 context-register records for shader linkage/interpolant mapping plus
+  shader-unit/output-primitive state;
+- 3 user-config primitive-state records.
 
-Requirements for that design:
+The next slice must first pin the exact import identity, argument roles, output
+record shape, primitive-type treatment, null-hull behavior, and failure
+semantics before any HLE mutation is added.
 
-- retain the exact parsed AGC binary and semantic Shader IR payload;
-- retain guest handle/header/text provenance;
-- retain the AGC program stage/profile explicitly;
-- keep generic GPU-domain code identity separate from stage-specific submitted
-  register-address types;
-- preserve duplicate-safe behavior where program-address lookup is used;
-- add a deterministic lookup by guest shader handle if linkage requires it;
-- keep the current pixel PGM lookup API semantically intact for submission
-  binding;
-- keep registration rollback-safe around guest-memory apply.
-
-Do not implement `sceAgcLinkShaders` in the same slice. Linkage is the next
-dependency only after both created programs have stable host-side identities.
-
-Do not broaden other AGC stages, PGM pairs, resource descriptors, draw packets,
-stage I/O, or Vulkan graphics behavior.
+Do not fold command-buffer emission, draw packets, stage I/O execution,
+resource descriptors, graphics SPIR-V, or Vulkan rasterization into the
+linkage slice. The output should remain typed guest-visible register records
+until later frontend state consumption requires more semantics.
 
 The #172 raster target remains the owned offscreen 4x4 uniform-color proof.
