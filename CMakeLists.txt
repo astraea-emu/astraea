@@ -133,11 +133,13 @@ add_library(astraea_core STATIC
     src/graphics/pm4_type3_framing.cpp
     src/graphics/pm4_set_sh_reg_ir.cpp
     src/graphics/pm4_set_context_reg_ir.cpp
+    src/graphics/pm4_set_uconfig_reg_ir.cpp
     src/graphics/pm4_write_data_ir.cpp
     src/graphics/gpu_buffer_address_space.cpp
     src/graphics/graphics_ir.cpp
     src/graphics/shader_register_state.cpp
     src/graphics/context_register_state.cpp
+    src/graphics/user_config_register_state.cpp
     src/graphics/rdna2_decoder.cpp
     src/graphics/shader_ir.cpp
     src/graphics/shader_program.cpp
