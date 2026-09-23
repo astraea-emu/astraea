@@ -62,6 +62,7 @@ add_executable(astraea_core_tests
     graphics/agc_shader_container_tests.cpp
     graphics/packet_tests.cpp
     graphics/pm4_type3_framing_tests.cpp
+    graphics/pm4_draw_control_ir_tests.cpp
     graphics/pm4_set_sh_reg_ir_tests.cpp
     graphics/pm4_set_context_reg_ir_tests.cpp
     graphics/pm4_set_uconfig_reg_ir_tests.cpp
