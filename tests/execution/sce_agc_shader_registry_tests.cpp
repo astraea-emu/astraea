@@ -536,7 +536,7 @@ TEST_CASE(
     REQUIRE(registry.size() == 2U);
     REQUIRE(
         registry.entry_at(0U)->code_address ==
-        registry.entry_at(1U)->program_address);
+        registry.entry_at(1U)->code_address);
     REQUIRE(
         registry.entry_at(0U)->shader_handle !=
         registry.entry_at(1U)->shader_handle);
