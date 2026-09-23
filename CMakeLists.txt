@@ -121,6 +121,7 @@ add_library(astraea_core STATIC
     src/execution/sce_agc_driver_submit_dcb.cpp
     src/execution/sce_agc_shader_preparation.cpp
     src/execution/sce_agc_shader_registry.cpp
+    src/execution/sce_agc_submission_shader_binding.cpp
     src/probe/hello.cpp
     src/probe/reference.cpp
     src/graphics/agc_shader_binary.cpp
