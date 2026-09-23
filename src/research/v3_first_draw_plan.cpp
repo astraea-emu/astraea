@@ -1,5 +1,7 @@
 #include <astraea/research/v3_first_draw_plan.hpp>
 
+#include <cstddef>
+
 namespace astraea::research {
 namespace {
 
