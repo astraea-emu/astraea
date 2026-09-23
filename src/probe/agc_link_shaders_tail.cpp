@@ -169,7 +169,7 @@ validate_agc_link_shaders_tail_observation(
             8U};
     validated.unknown_context_record =
         decode_record(context_tail_bytes);
-    validated.unknown_context_record_untouched =
+    validated.unknown_context_record_matches_sentinel =
         all_sentinel(
             context_tail_bytes,
             observation.cx_sentinel);
@@ -181,7 +181,7 @@ validate_agc_link_shaders_tail_observation(
         validated.unknown_user_config_records[index] =
             decode_record(bytes);
         validated
-            .unknown_user_config_record_untouched[index] =
+            .unknown_user_config_record_matches_sentinel[index] =
             all_sentinel(
                 bytes,
                 observation.uc_sentinel);
