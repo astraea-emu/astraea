@@ -127,6 +127,7 @@ add_library(astraea_core STATIC
     src/probe/reference.cpp
     src/probe/agc_link_shaders_tail.cpp
     src/research/agc_link_shaders_tail_candidate.cpp
+    src/research/v3_first_draw_plan.cpp
     src/graphics/agc_shader_binary.cpp
     src/graphics/agc_shader_container.cpp
     src/graphics/packet.cpp
