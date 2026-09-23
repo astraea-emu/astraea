@@ -95,9 +95,10 @@ Platform HLE, RDNA2 instruction coverage, resource semantics, and command
 decoding are pulled into this path when a gate needs them. Unknown
 Sony-specific behavior is recorded as an evidence blocker rather than guessed.
 
-The exact active branch, issue, blocker, and next action live only in
-`docs/STATUS.md`; this README intentionally describes durable architecture
-rather than duplicating the volatile frontier.
+The last merged frontier, blockers, and next dependency live in
+`docs/STATUS.md`; live open GitHub PRs/issues identify any in-flight branch
+or work item. This README intentionally describes durable architecture rather
+than duplicating either volatile source.
 
 See:
 
