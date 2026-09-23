@@ -59,6 +59,32 @@ void write_pixel_program_address(
     REQUIRE(result.has_value());
 }
 
+void write_geometry_es_program_address(
+    astraea::graphics::ShaderRegisterState& state,
+    std::uint64_t gpu_address) {
+    const auto pgm_lo =
+        static_cast<std::uint32_t>(
+            (gpu_address >> 8U) &
+            0xffffffffULL);
+    const auto pgm_hi =
+        static_cast<std::uint32_t>(
+            (gpu_address >> 40U) &
+            0xffULL);
+
+    const auto result =
+        astraea::graphics::
+            apply_shader_register_graphics_ir(
+                make_write(
+                    astraea::graphics::
+                        kGeometryEsProgramLoRegisterOffset,
+                    {
+                        pgm_lo,
+                        pgm_hi,
+                    }),
+                state);
+    REQUIRE(result.has_value());
+}
+
 }  // namespace
 
 TEST_CASE(
@@ -449,4 +475,121 @@ TEST_CASE(
             ShaderRegisterApplyErrorCode::
                 unsupported_operation);
     REQUIRE(state == before);
+}
+
+
+TEST_CASE(
+    "Geometry ES program resolver requires both program registers",
+    "[graphics][shader-register-state][geometry-es-program][negative]") {
+    SECTION("missing PGM_LO") {
+        astraea::graphics::ShaderRegisterState state{};
+        state.values[
+            astraea::graphics::
+                kGeometryEsProgramHiRegisterOffset] = 0U;
+        state.initialized.set(
+            astraea::graphics::
+                kGeometryEsProgramHiRegisterOffset);
+
+        const auto result =
+            astraea::graphics::
+                resolve_geometry_es_program_address(state);
+
+        REQUIRE_FALSE(result.has_value());
+        REQUIRE(
+            result.error().code ==
+            astraea::graphics::
+                GeometryEsProgramAddressErrorCode::
+                    pgm_lo_uninitialized);
+    }
+
+    SECTION("missing PGM_HI") {
+        astraea::graphics::ShaderRegisterState state{};
+        state.values[
+            astraea::graphics::
+                kGeometryEsProgramLoRegisterOffset] =
+            0x12345678U;
+        state.initialized.set(
+            astraea::graphics::
+                kGeometryEsProgramLoRegisterOffset);
+
+        const auto result =
+            astraea::graphics::
+                resolve_geometry_es_program_address(state);
+
+        REQUIRE_FALSE(result.has_value());
+        REQUIRE(
+            result.error().code ==
+            astraea::graphics::
+                GeometryEsProgramAddressErrorCode::
+                    pgm_hi_uninitialized);
+        REQUIRE(
+            result.error().pgm_lo ==
+            0x12345678U);
+    }
+}
+
+TEST_CASE(
+    "Geometry ES program resolver rejects unsupported PGM_HI upper bits",
+    "[graphics][shader-register-state][geometry-es-program][negative]") {
+    astraea::graphics::ShaderRegisterState state{};
+    state.values[
+        astraea::graphics::
+            kGeometryEsProgramLoRegisterOffset] =
+        0x12345678U;
+    state.values[
+        astraea::graphics::
+            kGeometryEsProgramHiRegisterOffset] =
+        0x0000019aU;
+    state.initialized.set(
+        astraea::graphics::
+            kGeometryEsProgramLoRegisterOffset);
+    state.initialized.set(
+        astraea::graphics::
+            kGeometryEsProgramHiRegisterOffset);
+
+    const auto result =
+        astraea::graphics::
+            resolve_geometry_es_program_address(state);
+
+    REQUIRE_FALSE(result.has_value());
+    REQUIRE(
+        result.error().code ==
+        astraea::graphics::
+            GeometryEsProgramAddressErrorCode::
+                unsupported_pgm_hi_bits);
+    REQUIRE(
+        result.error().pgm_hi ==
+        0x0000019aU);
+}
+
+TEST_CASE(
+    "Geometry ES program resolver round-trips the evidenced address encoding",
+    "[graphics][shader-register-state][geometry-es-program]") {
+    for (const auto address : {
+             std::uint64_t{0x0000000000000100ULL},
+             std::uint64_t{0x0000123456789a00ULL},
+             std::uint64_t{0x0000ffffffffff00ULL},
+         }) {
+        astraea::graphics::ShaderRegisterState state{};
+        write_geometry_es_program_address(
+            state,
+            address);
+
+        const auto result =
+            astraea::graphics::
+                resolve_geometry_es_program_address(
+                    state);
+
+        REQUIRE(result.has_value());
+        REQUIRE(result->value == address);
+
+        REQUIRE(
+            state.initialized.test(
+                astraea::graphics::
+                    kGeometryEsProgramLoRegisterOffset));
+        REQUIRE(
+            state.initialized.test(
+                astraea::graphics::
+                    kGeometryEsProgramHiRegisterOffset));
+    }
 }
