@@ -94,6 +94,8 @@ resolve_color_target0_context_state(
         value(state, kColorTarget0InfoContextOffset);
     const auto raw_attrib2 =
         value(state, kColorTarget0Attrib2ContextOffset);
+    const auto raw_attrib3 =
+        value(state, kColorTarget0Attrib3ContextOffset);
 
     return ColorTarget0ContextResult::success(
         ColorTarget0ContextState{
@@ -122,6 +124,13 @@ resolve_color_target0_context_state(
                 ((raw_attrib2 >> 14U) & 0x3fffU) + 1U,
             .height =
                 (raw_attrib2 & 0x3fffU) + 1U,
+            .raw_attrib3 = raw_attrib3,
+            .color_sw_mode =
+                static_cast<std::uint8_t>(
+                    (raw_attrib3 >> 14U) & 0x1fU),
+            .resource_type =
+                static_cast<std::uint8_t>(
+                    (raw_attrib3 >> 24U) & 0x03U),
         });
 }
 
