@@ -6,9 +6,14 @@
 
 ## Decision
 
-The first resource-backed V3 target is an **Astraea-owned offscreen graphics
+The first **raster** V3 target is an **Astraea-owned offscreen graphics
 workload** that eventually renders a deterministic uniform color into one tiny
 color target and reads the logical result back through Vulkan.
+
+Before that raster path is expanded further, #175 inserts a smaller bounded
+WRITE_DATA guest-buffer micro-gate to establish the reusable guest GPU
+address/resource substrate independently. That micro-gate does not replace this
+workload or complete V3.
 
 The target is intentionally small:
 
@@ -193,9 +198,18 @@ This is a dependency list, **not** an implementation order frozen in advance.
 After each bounded slice, the workload is re-evaluated and the next first
 missing dependency is selected.
 
-## First missing dependency
+## Raster dependency sequence
 
-The first missing dependency is **generic context-register transport/state**.
+The first raster-specific dependency selected from this workload was **generic
+context-register transport/state** (#173), and that bounded slice is now being
+implemented independently.
+
+The project then inserts #175's WRITE_DATA W0-W2 resource micro-gate before
+assigning PS5-specific context-register meanings, because guest GPU
+address/resource resolution is reusable by the eventual vertex buffers and
+color target and can be proven with fewer simultaneous raster unknowns.
+
+### First raster-specific dependency
 
 Astraea already has a typed/persistent shader-register path, but Graphics IR
 has no context-register write operation and there is no persistent
