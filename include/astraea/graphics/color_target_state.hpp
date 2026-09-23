@@ -17,6 +17,7 @@ namespace astraea::graphics {
 //   CB_COLOR0_INFO     0xa31c
 //   CB_COLOR0_BASE_EXT 0xa390
 //   CB_COLOR0_ATTRIB2  0xa3b0
+//   CB_COLOR0_ATTRIB3  0xa3b8
 //
 // Context-register IR stores offsets relative to the 0xa000 context window.
 inline constexpr std::uint16_t
@@ -29,6 +30,8 @@ inline constexpr std::uint16_t
     kColorTarget0BaseExtContextOffset = 0x0390U;
 inline constexpr std::uint16_t
     kColorTarget0Attrib2ContextOffset = 0x03b0U;
+inline constexpr std::uint16_t
+    kColorTarget0Attrib3ContextOffset = 0x03b8U;
 
 struct ColorTarget0ContextState {
     GpuVirtualAddress base_address;
@@ -46,6 +49,10 @@ struct ColorTarget0ContextState {
     std::uint32_t width = 0;
     std::uint32_t height = 0;
 
+    std::uint32_t raw_attrib3 = 0;
+    std::uint8_t color_sw_mode = 0;
+    std::uint8_t resource_type = 0;
+
     auto operator<=>(const ColorTarget0ContextState&) const = default;
 };
 
@@ -55,6 +62,7 @@ enum class ColorTarget0ContextErrorCode {
     base_ext_uninitialized,
     info_uninitialized,
     attrib2_uninitialized,
+    attrib3_uninitialized,
     address_overflow,
 };
 
@@ -79,13 +87,14 @@ using ColorTarget0ContextResult =
 // This function intentionally does not:
 // - decide whether the target is enabled or writable;
 // - assign a Vulkan/host format;
-// - interpret tiling/swizzle beyond ATTRIB2 dimensions;
+// - interpret the decoded ATTRIB3 swizzle/resource-type values;
 // - resolve the GPU address to backing storage;
 // - handle DCC metadata.
 //
 // BASE/BASE_EXT reconstruct the guest GPU VA as
 // ((BASE_EXT << 32) | BASE) << 8. ATTRIB2 stores MIP0_HEIGHT-1 in [13:0]
-// and MIP0_WIDTH-1 in [27:14].
+// and MIP0_WIDTH-1 in [27:14]. ATTRIB3 exposes COLOR_SW_MODE in [18:14]
+// and RESOURCE_TYPE in [25:24].
 [[nodiscard]] ColorTarget0ContextResult
 resolve_color_target0_context_state(
     const ContextRegisterState& state) noexcept;
