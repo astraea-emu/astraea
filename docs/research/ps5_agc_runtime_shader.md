@@ -244,3 +244,101 @@ This slice deliberately does not add a general decoder from packed SCE
 dynamic-record values back to library/module names. The existing loader keeps
 those values as evidence until a later dependency requires stronger typed
 semantics.
+
+
+## V3 type-2 Geometry/ES preparation evidence
+
+After the #175 W0-W2 resource substrate proof, #172's offscreen raster path
+requires a created pre-raster shader before shader linkage can be represented.
+
+### Program-kind identity
+
+Pinned SharpProspero source:
+
+- repository: `SvenGDK/SharpProspero`
+- commit: `9220876e25bc28aca1f65ea644783a479949ad77`
+- `src/SharpProspero/Graphics/Agc/AgcShader.cs`
+- `src/SharpProspero/Graphics/Agc/Shaders/mesh_vs.pssl`
+
+The public `ShaderKind` identifies raw program type 2 as:
+
+`Geometry shader (or a fused vertex-plus-geometry shader)`.
+
+The public mesh source's source-level vertex entry point is exported as
+`[CxxSymbol("Shader::gs")]`. Astraea therefore treats type 2 as the
+Geometry/fused-pre-raster family and does not invent a standalone AGC vertex
+program kind.
+
+### Existing raw-header shape
+
+The earlier #143 audit already inspected the public SharpProspero
+`mesh_vs.sb` at the same pinned commit without committing its bytes. It found
+the same v0x18 self-relative context/shader register-list qwords as the public
+pixel sample, and coherent lists only under the same field-relative pointer
+interpretation.
+
+That supports reusing the already-proven v0x18 pointer/list preparation
+machinery for a bounded type-2 profile.
+
+### Type-2 program-address register pair
+
+Pinned Kyty source:
+
+- repository: `InoriRus/Kyty`
+- commit: `4733b7e1c91b10554a52007903d74dc76c39a230`
+- `source/emulator/src/Graphics/Graphics.cpp`
+- `source/emulator/include/Emulator/Graphics/Pm4.h`
+
+Its public `GraphicsCreateShader` explicitly requires, for `h->type == 2`,
+that the first two shader-register records are:
+
+```text
+SPI_SHADER_PGM_LO_ES = 0xC8
+SPI_SHADER_PGM_HI_ES = 0xC9
+```
+
+and patches the values from the GPU code address as:
+
+```text
+LO = (address >> 8)  & 0xffffffff
+HI = (address >> 40) & 0xff
+```
+
+Pinned current Prosper source independently corroborates the CreateShader
+program-address behavior:
+
+- repository: `mattias800/prosper`
+- commit: `51f0a60b49ad68a1a326e3d0673545367776e9f2`
+- `prosper/src/hle/graphics/hle_agc.cpp`
+
+Its CreateShader implementation scans the leading shader-register pair against
+known PS/ES/GS/HS/compute PGM pairs and applies the same address encoding.
+This independently supports ES as a real prepared-program pair and the
+stage-independent address encoding.
+
+These are public emulator/research observations, not an official Sony
+specification. Astraea therefore supports only the exact type-2 / leading
+ES-pair profile required by the owned raster path.
+
+### Astraea profile boundary
+
+The new preparation profile is:
+
+`v18_geometry_es_public_shape`
+
+and requires:
+
+- header version 0x18;
+- program type raw 2 / known Geometry;
+- existing validated self-relative pointer/list provenance;
+- leading shader-register offsets exactly 0xC8 / 0xC9;
+- the same 256-byte-aligned, <=48-bit code-address envelope already used by
+  the pixel profile;
+- stage-specific ES PGM value patches;
+- output handle publication last.
+
+All other header bytes remain outside the mutation contract.
+
+This slice does not yet make the real HLE service register a type-2 shader.
+Persistent stage-aware materialization/identity and `sceAgcLinkShaders` are
+separate dependencies.
