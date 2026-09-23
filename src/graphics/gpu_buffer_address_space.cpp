@@ -117,15 +117,19 @@ GuestGpuBufferAddressSpace::register_buffer(
         }
     }
 
-    if (buffers_.size() >
-        static_cast<std::size_t>(
-            std::numeric_limits<std::uint64_t>::max())) {
-        return GuestGpuBufferRegistrationResult::failure(
-            registration_error(
-                GuestGpuBufferRegistrationErrorCode::
-                    host_size_unrepresentable,
-                base,
-                byte_size));
+    if constexpr (
+        std::numeric_limits<std::size_t>::digits >
+        std::numeric_limits<std::uint64_t>::digits) {
+        if (buffers_.size() >
+            static_cast<std::size_t>(
+                std::numeric_limits<std::uint64_t>::max())) {
+            return GuestGpuBufferRegistrationResult::failure(
+                registration_error(
+                    GuestGpuBufferRegistrationErrorCode::
+                        host_size_unrepresentable,
+                    base,
+                    byte_size));
+        }
     }
 
     const auto id =
@@ -241,10 +245,14 @@ GuestGpuBufferAddressSpace::resolve_range(
 const GuestGpuBufferRegion*
 GuestGpuBufferAddressSpace::entry_at(
     GuestGpuBufferId id) const noexcept {
-    if (id.value >
-        static_cast<std::uint64_t>(
-            std::numeric_limits<std::size_t>::max())) {
-        return nullptr;
+    if constexpr (
+        std::numeric_limits<std::uint64_t>::digits >
+        std::numeric_limits<std::size_t>::digits) {
+        if (id.value >
+            static_cast<std::uint64_t>(
+                std::numeric_limits<std::size_t>::max())) {
+            return nullptr;
+        }
     }
 
     const auto index =
@@ -263,7 +271,26 @@ resolve_gpu_memory_write(
     const auto value_count =
         operation.values.size();
 
-    if (value_count >
+    if constexpr (
+        std::numeric_limits<std::size_t>::digits >
+        std::numeric_limits<std::uint64_t>::digits) {
+        if (value_count >
+            static_cast<std::size_t>(
+                std::numeric_limits<std::uint64_t>::max())) {
+            return GpuMemoryWriteResolutionResult::failure(
+                GpuMemoryWriteResolutionError{
+                    .code =
+                        GpuMemoryWriteResolutionErrorCode::
+                            payload_size_unrepresentable,
+                    .address_resolution_error =
+                        std::nullopt,
+                });
+        }
+    }
+
+    const auto value_count_u64 =
+        static_cast<std::uint64_t>(value_count);
+    if (value_count_u64 >
         std::numeric_limits<std::uint64_t>::max() /
             kDwordBytes) {
         return GpuMemoryWriteResolutionResult::failure(
@@ -277,9 +304,7 @@ resolve_gpu_memory_write(
     }
 
     const auto byte_count =
-        static_cast<std::uint64_t>(
-            value_count) *
-        kDwordBytes;
+        value_count_u64 * kDwordBytes;
 
     auto resolved =
         address_space.resolve_range(
