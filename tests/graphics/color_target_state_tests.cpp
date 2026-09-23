@@ -71,7 +71,8 @@ TEST_CASE(
                 kAddress,
                 0x000000afU,
                 kInfo,
-                (3U << 14U) | 3U));
+                (3U << 14U) | 3U,
+                (7U << 14U) | (2U << 24U)));
 
     REQUIRE(result.has_value());
     REQUIRE(
