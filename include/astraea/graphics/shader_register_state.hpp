@@ -15,8 +15,14 @@ namespace astraea::graphics {
 
 inline constexpr std::size_t kShaderRegisterStateDwords =
     kPm4ShaderRegisterWindowDwords;
+
 inline constexpr std::uint16_t kPixelProgramLoRegisterOffset = 0x0008U;
 inline constexpr std::uint16_t kPixelProgramHiRegisterOffset = 0x0009U;
+
+// Evidence-bounded type-2 Geometry/fused-pre-raster profile. These are the
+// leading ES PGM_LO/HI registers already required by CreateShader preparation.
+inline constexpr std::uint16_t kGeometryEsProgramLoRegisterOffset = 0x00c8U;
+inline constexpr std::uint16_t kGeometryEsProgramHiRegisterOffset = 0x00c9U;
 
 struct ShaderRegisterState {
     std::array<std::uint32_t, kShaderRegisterStateDwords> values{};
@@ -94,6 +100,44 @@ using PixelProgramAddressResult =
 // This returns a GPU-domain value, not a CPU guest pointer or Vulkan object.
 [[nodiscard]] PixelProgramAddressResult
 resolve_pixel_program_address(
+    const ShaderRegisterState& state) noexcept;
+
+struct GeometryEsProgramGpuAddress {
+    std::uint64_t value = 0;
+
+    auto operator<=>(const GeometryEsProgramGpuAddress&) const = default;
+};
+
+enum class GeometryEsProgramAddressErrorCode {
+    pgm_lo_uninitialized,
+    pgm_hi_uninitialized,
+    unsupported_pgm_hi_bits,
+};
+
+struct GeometryEsProgramAddressError {
+    GeometryEsProgramAddressErrorCode code =
+        GeometryEsProgramAddressErrorCode::
+            pgm_lo_uninitialized;
+    std::uint32_t pgm_lo = 0;
+    std::uint32_t pgm_hi = 0;
+
+    auto operator<=>(const GeometryEsProgramAddressError&) const =
+        default;
+};
+
+using GeometryEsProgramAddressResult =
+    astraea::core::Result<
+        GeometryEsProgramGpuAddress,
+        GeometryEsProgramAddressError>;
+
+// Resolves the exact type-2 Geometry/ES program pair already supported by
+// CreateShader preparation.
+//
+// Relative SH offsets 0xc8/0xc9 use the same evidenced 256-byte program-address
+// encoding as the Pixel pair. No ordinary GS pair or other pre-raster stage is
+// inferred here.
+[[nodiscard]] GeometryEsProgramAddressResult
+resolve_geometry_es_program_address(
     const ShaderRegisterState& state) noexcept;
 
 }  // namespace astraea::graphics
