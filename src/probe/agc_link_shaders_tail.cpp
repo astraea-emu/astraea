@@ -54,8 +54,12 @@ size_error(
     std::size_t actual) noexcept {
     return AgcLinkShadersTailValidationError{
         .code = code,
+        .link_return_code = 0,
         .expected_size = expected,
         .actual_size = actual,
+        .record_index = std::nullopt,
+        .expected_record = std::nullopt,
+        .actual_record = std::nullopt,
     };
 }
 
@@ -67,6 +71,9 @@ record_error(
     Record actual) noexcept {
     return AgcLinkShadersTailValidationError{
         .code = code,
+        .link_return_code = 0,
+        .expected_size = 0,
+        .actual_size = 0,
         .record_index = index,
         .expected_record = expected,
         .actual_record = actual,
@@ -86,6 +93,11 @@ validate_agc_link_shaders_tail_observation(
                         link_return_failure,
                 .link_return_code =
                     observation.link_return_code,
+                .expected_size = 0,
+                .actual_size = 0,
+                .record_index = std::nullopt,
+                .expected_record = std::nullopt,
+                .actual_record = std::nullopt,
             });
     }
 
