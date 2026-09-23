@@ -131,7 +131,7 @@ TEST_CASE(
             .value = 0x456789abU,
         });
     REQUIRE_FALSE(
-        result->unknown_context_record_untouched);
+        result->unknown_context_record_matches_sentinel);
 
     REQUIRE(
         result->unknown_user_config_records[0] ==
@@ -152,11 +152,11 @@ TEST_CASE(
             .value = 0x90abcdefU,
         });
     REQUIRE_FALSE(
-        result->unknown_user_config_record_untouched[0]);
+        result->unknown_user_config_record_matches_sentinel[0]);
     REQUIRE_FALSE(
-        result->unknown_user_config_record_untouched[1]);
+        result->unknown_user_config_record_matches_sentinel[1]);
     REQUIRE_FALSE(
-        result->unknown_user_config_record_untouched[2]);
+        result->unknown_user_config_record_matches_sentinel[2]);
 
     REQUIRE(result->cx_raw == bytes.cx);
     REQUIRE(result->uc_raw == bytes.uc);
@@ -188,13 +188,13 @@ TEST_CASE(
 
     REQUIRE(result.has_value());
     REQUIRE(
-        result->unknown_context_record_untouched);
+        result->unknown_context_record_matches_sentinel);
     REQUIRE(
-        result->unknown_user_config_record_untouched[0]);
+        result->unknown_user_config_record_matches_sentinel[0]);
     REQUIRE_FALSE(
-        result->unknown_user_config_record_untouched[1]);
+        result->unknown_user_config_record_matches_sentinel[1]);
     REQUIRE_FALSE(
-        result->unknown_user_config_record_untouched[2]);
+        result->unknown_user_config_record_matches_sentinel[2]);
 }
 
 TEST_CASE(
