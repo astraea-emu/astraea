@@ -41,8 +41,25 @@ struct GraphicsIrUserConfigRegisterWriteRange {
     std::uint16_t start_offset = 0;
     std::vector<std::uint32_t> values;
 
-    auto operator<=>(
-        const GraphicsIrUserConfigRegisterWriteRange&) const = default;
+    auto operator<=>(const GraphicsIrUserConfigRegisterWriteRange&) const =
+        default;
+};
+
+struct GraphicsIrSetInstanceCount {
+    std::uint32_t instance_count = 0;
+
+    auto operator<=>(const GraphicsIrSetInstanceCount&) const = default;
+};
+
+struct GraphicsIrDrawIndexAuto {
+    std::uint32_t index_count = 0;
+
+    // Preserved exactly from the packet. Later bounded consumers may interpret
+    // only evidence-backed fields (for the first PS5 profile, the observed
+    // auto-index initiator is 2) rather than assigning semantics here.
+    std::uint32_t initiator = 0;
+
+    auto operator<=>(const GraphicsIrDrawIndexAuto&) const = default;
 };
 
 struct GraphicsIrGpuMemoryWrite {
@@ -58,6 +75,8 @@ using GraphicsIrOperation =
         GraphicsIrShaderRegisterWriteRange,
         GraphicsIrContextRegisterWriteRange,
         GraphicsIrUserConfigRegisterWriteRange,
+        GraphicsIrSetInstanceCount,
+        GraphicsIrDrawIndexAuto,
         GraphicsIrGpuMemoryWrite>;
 
 struct GraphicsIrProvenance {
