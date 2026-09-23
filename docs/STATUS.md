@@ -1,7 +1,7 @@
 # Project Status
 
 **Integration gate:** V3 — submitted guest GPU state/resources -> Vulkan -> deterministic result  
-**State:** V0/V1/V2 complete; V3 active; bounded WRITE_DATA semantics and guest GPU buffer range resolution complete; next dependency is #175 W2 Vulkan buffer execution/readback  
+**State:** V0/V1/V2 complete; V3 active; #175 WRITE_DATA W0-W2 resource-substrate proof complete; next dependency must be re-selected from #172 offscreen raster workload  
 **Repository:** astraea-emu/astraea  
 **In-flight work:** inspect live open GitHub PRs/issues; this file describes the expected merged frontier on `main`.
 
@@ -84,6 +84,7 @@
 - Generic AMD SET_CONTEXT_REG (0x69) lowering plus separate persistent initialized-vs-zero ContextRegisterState is complete (#173), with exact RawPacket provenance, explicit control/range failures, Trace v0 semantics, and no PS5-specific register meanings.
 - #175 W0 bounded WRITE_DATA memory profile is complete (#177): exact first-profile PM4 0x37 control, typed guest GpuVirtualAddress + ordered inline payload Graphics IR, exact RawPacket provenance, and Trace v0 semantics, with no resource lookup, memory mutation, or Vulkan dependency.
 - #175 W1 guest GPU buffer address-space resolution is complete (#179): explicitly registered non-overlapping GPU-domain buffer regions, stable logical buffer IDs, checked half-open range lookup, exact byte offsets/counts, and W0 payload-range composition with no backing memory or Vulkan identity.
+- #175 W2 Vulkan transfer/readback proof is complete (#181): real vkCmdUpdateBuffer execution over the W0/W1 resolved guest buffer, explicit transfer->host synchronization, non-coherent flush/invalidate handling, stable guest buffer identity, and mandatory full-buffer Lavapipe readback with surrounding-byte verification.
 - Public five-gate CI remains the merge requirement:
   - Linux x64
   - Windows x64
@@ -109,7 +110,8 @@
 14. #175 inserts a bounded WRITE_DATA guest-buffer micro-gate before further raster orchestration so Astraea can establish guest GPU address/resource resolution independently of shader linkage, draw, export, and render-target semantics.
 15. #177 completes #175 W0: ordinary AMD PM4 WRITE_DATA (0x37) direct-memory profile -> typed guest-GPU memory-write Graphics IR, preserving destination/payload semantics and packet provenance without resolving or mutating memory.
 16. #179 completes #175 W1: non-overlapping predeclared guest GPU buffer regions resolve checked W0 write ranges to stable guest buffer IDs plus byte offsets/counts without backing-memory mutation or backend identity.
-17. The next dependency is #175 W2: materialize one explicitly registered guest buffer through the Vulkan backend, apply one resolved W0 write through a bounded backend contract, and require exact readback in mandatory Linux Lavapipe CI while preserving guest buffer identity separately from Vulkan objects.
+17. #181 completes #175 W2: raw bounded WRITE_DATA -> typed W0 operation -> W1 guest-buffer resolution -> real queued Vulkan transfer -> deterministic full-buffer Lavapipe readback, without exposing Vulkan handles as guest identity.
+18. #175 is therefore complete as a resource-substrate micro-gate. Planning now returns to #172's offscreen raster workload; the next raster dependency must be selected from the expanded verified state rather than assumed from the pre-W0 ordering.
 
 ## SCE metadata boundary
 
@@ -169,45 +171,43 @@ PS5-specific assumptions require documented evidence.
 
 ## Next action
 
-Define and implement **#175 W2**: the smallest real Vulkan-backed buffer proof
-for the already-typed and already-resolved WRITE_DATA workload.
+Return to **#172's owned offscreen 4x4 raster workload** and perform a fresh
+dependency analysis using the now-proven resource substrate:
 
-W2 must take:
+- submitted pixel shader selection is connected;
+- generic SET_SH_REG and SET_CONTEXT_REG state exist;
+- guest GPU virtual addresses have a distinct typed domain;
+- explicitly declared guest GPU buffers resolve to stable guest identities;
+- a resolved guest buffer operation has reached real Vulkan and deterministic
+  readback.
 
-- one explicitly registered Astraea-owned guest GPU buffer region;
-- its stable `GuestGpuBufferId`;
-- one successful W1 `GuestGpuBufferResolution`;
-- W0's ordered dword payload;
+Do not simply resume the old dependency list by position. Re-evaluate the
+shortest honest raster path and choose the **first missing dependency** required
+for a deterministic offscreen uniform-color result.
 
-and prove:
+Candidate dependency classes to compare include:
 
-```text
-guest buffer identity + resolved byte range + typed payload
-    -> host Vulkan buffer materialization
-    -> bounded backend write
-    -> explicit submit/wait contract
-    -> host-visible readback
-    -> exact expected bytes
-```
+- owned vertex-stage shader creation/identity;
+- shader linkage / primitive state;
+- minimal draw packet semantics;
+- minimal vertex input/resource requirements;
+- vertex position export semantics;
+- pixel color export semantics;
+- the narrow PS5 context-register meanings needed for one color target;
+- guest color-target identity/layout;
+- Vulkan graphics pipeline/image realization.
 
-The backend mapping record may associate a `GuestGpuBufferId` with Vulkan
-resources, but Vulkan handles and `VkDeviceAddress` must never replace or
-leak into the guest semantic identity.
+Prefer a workload shape that removes whole dependency classes rather than
+implementing broad register/opcode coverage. Keep presentation/VideoOut out of
+V3.
 
-The first W2 proof remains Astraea-owned and deterministic. It must reject
-buffer/range mismatches explicitly and must not execute arbitrary guest
-commands or make `sceAgcDriverSubmitDcb` return guest-visible success.
+Before starting code, record the selected next dependency and its evidence in a
+bounded issue/update to the #172 research plan.
 
-Use mandatory Linux Lavapipe CI as the deterministic oracle. Keep Windows and
-macOS build/tests portable, but do not require a hardware GPU.
+Separately, the two independently proven headless Vulkan executors now justify
+a future small refactor of their common loader/device/memory/submit substrate,
+but that refactor must not displace the V3 critical path or alter either guest
+semantic contract.
 
-Do not infer PS5 page tables, allocation policy, cache behavior beyond the
-bounded W0 profile, descriptors, images, tiling, or resource lifetime.
-
-After W2 is proven, close the #175 resource micro-gate and return to the #172
-offscreen raster workload to select its next first missing dependency from
-actual evidence.
-
-Separately, add PM4 Type-3 stream and bounded RDNA2 stream fuzz-smoke coverage
-as a hardening follow-up when it can proceed without displacing the V3
-critical path.
+The PM4 Type-3 stream and bounded RDNA2 stream fuzz-smoke hardening follow-up
+also remains valid when it can proceed without displacing the V3 critical path.
