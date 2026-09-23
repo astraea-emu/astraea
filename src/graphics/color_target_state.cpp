@@ -75,6 +75,14 @@ resolve_color_target0_context_state(
                 raw_base_ext));
     }
 
+    if (!initialized(state, kColorTarget0Attrib3ContextOffset)) {
+        return ColorTarget0ContextResult::failure(
+            error(
+                ColorTarget0ContextErrorCode::attrib3_uninitialized,
+                raw_base,
+                raw_base_ext));
+    }
+
     const auto unshifted =
         (static_cast<std::uint64_t>(raw_base_ext) << 32U) |
         static_cast<std::uint64_t>(raw_base);
