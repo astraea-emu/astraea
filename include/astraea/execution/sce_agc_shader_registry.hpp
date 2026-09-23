@@ -8,6 +8,7 @@
 #include <astraea/core/result.hpp>
 #include <astraea/execution/sce_agc_shader_preparation.hpp>
 #include <astraea/graphics/agc_shader_binary.hpp>
+#include <astraea/graphics/gpu_address.hpp>
 #include <astraea/graphics/shader_program.hpp>
 #include <astraea/graphics/shader_register_state.hpp>
 #include <astraea/memory/guest_address.hpp>
@@ -16,11 +17,16 @@ namespace astraea::execution {
 
 // One host-side record of a successfully validated/prepared AGC shader object.
 //
-// The program address is typed in the GPU domain because it is the value later
-// reconstructed from the evidence-scoped pixel PGM_LO/PGM_HI register pair.
-// The original guest addresses remain preserved separately as provenance.
+// code_address is a backend-independent guest GPU virtual address. It is not a
+// CPU guest pointer, a stage-specific submitted register address, or a Vulkan
+// object. The original guest call addresses remain preserved separately as
+// provenance.
 struct CreatedAgcShader {
-    astraea::graphics::PixelProgramGpuAddress program_address;
+    astraea::graphics::GpuVirtualAddress code_address;
+    astraea::graphics::AgcShaderStage stage =
+        astraea::graphics::AgcShaderStage::pixel;
+    SceAgcShaderPreparationProfile preparation_profile =
+        SceAgcShaderPreparationProfile::v18_pixel_public_shape;
     astraea::memory::GuestAddress shader_handle;
     astraea::memory::GuestAddress shader_header_address;
     astraea::memory::GuestAddress shader_text_address;
@@ -30,6 +36,7 @@ struct CreatedAgcShader {
 
 enum class CreatedAgcShaderMaterializationErrorCode {
     unsupported_preparation_profile,
+    preparation_stage_mismatch,
     shader_ir_lowering_failure,
     host_allocation_failure,
 };
@@ -50,8 +57,8 @@ using CreatedAgcShaderMaterializationResult =
         CreatedAgcShader,
         CreatedAgcShaderMaterializationError>;
 
-// Materializes the existing validated V1 pixel preparation result into one
-// host-side shader record without reading or mutating guest memory.
+// Materializes one already validated supported preparation profile into a
+// persistent host-side shader record without reading or mutating guest memory.
 [[nodiscard]] CreatedAgcShaderMaterializationResult
 materialize_created_agc_shader(
     const SceAgcShaderPreparationPlan& preparation);
@@ -92,6 +99,26 @@ using CreatedAgcShaderLookupResult =
         std::reference_wrapper<const CreatedAgcShader>,
         CreatedAgcShaderLookupError>;
 
+enum class CreatedAgcShaderHandleLookupErrorCode {
+    not_found,
+    ambiguous,
+};
+
+struct CreatedAgcShaderHandleLookupError {
+    CreatedAgcShaderHandleLookupErrorCode code =
+        CreatedAgcShaderHandleLookupErrorCode::not_found;
+    astraea::memory::GuestAddress shader_handle;
+    std::size_t match_count = 0;
+
+    auto operator<=>(
+        const CreatedAgcShaderHandleLookupError&) const = default;
+};
+
+using CreatedAgcShaderHandleLookupResult =
+    astraea::core::Result<
+        std::reference_wrapper<const CreatedAgcShader>,
+        CreatedAgcShaderHandleLookupError>;
+
 class CreatedAgcShaderRegistry {
 public:
     // Appends exactly one record. The returned logical insertion index remains
@@ -105,9 +132,9 @@ public:
     [[nodiscard]] bool rollback_last_registration(
         std::size_t index) noexcept;
 
-    // Returns a record only when the requested program address identifies
-    // exactly one created object. Duplicate program addresses remain
-    // preserved and are reported as ambiguous rather than overwritten.
+    // Compatibility lookup for the already-proven pixel submission path.
+    // Only pixel-stage records participate. A Geometry record with the same
+    // numeric code address cannot make a pixel lookup ambiguous.
     //
     // The returned reference remains valid only until the next registry
     // mutation.
@@ -115,6 +142,16 @@ public:
     lookup_unique(
         astraea::graphics::PixelProgramGpuAddress
             program_address) const noexcept;
+
+    // Stage-independent identity used by later shader linkage. Duplicate
+    // handles remain preserved and are reported explicitly as ambiguous.
+    //
+    // The returned reference remains valid only until the next registry
+    // mutation.
+    [[nodiscard]] CreatedAgcShaderHandleLookupResult
+    lookup_unique_by_handle(
+        astraea::memory::GuestAddress
+            shader_handle) const noexcept;
 
     [[nodiscard]] std::size_t size() const noexcept {
         return shaders_.size();
