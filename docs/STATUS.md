@@ -1,7 +1,7 @@
 # Project Status
 
 **Integration gate:** V3 — submitted guest GPU state/resources -> Vulkan -> deterministic result  
-**State:** V0/V1/V2 complete; V3 active; #175 WRITE_DATA W0-W2 resource-substrate proof complete; next dependency must be re-selected from #172 offscreen raster workload  
+**State:** V0/V1/V2 complete; V3 active; #175 resource proof complete; v0x18 Geometry/ES preparation complete; next dependency is stage-aware created-shader materialization/registration  
 **Repository:** astraea-emu/astraea  
 **In-flight work:** inspect live open GitHub PRs/issues; this file describes the expected merged frontier on `main`.
 
@@ -85,6 +85,7 @@
 - #175 W0 bounded WRITE_DATA memory profile is complete (#177): exact first-profile PM4 0x37 control, typed guest GpuVirtualAddress + ordered inline payload Graphics IR, exact RawPacket provenance, and Trace v0 semantics, with no resource lookup, memory mutation, or Vulkan dependency.
 - #175 W1 guest GPU buffer address-space resolution is complete (#179): explicitly registered non-overlapping GPU-domain buffer regions, stable logical buffer IDs, checked half-open range lookup, exact byte offsets/counts, and W0 payload-range composition with no backing memory or Vulkan identity.
 - #175 W2 Vulkan transfer/readback proof is complete (#181): real vkCmdUpdateBuffer execution over the W0/W1 resolved guest buffer, explicit transfer->host synchronization, non-coherent flush/invalidate handling, stable guest buffer identity, and mandatory full-buffer Lavapipe readback with surrounding-byte verification.
+- Evidence-bounded v0x18 type-2 Geometry/fused-pre-raster preparation is complete (#184): the existing transactional pointer preparation now supports the exact leading ES PGM_LO/HI pair 0xC8/0xC9 with stage-specific patches, synthetic-only fixtures, and no registry/linkage generalization.
 - Public five-gate CI remains the merge requirement:
   - Linux x64
   - Windows x64
@@ -171,43 +172,34 @@ PS5-specific assumptions require documented evidence.
 
 ## Next action
 
-Return to **#172's owned offscreen 4x4 raster workload** and perform a fresh
-dependency analysis using the now-proven resource substrate:
+Implement **#186**: extend the created-shader materialization/registry boundary
+just enough for the new #184 type-2 Geometry/fused-pre-raster preparation
+profile to reach the real `sceAgcCreateShader` service transactionally.
 
-- submitted pixel shader selection is connected;
-- generic SET_SH_REG and SET_CONTEXT_REG state exist;
-- guest GPU virtual addresses have a distinct typed domain;
-- explicitly declared guest GPU buffers resolve to stable guest identities;
-- a resolved guest buffer operation has reached real Vulkan and deterministic
-  readback.
+The next slice must preserve existing pixel submission behavior while adding a
+stage-aware persistent identity suitable for later `sceAgcLinkShaders`.
 
-Do not simply resume the old dependency list by position. Re-evaluate the
-shortest honest raster path and choose the **first missing dependency** required
-for a deterministic offscreen uniform-color result.
+Before code, define the smallest representation that can hold both current
+pixel and type-2 pre-raster created shaders without mislabeling ES addresses as
+`PixelProgramGpuAddress`.
 
-Candidate dependency classes to compare include:
+Requirements for that design:
 
-- owned vertex-stage shader creation/identity;
-- shader linkage / primitive state;
-- minimal draw packet semantics;
-- minimal vertex input/resource requirements;
-- vertex position export semantics;
-- pixel color export semantics;
-- the narrow PS5 context-register meanings needed for one color target;
-- guest color-target identity/layout;
-- Vulkan graphics pipeline/image realization.
+- retain the exact parsed AGC binary and semantic Shader IR payload;
+- retain guest handle/header/text provenance;
+- retain the AGC program stage/profile explicitly;
+- keep generic GPU-domain code identity separate from stage-specific submitted
+  register-address types;
+- preserve duplicate-safe behavior where program-address lookup is used;
+- add a deterministic lookup by guest shader handle if linkage requires it;
+- keep the current pixel PGM lookup API semantically intact for submission
+  binding;
+- keep registration rollback-safe around guest-memory apply.
 
-Prefer a workload shape that removes whole dependency classes rather than
-implementing broad register/opcode coverage. Keep presentation/VideoOut out of
-V3.
+Do not implement `sceAgcLinkShaders` in the same slice. Linkage is the next
+dependency only after both created programs have stable host-side identities.
 
-Before starting code, record the selected next dependency and its evidence in a
-bounded issue/update to the #172 research plan.
+Do not broaden other AGC stages, PGM pairs, resource descriptors, draw packets,
+stage I/O, or Vulkan graphics behavior.
 
-Separately, the two independently proven headless Vulkan executors now justify
-a future small refactor of their common loader/device/memory/submit substrate,
-but that refactor must not displace the V3 critical path or alter either guest
-semantic contract.
-
-The PM4 Type-3 stream and bounded RDNA2 stream fuzz-smoke hardening follow-up
-also remains valid when it can proceed without displacing the V3 critical path.
+The #172 raster target remains the owned offscreen 4x4 uniform-color proof.

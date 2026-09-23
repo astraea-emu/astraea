@@ -21,6 +21,8 @@ namespace {
 constexpr std::uint32_t kSupportedHeaderVersion = 0x18U;
 constexpr std::uint16_t kPixelPgmLoRegister = 0x0008U;
 constexpr std::uint16_t kPixelPgmHiRegister = 0x0009U;
+constexpr std::uint16_t kGeometryEsPgmLoRegister = 0x00c8U;
+constexpr std::uint16_t kGeometryEsPgmHiRegister = 0x00c9U;
 
 constexpr std::uint64_t kUserDataField = 0x08U;
 constexpr std::uint64_t kCodeField = 0x10U;
@@ -331,9 +333,46 @@ plan_sce_agc_shader_preparation(
                 4));
     }
 
-    if (shader.program_type.known !=
-            std::optional<Stage>{Stage::pixel} ||
-        shader.program_type.raw != 1U) {
+    SceAgcShaderPreparationProfile profile{};
+    std::uint16_t pgm_lo_register = 0;
+    std::uint16_t pgm_hi_register = 0;
+    SceAgcShaderPatchKind pgm_lo_patch_kind =
+        SceAgcShaderPatchKind::pixel_pgm_lo_value;
+    SceAgcShaderPatchKind pgm_hi_patch_kind =
+        SceAgcShaderPatchKind::pixel_pgm_hi_value;
+    SceAgcShaderPreparationErrorCode pgm_pair_error =
+        SceAgcShaderPreparationErrorCode::
+            unsupported_pixel_program_register_pair;
+
+    if (shader.program_type.known ==
+            std::optional<Stage>{Stage::pixel} &&
+        shader.program_type.raw == 1U) {
+        profile =
+            SceAgcShaderPreparationProfile::
+                v18_pixel_public_shape;
+        pgm_lo_register = kPixelPgmLoRegister;
+        pgm_hi_register = kPixelPgmHiRegister;
+    } else if (
+        shader.program_type.known ==
+            std::optional<Stage>{Stage::geometry} &&
+        shader.program_type.raw == 2U) {
+        profile =
+            SceAgcShaderPreparationProfile::
+                v18_geometry_es_public_shape;
+        pgm_lo_register =
+            kGeometryEsPgmLoRegister;
+        pgm_hi_register =
+            kGeometryEsPgmHiRegister;
+        pgm_lo_patch_kind =
+            SceAgcShaderPatchKind::
+                geometry_es_pgm_lo_value;
+        pgm_hi_patch_kind =
+            SceAgcShaderPatchKind::
+                geometry_es_pgm_hi_value;
+        pgm_pair_error =
+            SceAgcShaderPreparationErrorCode::
+                unsupported_geometry_program_register_pair;
+    } else {
         return SceAgcShaderPreparationResult::failure(
             error(
                 SceAgcShaderPreparationErrorCode::
@@ -372,13 +411,12 @@ plan_sce_agc_shader_preparation(
 
     if (shader.shader_registers.size() < 2 ||
         shader.shader_registers[0].register_offset !=
-            kPixelPgmLoRegister ||
+            pgm_lo_register ||
         shader.shader_registers[1].register_offset !=
-            kPixelPgmHiRegister) {
+            pgm_hi_register) {
         return SceAgcShaderPreparationResult::failure(
             error(
-                SceAgcShaderPreparationErrorCode::
-                    unsupported_pixel_program_register_pair,
+                pgm_pair_error,
                 *shader.shader_register_list_header_offset));
     }
 
@@ -693,9 +731,7 @@ plan_sce_agc_shader_preparation(
                 append_patch(
                     patches,
                     SceAgcShaderPatch{
-                        .kind =
-                            SceAgcShaderPatchKind::
-                                pixel_pgm_lo_value,
+                        .kind = pgm_lo_patch_kind,
                         .address =
                             pgm_lo_address.value(),
                         .bytes =
@@ -715,9 +751,7 @@ plan_sce_agc_shader_preparation(
                 append_patch(
                     patches,
                     SceAgcShaderPatch{
-                        .kind =
-                            SceAgcShaderPatchKind::
-                                pixel_pgm_hi_value,
+                        .kind = pgm_hi_patch_kind,
                         .address =
                             pgm_hi_address.value(),
                         .bytes =
@@ -760,9 +794,7 @@ plan_sce_agc_shader_preparation(
         return SceAgcShaderPreparationResult::success(
             SceAgcShaderPreparationPlan{
                 .create_shader = create_shader,
-                .profile =
-                    SceAgcShaderPreparationProfile::
-                        v18_pixel_public_shape,
+                .profile = profile,
                 .shader_handle =
                     request.shader_header_address,
                 .patches = std::move(patches),

@@ -15,6 +15,7 @@ namespace astraea::execution {
 
 enum class SceAgcShaderPreparationProfile {
     v18_pixel_public_shape,
+    v18_geometry_es_public_shape,
 };
 
 enum class SceAgcShaderPatchKind {
@@ -32,6 +33,8 @@ enum class SceAgcShaderPatchKind {
     user_data_sharp_resource_pointer_3,
     pixel_pgm_lo_value,
     pixel_pgm_hi_value,
+    geometry_es_pgm_lo_value,
+    geometry_es_pgm_hi_value,
     output_handle,
 };
 
@@ -62,6 +65,7 @@ enum class SceAgcShaderPreparationErrorCode {
     missing_register_list_provenance,
     canonical_register_list_mismatch,
     unsupported_pixel_program_register_pair,
+    unsupported_geometry_program_register_pair,
     shader_code_address_misaligned,
     shader_code_address_unrepresentable,
     self_relative_pointer_overflow,
