@@ -79,6 +79,29 @@ namespace {
     };
 }
 
+[[nodiscard]] std::vector<std::byte> graphics_ir_register_value_bytes(
+    const astraea::graphics::GraphicsIrShaderRegisterWriteRange& operation) {
+    std::vector<std::byte> bytes;
+    bytes.reserve(operation.values.size() * 4U);
+
+    for (const auto value : operation.values) {
+        bytes.push_back(
+            static_cast<std::byte>(
+                value & 0xffU));
+        bytes.push_back(
+            static_cast<std::byte>(
+                (value >> 8U) & 0xffU));
+        bytes.push_back(
+            static_cast<std::byte>(
+                (value >> 16U) & 0xffU));
+        bytes.push_back(
+            static_cast<std::byte>(
+                (value >> 24U) & 0xffU));
+    }
+
+    return bytes;
+}
+
 [[nodiscard]] std::vector<std::byte> packet_bytes(
     const astraea::graphics::RawPacket& packet) {
     std::vector<std::byte> bytes;
@@ -594,11 +617,6 @@ trace_graphics_ir_v0(
     const astraea::graphics::GraphicsIrEmission&
         emission) {
     try {
-        const auto& unsupported =
-            std::get<
-                astraea::graphics::
-                    GraphicsIrUnsupported>(
-                emission.operation);
         const auto& packet =
             emission.provenance.source_packet;
 
@@ -613,19 +631,56 @@ trace_graphics_ir_v0(
             return size_failure();
         }
 
+        std::string event_type;
+        std::vector<TraceFieldV0> stable;
+
+        std::visit(
+            [&event_type, &stable](const auto& operation) {
+                using Operation =
+                    std::decay_t<decltype(operation)>;
+
+                if constexpr (
+                    std::is_same_v<
+                        Operation,
+                        astraea::graphics::
+                            GraphicsIrUnsupported>) {
+                    event_type = "unsupported";
+                    stable.push_back(
+                        text_field(
+                            "reason",
+                            graphics_ir_reason_text(
+                                operation.reason)));
+                } else if constexpr (
+                    std::is_same_v<
+                        Operation,
+                        astraea::graphics::
+                            GraphicsIrShaderRegisterWriteRange>) {
+                    event_type =
+                        "shader_register_write_range";
+                    stable.push_back(
+                        u64_field(
+                            "start_offset",
+                            operation.start_offset));
+                    stable.push_back(
+                        u64_field(
+                            "value_count",
+                            operation.values.size()));
+                    stable.push_back(
+                        bytes_field(
+                            "value_bits",
+                            graphics_ir_register_value_bytes(
+                                operation)));
+                }
+            },
+            emission.operation);
+
         return GraphicsTraceEventResultV0::success(
             TraceEventV0{
                 .id = event_id,
                 .subsystem = "graphics.ir",
-                .type = "unsupported",
+                .type = std::move(event_type),
                 .guest = std::nullopt,
-                .stable =
-                    std::vector<TraceFieldV0>{
-                        text_field(
-                            "reason",
-                            graphics_ir_reason_text(
-                                unsupported.reason)),
-                    },
+                .stable = std::move(stable),
                 .diagnostics =
                     std::vector<TraceFieldV0>{
                         bytes_field(

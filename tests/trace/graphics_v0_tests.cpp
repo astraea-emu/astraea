@@ -1,5 +1,7 @@
 #include <astraea/graphics/graphics_ir.hpp>
 #include <astraea/graphics/packet.hpp>
+#include <astraea/graphics/pm4_set_sh_reg_ir.hpp>
+#include <astraea/graphics/pm4_type3_framing.hpp>
 #include <astraea/graphics/rdna2_decoder.hpp>
 #include <astraea/graphics/shader_cfg.hpp>
 #include <astraea/graphics/shader_control_execution.hpp>
@@ -1968,4 +1970,139 @@ TEST_CASE(
         diff->first_divergence->field_name ==
         std::optional<std::string>{
             "target_block_index"});
+}
+
+
+TEST_CASE(
+    "Graphics IR SET_SH_REG trace exposes stable range semantics",
+    "[trace][graphics][v0][set-sh-reg]") {
+    const std::vector<std::byte> bytes{
+        std::byte{0x00}, std::byte{0x76},
+        std::byte{0x02}, std::byte{0xc0},
+        std::byte{0x10}, std::byte{0x00},
+        std::byte{0x00}, std::byte{0x00},
+        std::byte{0x44}, std::byte{0x33},
+        std::byte{0x22}, std::byte{0x11},
+        std::byte{0x88}, std::byte{0x77},
+        std::byte{0x66}, std::byte{0x55},
+    };
+
+    const auto framed =
+        astraea::graphics::
+            frame_pm4_type3_stream(bytes);
+    REQUIRE(framed.has_value());
+    REQUIRE(framed->frames.size() == 1U);
+
+    const auto lowered =
+        astraea::graphics::
+            lower_pm4_type3_frame_to_graphics_ir(
+                framed->frames[0]);
+    REQUIRE(lowered.has_value());
+
+    auto event =
+        astraea::trace::trace_graphics_ir_v0(
+            25,
+            lowered.value());
+    REQUIRE(event.has_value());
+    REQUIRE(event->subsystem == "graphics.ir");
+    REQUIRE(
+        event->type ==
+        "shader_register_write_range");
+    REQUIRE(event->stable.size() == 3U);
+    REQUIRE(
+        event->stable[0].name ==
+        "start_offset");
+    REQUIRE(
+        event->stable[0].value ==
+        astraea::trace::TraceValueV0{
+            std::uint64_t{0x10U}});
+    REQUIRE(
+        event->stable[1].name ==
+        "value_count");
+    REQUIRE(
+        event->stable[1].value ==
+        astraea::trace::TraceValueV0{
+            std::uint64_t{2U}});
+    REQUIRE(
+        event->stable[2].name ==
+        "value_bits");
+    REQUIRE(
+        event->stable[2].value ==
+        astraea::trace::TraceValueV0{
+            std::vector<std::byte>{
+                std::byte{0x44},
+                std::byte{0x33},
+                std::byte{0x22},
+                std::byte{0x11},
+                std::byte{0x88},
+                std::byte{0x77},
+                std::byte{0x66},
+                std::byte{0x55}}});
+    REQUIRE(event->diagnostics.size() == 3U);
+}
+
+TEST_CASE(
+    "Graphics IR SET_SH_REG trace participates in first divergence",
+    "[trace][graphics][v0][set-sh-reg][diff]") {
+    auto make_ir =
+        [](std::uint32_t value)
+        -> astraea::graphics::GraphicsIrEmission {
+        std::vector<std::byte> bytes{
+            std::byte{0x00}, std::byte{0x76},
+            std::byte{0x01}, std::byte{0xc0},
+            std::byte{0x20}, std::byte{0x00},
+            std::byte{0x00}, std::byte{0x00},
+            std::byte{
+                static_cast<unsigned char>(
+                    value & 0xffU)},
+            std::byte{
+                static_cast<unsigned char>(
+                    (value >> 8U) & 0xffU)},
+            std::byte{
+                static_cast<unsigned char>(
+                    (value >> 16U) & 0xffU)},
+            std::byte{
+                static_cast<unsigned char>(
+                    (value >> 24U) & 0xffU)},
+        };
+
+        auto framed =
+            astraea::graphics::
+                frame_pm4_type3_stream(bytes);
+        REQUIRE(framed.has_value());
+        auto lowered =
+            astraea::graphics::
+                lower_pm4_type3_frame_to_graphics_ir(
+                    framed->frames[0]);
+        REQUIRE(lowered.has_value());
+        return std::move(lowered).value();
+    };
+
+    auto left =
+        astraea::trace::trace_graphics_ir_v0(
+            26,
+            make_ir(0x11111111U));
+    auto right =
+        astraea::trace::trace_graphics_ir_v0(
+            26,
+            make_ir(0x22222222U));
+
+    REQUIRE(left.has_value());
+    REQUIRE(right.has_value());
+
+    auto diff =
+        astraea::trace::diff_trace_v0(
+            document(std::move(left).value()),
+            document(std::move(right).value()));
+
+    REQUIRE(diff.has_value());
+    REQUIRE_FALSE(diff->equivalent);
+    REQUIRE(
+        diff->first_divergence->kind ==
+        astraea::trace::TraceDivergenceKindV0::
+            stable_field_value_mismatch);
+    REQUIRE(
+        diff->first_divergence->field_name ==
+        std::optional<std::string>{
+            "value_bits"});
 }
