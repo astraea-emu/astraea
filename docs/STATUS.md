@@ -1,7 +1,7 @@
 # Project Status
 
 **Integration gate:** V3 — submitted guest GPU state/resources -> Vulkan -> deterministic result  
-**State:** V0/V1/V2 complete; V3 active; host-GPU semantic proof, submitted shader binding, and generic context-register state complete; next dependency is mixed submitted shader/context state orchestration  
+**State:** V0/V1/V2 complete; V3 active; host-GPU semantic proof, submitted shader binding, and generic context-register state complete; next dependency is #175 W0 bounded WRITE_DATA semantics  
 **Repository:** astraea-emu/astraea  
 **In-flight work:** inspect live open GitHub PRs/issues; this file describes the expected merged frontier on `main`.
 
@@ -104,7 +104,8 @@
 11. #169 composes the captured DCB/state path through final pixel-program address resolution and unique created-shader selection with exact PGM source provenance.
 12. #172 selects the first resource-backed V3 workload: a tiny owned offscreen uniform-color graphics proof, deliberately excluding presentation.
 13. #173 adds generic PM4 SET_CONTEXT_REG lowering plus a separate persistent initialized-vs-zero ContextRegisterState without assigning PS5 meanings.
-14. The next code dependency is a bounded submitted-state orchestration slice that routes supported SET_SH_REG and SET_CONTEXT_REG frames into separate staged states in source order while preserving exact packet provenance and explicit failure on all other packet semantics.
+14. #175 inserts a bounded WRITE_DATA guest-buffer micro-gate before further raster orchestration so Astraea can establish guest GPU address/resource resolution independently of shader linkage, draw, export, and render-target semantics.
+15. The immediate next code dependency is #175 W0: ordinary AMD PM4 WRITE_DATA (0x37) memory-profile lowering to typed guest-GPU memory-write Graphics IR with no memory mutation or Vulkan.
 
 ## SCE metadata boundary
 
@@ -164,30 +165,38 @@ PS5-specific assumptions require documented evidence.
 
 ## Next action
 
-Add the smallest **mixed submitted graphics-state planner** required by the
-#172 offscreen workload.
+Implement **#175 W0**: the first bounded generic AMD PM4 WRITE_DATA semantic
+slice for the resource-substrate micro-workload.
 
-The planner must consume one already captured flag-zero DCB and, in source
-order:
+The first supported profile is:
 
-- frame the stream with the existing Type-3 framer;
-- route opcode 0x76 through the SET_SH_REG-specific lowerer and stage writes in
-  `ShaderRegisterState`;
-- route opcode 0x69 through the SET_CONTEXT_REG-specific lowerer and stage
-  writes in `ContextRegisterState`;
-- preserve exact RawPacket/frame/word provenance for effective state;
-- retain the existing unique created-pixel-shader selection proof;
-- fail explicitly on every other packet semantic.
+- Type-3 opcode `0x37`;
+- Type-3 low control byte = 0;
+- destination selector = 5 (direct memory);
+- increment-address = 0;
+- write-confirm = 1;
+- cache policy = 0 (LRU);
+- engine select = 0 (ME);
+- all other unsupported/reserved control bits = 0;
+- dword-aligned destination GPU address;
+- at least one inline payload dword.
 
-The planner must not mutate caller-owned state on failure and must not call
-Vulkan or return guest-visible SubmitDcb success.
+Lower that packet to a typed Graphics IR guest-GPU memory write containing the
+destination GPU-domain address, ordered inline dword payload, and exact
+RawPacket provenance.
 
-Do **not** assign PS5 meaning to any context-register offset in this slice.
-Render-target/viewport field semantics remain the next workload-driven evidence
-question after mixed state survives the submitted frontend boundary.
+W0 must not mutate memory, resolve guest resources, cast the guest GPU address
+to any CPU/host/Vulkan address, call Vulkan, or return guest-visible SubmitDcb
+success.
 
-The selected workload remains
-`docs/research/v3_offscreen_graphics_workload.md`.
+The evidence and W0-W2 resource plan are recorded in GitHub issue #175. W1
+will introduce a bounded predeclared guest GPU buffer address space; W2 will
+prove the same write through a real Vulkan buffer/readback path. After W0-W2,
+return to the #172 offscreen raster workload and select its next first missing
+dependency.
+
+#173 context-register state remains part of that later raster path and is not
+superseded by #175.
 
 Separately, add PM4 Type-3 stream and bounded RDNA2 stream fuzz-smoke coverage
 as a hardening follow-up when it can proceed without displacing the V3
