@@ -142,6 +142,7 @@ add_library(astraea_core STATIC
     src/graphics/graphics_ir.cpp
     src/graphics/shader_register_state.cpp
     src/graphics/context_register_state.cpp
+    src/graphics/color_target_state.cpp
     src/graphics/user_config_register_state.cpp
     src/graphics/rdna2_decoder.cpp
     src/graphics/shader_ir.cpp
