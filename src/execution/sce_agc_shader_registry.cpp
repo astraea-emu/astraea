@@ -31,6 +31,20 @@ materialization_error(
     };
 }
 
+[[nodiscard]] CreatedAgcShaderStageLookupError
+stage_lookup_error(
+    CreatedAgcShaderStageLookupErrorCode code,
+    astraea::graphics::GpuVirtualAddress program_address,
+    astraea::graphics::AgcShaderStage stage,
+    std::size_t match_count) noexcept {
+    return CreatedAgcShaderStageLookupError{
+        .code = code,
+        .program_address = program_address,
+        .stage = stage,
+        .match_count = match_count,
+    };
+}
+
 [[nodiscard]] CreatedAgcShaderHandleLookupError
 handle_lookup_error(
     CreatedAgcShaderHandleLookupErrorCode code,
@@ -228,6 +242,49 @@ CreatedAgcShaderRegistry::lookup_unique(
     }
 
     return CreatedAgcShaderLookupResult::success(
+        std::cref(*match));
+}
+
+CreatedAgcShaderStageLookupResult
+CreatedAgcShaderRegistry::lookup_unique_by_stage_and_code(
+    astraea::graphics::GpuVirtualAddress program_address,
+    astraea::graphics::AgcShaderStage stage) const noexcept {
+    const CreatedAgcShader* match = nullptr;
+    std::size_t match_count = 0;
+
+    for (const auto& shader : shaders_) {
+        if (shader.stage != stage ||
+            shader.code_address != program_address) {
+            continue;
+        }
+
+        ++match_count;
+        if (match_count == 1U) {
+            match = &shader;
+        }
+    }
+
+    if (match_count == 0U || match == nullptr) {
+        return CreatedAgcShaderStageLookupResult::failure(
+            stage_lookup_error(
+                CreatedAgcShaderStageLookupErrorCode::
+                    not_found,
+                program_address,
+                stage,
+                0U));
+    }
+
+    if (match_count != 1U) {
+        return CreatedAgcShaderStageLookupResult::failure(
+            stage_lookup_error(
+                CreatedAgcShaderStageLookupErrorCode::
+                    ambiguous,
+                program_address,
+                stage,
+                match_count));
+    }
+
+    return CreatedAgcShaderStageLookupResult::success(
         std::cref(*match));
 }
 
