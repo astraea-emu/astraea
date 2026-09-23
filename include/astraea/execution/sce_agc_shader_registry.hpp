@@ -99,6 +99,28 @@ using CreatedAgcShaderLookupResult =
         std::reference_wrapper<const CreatedAgcShader>,
         CreatedAgcShaderLookupError>;
 
+enum class CreatedAgcShaderStageLookupErrorCode {
+    not_found,
+    ambiguous,
+};
+
+struct CreatedAgcShaderStageLookupError {
+    CreatedAgcShaderStageLookupErrorCode code =
+        CreatedAgcShaderStageLookupErrorCode::not_found;
+    astraea::graphics::GpuVirtualAddress program_address;
+    astraea::graphics::AgcShaderStage stage =
+        astraea::graphics::AgcShaderStage::pixel;
+    std::size_t match_count = 0;
+
+    auto operator<=>(
+        const CreatedAgcShaderStageLookupError&) const = default;
+};
+
+using CreatedAgcShaderStageLookupResult =
+    astraea::core::Result<
+        std::reference_wrapper<const CreatedAgcShader>,
+        CreatedAgcShaderStageLookupError>;
+
 enum class CreatedAgcShaderHandleLookupErrorCode {
     not_found,
     ambiguous,
@@ -142,6 +164,17 @@ public:
     lookup_unique(
         astraea::graphics::PixelProgramGpuAddress
             program_address) const noexcept;
+
+    // Stage-qualified GPU program identity. This is the generic lookup used by
+    // later submitted-stage binding; identical numeric code addresses in
+    // different shader stages never make each other ambiguous.
+    //
+    // The returned reference remains valid only until the next registry
+    // mutation.
+    [[nodiscard]] CreatedAgcShaderStageLookupResult
+    lookup_unique_by_stage_and_code(
+        astraea::graphics::GpuVirtualAddress program_address,
+        astraea::graphics::AgcShaderStage stage) const noexcept;
 
     // Stage-independent identity used by later shader linkage. Duplicate
     // handles remain preserved and are reported explicitly as ambiguous.
