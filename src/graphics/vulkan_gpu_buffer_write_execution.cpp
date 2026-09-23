@@ -527,6 +527,26 @@ plan_vulkan_gpu_buffer_write(
                     payload_too_large));
     }
 
+    const auto host_buffer_size =
+        static_cast<std::size_t>(region.byte_size);
+    if (static_cast<std::uint64_t>(
+            host_buffer_size) != region.byte_size) {
+        return VulkanGpuBufferWritePlanResult::failure(
+            make_error(
+                VulkanGpuBufferWriteErrorCode::
+                    buffer_size_unrepresentable));
+    }
+
+    const auto vk_buffer_size =
+        static_cast<VkDeviceSize>(region.byte_size);
+    if (static_cast<std::uint64_t>(
+            vk_buffer_size) != region.byte_size) {
+        return VulkanGpuBufferWritePlanResult::failure(
+            make_error(
+                VulkanGpuBufferWriteErrorCode::
+                    buffer_size_unrepresentable));
+    }
+
     return VulkanGpuBufferWritePlanResult::success(
         VulkanGpuBufferWritePlan{
             .buffer_id = region.id,
