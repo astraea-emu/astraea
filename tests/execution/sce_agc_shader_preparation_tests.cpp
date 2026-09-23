@@ -1170,6 +1170,129 @@ TEST_CASE(
 }
 
 TEST_CASE(
+    "Geometry AGC preparation applies ES program address and preserves unknown bytes",
+    "[execution][agc][prepare][apply][linux][geometry]") {
+    auto layout = make_mapped_fixture();
+    auto prepared =
+        astraea::execution::
+            prepare_linux_guest_memory(
+                layout.image);
+    REQUIRE(prepared.has_value());
+
+    GuestMemoryAccess memory{
+        layout.image,
+        prepared.value()};
+
+    auto fixture =
+        make_public_shape_geometry_fixture();
+    const auto output =
+        layout.data_base + 0x20U;
+    const auto header =
+        layout.data_base + 0x100U;
+    const auto text =
+        layout.data_base + layout.page;
+
+    REQUIRE((text & 0xffU) == 0U);
+    REQUIRE(
+        memory.write(
+            GuestAddress{header},
+            fixture.header)
+            .has_value());
+    REQUIRE(
+        memory.write(
+            GuestAddress{text},
+            fixture.text)
+            .has_value());
+
+    std::array<std::byte, 8> output_sentinel{
+        std::byte{0x10},
+        std::byte{0x20},
+        std::byte{0x30},
+        std::byte{0x40},
+        std::byte{0x50},
+        std::byte{0x60},
+        std::byte{0x70},
+        std::byte{0x80},
+    };
+    REQUIRE(
+        memory.write(
+            GuestAddress{output},
+            output_sentinel)
+            .has_value());
+
+    auto captured =
+        astraea::execution::
+            plan_sce_agc_create_shader(
+                make_call(
+                    output,
+                    header,
+                    text),
+                memory);
+    REQUIRE(captured.has_value());
+    REQUIRE(
+        captured->shader.program_type.known ==
+        std::optional<
+            astraea::graphics::AgcShaderStage>{
+            astraea::graphics::AgcShaderStage::
+                geometry});
+
+    auto plan =
+        astraea::execution::
+            plan_sce_agc_shader_preparation(
+                captured.value());
+    REQUIRE(plan.has_value());
+    REQUIRE(
+        plan->profile ==
+        astraea::execution::
+            SceAgcShaderPreparationProfile::
+                v18_geometry_es_public_shape);
+
+    auto applied =
+        astraea::execution::
+            apply_sce_agc_shader_preparation(
+                plan.value(),
+                memory);
+    REQUIRE(applied.has_value());
+    REQUIRE(
+        applied->applied_patch_count ==
+        plan->patches.size());
+    REQUIRE(
+        applied->shader_handle ==
+        GuestAddress{header});
+
+    REQUIRE(
+        read_guest_value<std::uint64_t>(
+            memory,
+            header + 0x10U) ==
+        text);
+    REQUIRE(
+        read_guest_value<std::uint32_t>(
+            memory,
+            header + kShaderOffset + 4U) ==
+        static_cast<std::uint32_t>(
+            (text >> 8U) & 0xffffffffU));
+    REQUIRE(
+        read_guest_value<std::uint32_t>(
+            memory,
+            header + kShaderOffset + 12U) ==
+        static_cast<std::uint32_t>(
+            (text >> 40U) & 0xffU));
+    REQUIRE(
+        read_guest_value<std::uint64_t>(
+            memory,
+            output) ==
+        header);
+
+    std::array<std::byte, 1> unknown{};
+    REQUIRE(
+        memory.read(
+            GuestAddress{header + 0x71U},
+            unknown)
+            .has_value());
+    REQUIRE(unknown[0] == std::byte{0x6b});
+}
+
+TEST_CASE(
     "AGC preparation preflight failure leaves header byte-identical",
     "[execution][agc][prepare][apply][atomic][linux]") {
     auto layout = make_mapped_fixture();
