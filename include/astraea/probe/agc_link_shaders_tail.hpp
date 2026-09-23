@@ -72,9 +72,9 @@ struct AgcLinkShadersTailValidatedObservation {
         3>
         unknown_user_config_records{};
 
-    bool unknown_context_record_untouched = false;
+    bool unknown_context_record_matches_sentinel = false;
     std::array<bool, 3>
-        unknown_user_config_record_untouched{};
+        unknown_user_config_record_matches_sentinel{};
 
     auto operator<=>(
         const AgcLinkShadersTailValidatedObservation&) const = default;
