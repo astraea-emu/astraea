@@ -69,7 +69,7 @@ astraea::graphics::GraphicsIrEmission lower_one(
     auto frame = frame_one(words);
     auto lowered =
         astraea::graphics::
-            lower_pm4_type3_frame_to_graphics_ir(
+            lower_pm4_set_sh_reg_frame_to_graphics_ir(
                 frame);
     REQUIRE(lowered.has_value());
     return std::move(lowered).value();
@@ -180,7 +180,7 @@ TEST_CASE(
 
     const auto result =
         astraea::graphics::
-            lower_pm4_type3_frame_to_graphics_ir(
+            lower_pm4_set_sh_reg_frame_to_graphics_ir(
                 frame);
 
     REQUIRE_FALSE(result.has_value());
@@ -206,7 +206,7 @@ TEST_CASE(
 
     const auto result =
         astraea::graphics::
-            lower_pm4_type3_frame_to_graphics_ir(
+            lower_pm4_set_sh_reg_frame_to_graphics_ir(
                 frame);
 
     REQUIRE_FALSE(result.has_value());
@@ -253,7 +253,7 @@ TEST_CASE(
 
     const auto result =
         astraea::graphics::
-            lower_pm4_type3_frame_to_graphics_ir(
+            lower_pm4_set_sh_reg_frame_to_graphics_ir(
                 frame);
 
     REQUIRE_FALSE(result.has_value());
@@ -342,11 +342,11 @@ TEST_CASE(
 
     const auto first =
         astraea::graphics::
-            lower_pm4_type3_frame_to_graphics_ir(
+            lower_pm4_set_sh_reg_frame_to_graphics_ir(
                 framed->frames[0]);
     const auto second =
         astraea::graphics::
-            lower_pm4_type3_frame_to_graphics_ir(
+            lower_pm4_set_sh_reg_frame_to_graphics_ir(
                 framed->frames[1]);
 
     REQUIRE(first.has_value());
