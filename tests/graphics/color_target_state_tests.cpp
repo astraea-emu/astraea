@@ -19,7 +19,8 @@ make_complete_state(
     std::uint64_t address = 0x0000123456789a00ULL,
     std::uint32_t target_mask = 0x0fU,
     std::uint32_t info = (10U << 2U),
-    std::uint32_t attrib2 = (3U << 14U) | 3U) {
+    std::uint32_t attrib2 = (3U << 14U) | 3U,
+    std::uint32_t attrib3 = 0U) {
     astraea::graphics::ContextRegisterState state{};
 
     set_register(
@@ -43,6 +44,10 @@ make_complete_state(
         state,
         astraea::graphics::kColorTarget0Attrib2ContextOffset,
         attrib2);
+    set_register(
+        state,
+        astraea::graphics::kColorTarget0Attrib3ContextOffset,
+        attrib3);
 
     return state;
 }
@@ -83,6 +88,11 @@ TEST_CASE(
     REQUIRE(result->width == 4U);
     REQUIRE(result->height == 4U);
     REQUIRE(result->raw_attrib2 == ((3U << 14U) | 3U));
+    REQUIRE(
+        result->raw_attrib3 ==
+        ((7U << 14U) | (2U << 24U)));
+    REQUIRE(result->color_sw_mode == 7U);
+    REQUIRE(result->resource_type == 2U);
 }
 
 TEST_CASE(
@@ -175,6 +185,20 @@ TEST_CASE(
             astraea::graphics::ColorTarget0ContextErrorCode::
                 attrib2_uninitialized);
     }
+
+    SECTION("attrib3") {
+        auto state = make_complete_state();
+        state.initialized.reset(
+            astraea::graphics::kColorTarget0Attrib3ContextOffset);
+
+        const auto result =
+            astraea::graphics::resolve_color_target0_context_state(state);
+        REQUIRE_FALSE(result.has_value());
+        REQUIRE(
+            result.error().code ==
+            astraea::graphics::ColorTarget0ContextErrorCode::
+                attrib3_uninitialized);
+    }
 }
 
 TEST_CASE(
@@ -221,4 +245,7 @@ TEST_CASE(
     REQUIRE_FALSE(result->dcc_enabled);
     REQUIRE(result->width == 4U);
     REQUIRE(result->height == 4U);
+    REQUIRE(result->raw_attrib3 == 0U);
+    REQUIRE(result->color_sw_mode == 0U);
+    REQUIRE(result->resource_type == 0U);
 }
