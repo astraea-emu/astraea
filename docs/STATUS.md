@@ -1,7 +1,7 @@
 # Project Status
 
 **Integration gate:** V3 — submitted guest GPU state/resources -> Vulkan -> deterministic result  
-**State:** V0/V1/V2 complete; V3 active; host-GPU semantic proof complete; next dependency is submission-side created-shader binding  
+**State:** V0/V1/V2 complete; V3 active; host-GPU semantic proof and submission-side created-shader binding complete; next dependency is the first owned deterministic resource-backed workload  
 **Repository:** astraea-emu/astraea  
 **In-flight work:** inspect live open GitHub PRs/issues; this file describes the expected merged frontier on `main`.
 
@@ -79,6 +79,7 @@
 - Created pixel shader materialization plus duplicate-safe not-found/unique/ambiguous lookup by typed program GPU address is complete and five-gate validated (#162/#163).
 - Transactional created-shader registration in the real `sceAgcCreateShader` HLE path is complete and five-gate validated (#164/#165), including typed materialization/registration failures and exact-last-entry rollback if guest publication fails.
 - Post-V1/V2/V3 architecture synchronization and the separate semantic-IR/compiler-IR contract are complete (#166/#167, ADR 0007).
+- Evidence-bounded submitted pixel-shader binding is complete (#169): flag-zero captured DCB -> zero-control Type-3 frames -> SET_SH_REG Graphics IR -> fresh shader-register state -> typed pixel program GPU address -> duplicate-safe unique created-shader selection, with final PGM_LO/PGM_HI DCB word provenance and no fake SubmitDcb success or Vulkan work.
 - Public five-gate CI remains the merge requirement:
   - Linux x64
   - Windows x64
@@ -98,7 +99,8 @@
 8. #162/#163 materialize validated created pixel shaders and provide duplicate-safe lookup by that address.
 9. #164/#165 register those created shaders transactionally in the real `sceAgcCreateShader` HLE path.
 10. #166/#167 reconcile durable V1/V2/V3 documentation and record the semantic-IR/compiler-IR boundary after the rapid proof-chain merges.
-11. The next code dependency is submission-side shader binding; draw/dispatch semantics, resource meaning, other shader stages, and real guest-resource Vulkan execution remain later workload-driven dependencies.
+11. #169 composes the captured DCB/state path through final pixel-program address resolution and unique created-shader selection with exact PGM source provenance.
+12. The next code dependency must come from one owned deterministic resource-backed V3 workload; draw/dispatch semantics, resource meaning, other shader stages, and real guest-resource Vulkan execution remain workload-driven dependencies rather than coverage goals.
 
 ## SCE metadata boundary
 
@@ -158,23 +160,24 @@ PS5-specific assumptions require documented evidence.
 
 ## Next action
 
-Create the smallest owned V3 submission-side created-shader binding issue.
+Specify one **owned deterministic resource-backed V3 workload** and trace its
+shortest end-to-end path from the now-connected submitted pixel-shader binding
+toward a deterministic host-visible Vulkan result.
 
-The bounded proof is:
+The workload specification must identify:
 
-`captured DCB -> Type-3 framing -> SET_SH_REG IR -> persistent shader state -> pixel program address -> unique created-shader lookup`.
+- the exact owned guest command/state/resource setup;
+- the expected deterministic result;
+- which already-supported shader subset it uses;
+- the first missing PM4/resource/descriptor/memory/export/synchronization
+  dependency on that path;
+- the evidence source for that dependency, or an explicit evidence blocker if
+  public evidence is insufficient.
 
-The first owned DCB profile should contain only packet semantics already
-supported by this proof. Unknown/state-changing packet semantics must fail
-explicitly rather than being silently skipped.
-
-The binding result must retain enough provenance to identify the final
-PGM_LO/PGM_HI source frame/word offsets while the captured DCB remains the raw
-byte source of truth. Do not build a speculative full-register provenance
-framework solely for this slice.
-
-Do not claim SubmitDcb success, interpret draw/dispatch packets, decode
-resources/descriptors, call Vulkan, or add unrelated RDNA2 coverage.
+Do not choose the next task by raw opcode/API coverage. Do not wire
+`sceAgcDriverSubmitDcb` to fake success merely because shader selection is now
+connected. Do not invent descriptor/resource semantics or treat guest GPU
+addresses as host/Vulkan addresses.
 
 Separately, add PM4 Type-3 stream and bounded RDNA2 stream fuzz-smoke coverage
 as a hardening follow-up when it can proceed without displacing the V3
