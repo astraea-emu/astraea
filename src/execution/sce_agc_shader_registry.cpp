@@ -31,14 +31,56 @@ materialization_error(
     };
 }
 
+[[nodiscard]] CreatedAgcShaderHandleLookupError
+handle_lookup_error(
+    CreatedAgcShaderHandleLookupErrorCode code,
+    astraea::memory::GuestAddress shader_handle,
+    std::size_t match_count) noexcept {
+    return CreatedAgcShaderHandleLookupError{
+        .code = code,
+        .shader_handle = shader_handle,
+        .match_count = match_count,
+    };
+}
+
 }  // namespace
 
 CreatedAgcShaderMaterializationResult
 materialize_created_agc_shader(
     const SceAgcShaderPreparationPlan& preparation) {
-    if (preparation.profile !=
-        SceAgcShaderPreparationProfile::
-            v18_pixel_public_shape) {
+    using Stage = astraea::graphics::AgcShaderStage;
+
+    const auto& shader = preparation.create_shader.shader;
+    Stage stage = Stage::pixel;
+
+    switch (preparation.profile) {
+    case SceAgcShaderPreparationProfile::
+        v18_pixel_public_shape:
+        if (shader.program_type.raw != 1U ||
+            shader.program_type.known !=
+                std::optional<Stage>{Stage::pixel}) {
+            return CreatedAgcShaderMaterializationResult::failure(
+                materialization_error(
+                    CreatedAgcShaderMaterializationErrorCode::
+                        preparation_stage_mismatch));
+        }
+        stage = Stage::pixel;
+        break;
+
+    case SceAgcShaderPreparationProfile::
+        v18_geometry_es_public_shape:
+        if (shader.program_type.raw != 2U ||
+            shader.program_type.known !=
+                std::optional<Stage>{Stage::geometry}) {
+            return CreatedAgcShaderMaterializationResult::failure(
+                materialization_error(
+                    CreatedAgcShaderMaterializationErrorCode::
+                        preparation_stage_mismatch));
+        }
+        stage = Stage::geometry;
+        break;
+
+    default:
         return CreatedAgcShaderMaterializationResult::failure(
             materialization_error(
                 CreatedAgcShaderMaterializationErrorCode::
@@ -48,7 +90,7 @@ materialize_created_agc_shader(
     auto shader_ir =
         astraea::graphics::
             lower_rdna2_stream_to_shader_ir(
-                preparation.create_shader.shader.rdna2_words);
+                shader.rdna2_words);
     if (!shader_ir.has_value()) {
         return CreatedAgcShaderMaterializationResult::failure(
             materialization_error(
@@ -60,16 +102,18 @@ materialize_created_agc_shader(
     try {
         return CreatedAgcShaderMaterializationResult::success(
             CreatedAgcShader{
-                .program_address =
-                    astraea::graphics::
-                        PixelProgramGpuAddress{
-                            .value =
-                                preparation
-                                    .create_shader
-                                    .request
-                                    .shader_text_address
-                                    .value(),
-                        },
+                .code_address =
+                    astraea::graphics::GpuVirtualAddress{
+                        .value =
+                            preparation
+                                .create_shader
+                                .request
+                                .shader_text_address
+                                .value(),
+                    },
+                .stage = stage,
+                .preparation_profile =
+                    preparation.profile,
                 .shader_handle =
                     preparation.shader_handle,
                 .shader_header_address =
@@ -82,8 +126,7 @@ materialize_created_agc_shader(
                         .create_shader
                         .request
                         .shader_text_address,
-                .shader =
-                    preparation.create_shader.shader,
+                .shader = shader,
                 .shader_ir =
                     std::move(shader_ir).value(),
             });
@@ -153,7 +196,10 @@ CreatedAgcShaderRegistry::lookup_unique(
     std::size_t match_count = 0;
 
     for (const auto& shader : shaders_) {
-        if (shader.program_address != program_address) {
+        if (shader.stage !=
+                astraea::graphics::AgcShaderStage::pixel ||
+            shader.code_address.value !=
+                program_address.value) {
             continue;
         }
 
@@ -182,6 +228,46 @@ CreatedAgcShaderRegistry::lookup_unique(
     }
 
     return CreatedAgcShaderLookupResult::success(
+        std::cref(*match));
+}
+
+CreatedAgcShaderHandleLookupResult
+CreatedAgcShaderRegistry::lookup_unique_by_handle(
+    astraea::memory::GuestAddress
+        shader_handle) const noexcept {
+    const CreatedAgcShader* match = nullptr;
+    std::size_t match_count = 0;
+
+    for (const auto& shader : shaders_) {
+        if (shader.shader_handle != shader_handle) {
+            continue;
+        }
+
+        ++match_count;
+        if (match_count == 1) {
+            match = &shader;
+        }
+    }
+
+    if (match_count == 0 || match == nullptr) {
+        return CreatedAgcShaderHandleLookupResult::failure(
+            handle_lookup_error(
+                CreatedAgcShaderHandleLookupErrorCode::
+                    not_found,
+                shader_handle,
+                0));
+    }
+
+    if (match_count != 1) {
+        return CreatedAgcShaderHandleLookupResult::failure(
+            handle_lookup_error(
+                CreatedAgcShaderHandleLookupErrorCode::
+                    ambiguous,
+                shader_handle,
+                match_count));
+    }
+
+    return CreatedAgcShaderHandleLookupResult::success(
         std::cref(*match));
 }
 

@@ -41,7 +41,16 @@ make_preparation(
     std::vector<std::uint32_t> rdna2_words = {
         make_sopp(0, 0),
         make_sopp(1, 0),
-    }) {
+    },
+    std::uint8_t raw_program_type = 1U,
+    std::optional<astraea::graphics::AgcShaderStage>
+        known_stage =
+            astraea::graphics::AgcShaderStage::pixel,
+    astraea::execution::SceAgcShaderPreparationProfile
+        profile =
+            astraea::execution::
+                SceAgcShaderPreparationProfile::
+                    v18_pixel_public_shape) {
     astraea::graphics::AgcShaderBinary shader{
         .header_magic = 0x34333231U,
         .header_version = 0x18U,
@@ -49,10 +58,8 @@ make_preparation(
         .declared_shader_text_size = 0x80U,
         .program_type =
             astraea::graphics::AgcShaderProgramType{
-                .raw = 1U,
-                .known =
-                    astraea::graphics::AgcShaderStage::
-                        pixel,
+                .raw = raw_program_type,
+                .known = known_stage,
             },
         .context_register_list_header_offset =
             0xc8U,
@@ -92,10 +99,7 @@ make_preparation(
                                 },
                         .shader = std::move(shader),
                     },
-            .profile =
-                astraea::execution::
-                    SceAgcShaderPreparationProfile::
-                        v18_pixel_public_shape,
+            .profile = profile,
             .shader_handle =
                 astraea::memory::GuestAddress{
                     handle_address},
@@ -113,6 +117,33 @@ require_created(
             header_address,
             text_address,
             handle_address);
+    auto result =
+        astraea::execution::
+            materialize_created_agc_shader(
+                preparation);
+    REQUIRE(result.has_value());
+    return std::move(result).value();
+}
+
+astraea::execution::CreatedAgcShader
+require_geometry_created(
+    std::uint64_t header_address,
+    std::uint64_t text_address,
+    std::uint64_t handle_address) {
+    const auto preparation =
+        make_preparation(
+            header_address,
+            text_address,
+            handle_address,
+            {
+                make_sopp(0, 0),
+                make_sopp(1, 0),
+            },
+            2U,
+            astraea::graphics::AgcShaderStage::geometry,
+            astraea::execution::
+                SceAgcShaderPreparationProfile::
+                    v18_geometry_es_public_shape);
     auto result =
         astraea::execution::
             materialize_created_agc_shader(
@@ -142,10 +173,18 @@ TEST_CASE(
 
     REQUIRE(result.has_value());
     REQUIRE(
-        result->program_address ==
+        result->code_address ==
         astraea::graphics::
-            PixelProgramGpuAddress{
+            GpuVirtualAddress{
                 .value = kText});
+    REQUIRE(
+        result->stage ==
+        astraea::graphics::AgcShaderStage::pixel);
+    REQUIRE(
+        result->preparation_profile ==
+        astraea::execution::
+            SceAgcShaderPreparationProfile::
+                v18_pixel_public_shape);
     REQUIRE(
         result->shader_handle ==
         astraea::memory::GuestAddress{kHandle});
@@ -168,6 +207,62 @@ TEST_CASE(
         std::holds_alternative<
             astraea::graphics::ShaderIrEndProgram>(
             result->shader_ir.emissions[1].operation));
+}
+
+TEST_CASE(
+    "created Geometry AGC shader materialization preserves stage profile and provenance",
+    "[execution][agc][shader-registry][geometry]") {
+    constexpr std::uint64_t kHeader = 0x00110000ULL;
+    constexpr std::uint64_t kText = 0x00245600ULL;
+    constexpr std::uint64_t kHandle = 0x00110000ULL;
+
+    const auto preparation =
+        make_preparation(
+            kHeader,
+            kText,
+            kHandle,
+            {
+                make_sopp(0, 0),
+                make_sopp(1, 0),
+            },
+            2U,
+            astraea::graphics::AgcShaderStage::geometry,
+            astraea::execution::
+                SceAgcShaderPreparationProfile::
+                    v18_geometry_es_public_shape);
+    const auto result =
+        astraea::execution::
+            materialize_created_agc_shader(
+                preparation);
+
+    REQUIRE(result.has_value());
+    REQUIRE(
+        result->code_address ==
+        astraea::graphics::
+            GpuVirtualAddress{
+                .value = kText});
+    REQUIRE(
+        result->stage ==
+        astraea::graphics::AgcShaderStage::geometry);
+    REQUIRE(
+        result->preparation_profile ==
+        astraea::execution::
+            SceAgcShaderPreparationProfile::
+                v18_geometry_es_public_shape);
+    REQUIRE(
+        result->shader_handle ==
+        astraea::memory::GuestAddress{kHandle});
+    REQUIRE(
+        result->shader_header_address ==
+        astraea::memory::GuestAddress{kHeader});
+    REQUIRE(
+        result->shader_text_address ==
+        astraea::memory::GuestAddress{kText});
+    REQUIRE(
+        result->shader ==
+        preparation.create_shader.shader);
+    REQUIRE(result->shader_ir.source_word_count == 2U);
+    REQUIRE(result->shader_ir.emissions.size() == 2U);
 }
 
 TEST_CASE(
@@ -222,6 +317,59 @@ TEST_CASE(
 }
 
 TEST_CASE(
+    "created AGC shader materialization rejects profile stage mismatches",
+    "[execution][agc][shader-registry][negative][stage]") {
+    SECTION("pixel profile with Geometry binary") {
+        auto preparation =
+            make_preparation(
+                0x00100000ULL,
+                0x00200000ULL,
+                0x00100000ULL);
+        preparation.create_shader.shader.program_type =
+            astraea::graphics::AgcShaderProgramType{
+                .raw = 2U,
+                .known =
+                    astraea::graphics::AgcShaderStage::
+                        geometry,
+            };
+
+        const auto result =
+            astraea::execution::
+                materialize_created_agc_shader(
+                    preparation);
+        REQUIRE_FALSE(result.has_value());
+        REQUIRE(
+            result.error().code ==
+            astraea::execution::
+                CreatedAgcShaderMaterializationErrorCode::
+                    preparation_stage_mismatch);
+    }
+
+    SECTION("Geometry profile with pixel binary") {
+        auto preparation =
+            make_preparation(
+                0x00100000ULL,
+                0x00200000ULL,
+                0x00100000ULL);
+        preparation.profile =
+            astraea::execution::
+                SceAgcShaderPreparationProfile::
+                    v18_geometry_es_public_shape;
+
+        const auto result =
+            astraea::execution::
+                materialize_created_agc_shader(
+                    preparation);
+        REQUIRE_FALSE(result.has_value());
+        REQUIRE(
+            result.error().code ==
+            astraea::execution::
+                CreatedAgcShaderMaterializationErrorCode::
+                    preparation_stage_mismatch);
+    }
+}
+
+TEST_CASE(
     "created AGC shader materialization rejects unsupported preparation profile",
     "[execution][agc][shader-registry][negative]") {
     auto preparation =
@@ -261,7 +409,7 @@ TEST_CASE(
             0x00200000ULL,
             0x00100000ULL);
     auto second =
-        require_created(
+        require_geometry_created(
             0x00110000ULL,
             0x00300000ULL,
             0x00110000ULL);
@@ -387,8 +535,8 @@ TEST_CASE(
 
     REQUIRE(registry.size() == 2U);
     REQUIRE(
-        registry.entry_at(0U)->program_address ==
-        registry.entry_at(1U)->program_address);
+        registry.entry_at(0U)->code_address ==
+        registry.entry_at(1U)->code_address);
     REQUIRE(
         registry.entry_at(0U)->shader_handle !=
         registry.entry_at(1U)->shader_handle);
@@ -406,6 +554,124 @@ TEST_CASE(
             CreatedAgcShaderLookupErrorCode::
                 ambiguous);
     REQUIRE(result.error().match_count == 2U);
+}
+
+TEST_CASE(
+    "pixel lookup ignores Geometry record with the same numeric code address",
+    "[execution][agc][shader-registry][lookup][mixed-stage]") {
+    astraea::execution::CreatedAgcShaderRegistry registry;
+
+    auto pixel =
+        require_created(
+            0x00100000ULL,
+            0x00200000ULL,
+            0x00100000ULL);
+    auto geometry =
+        require_geometry_created(
+            0x00110000ULL,
+            0x00200000ULL,
+            0x00110000ULL);
+
+    REQUIRE(
+        registry.register_shader(
+            std::move(pixel))
+            .has_value());
+    REQUIRE(
+        registry.register_shader(
+            std::move(geometry))
+            .has_value());
+
+    const auto result =
+        registry.lookup_unique(
+            astraea::graphics::
+                PixelProgramGpuAddress{
+                    .value = 0x00200000ULL});
+
+    REQUIRE(result.has_value());
+    REQUIRE(
+        result.value().get().stage ==
+        astraea::graphics::AgcShaderStage::pixel);
+    REQUIRE(
+        result.value().get().shader_handle ==
+        astraea::memory::GuestAddress{
+            0x00100000ULL});
+}
+
+TEST_CASE(
+    "created AGC shader handle lookup is stage independent and duplicate safe",
+    "[execution][agc][shader-registry][handle-lookup]") {
+    astraea::execution::CreatedAgcShaderRegistry registry;
+
+    auto pixel =
+        require_created(
+            0x00100000ULL,
+            0x00200000ULL,
+            0x00100000ULL);
+    auto geometry =
+        require_geometry_created(
+            0x00110000ULL,
+            0x00300000ULL,
+            0x00110000ULL);
+
+    REQUIRE(
+        registry.register_shader(
+            std::move(pixel))
+            .has_value());
+    REQUIRE(
+        registry.register_shader(
+            std::move(geometry))
+            .has_value());
+
+    const auto geometry_lookup =
+        registry.lookup_unique_by_handle(
+            astraea::memory::GuestAddress{
+                0x00110000ULL});
+    REQUIRE(geometry_lookup.has_value());
+    REQUIRE(
+        geometry_lookup.value().get().stage ==
+        astraea::graphics::AgcShaderStage::geometry);
+    REQUIRE(
+        geometry_lookup.value().get().code_address ==
+        astraea::graphics::GpuVirtualAddress{
+            .value = 0x00300000ULL});
+
+    const auto missing =
+        registry.lookup_unique_by_handle(
+            astraea::memory::GuestAddress{
+                0x00900000ULL});
+    REQUIRE_FALSE(missing.has_value());
+    REQUIRE(
+        missing.error().code ==
+        astraea::execution::
+            CreatedAgcShaderHandleLookupErrorCode::
+                not_found);
+    REQUIRE(
+        missing.error().shader_handle ==
+        astraea::memory::GuestAddress{
+            0x00900000ULL});
+    REQUIRE(missing.error().match_count == 0U);
+
+    auto duplicate =
+        require_geometry_created(
+            0x00120000ULL,
+            0x00400000ULL,
+            0x00110000ULL);
+    REQUIRE(
+        registry.register_shader(
+            std::move(duplicate))
+            .has_value());
+
+    const auto ambiguous =
+        registry.lookup_unique_by_handle(
+            astraea::memory::GuestAddress{
+                0x00110000ULL});
+    REQUIRE_FALSE(ambiguous.has_value());
+    REQUIRE(
+        ambiguous.error().code ==
+        astraea::execution::
+            CreatedAgcShaderHandleLookupErrorCode::
+                ambiguous);
+    REQUIRE(ambiguous.error().match_count == 2U);
 }
 
 TEST_CASE(
@@ -468,7 +734,7 @@ TEST_CASE(
             0x00200000ULL,
             0x00100000ULL);
     auto second =
-        require_created(
+        require_geometry_created(
             0x00110000ULL,
             0x00300000ULL,
             0x00110000ULL);

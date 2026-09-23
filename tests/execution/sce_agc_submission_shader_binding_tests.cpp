@@ -95,11 +95,18 @@ void register_shader(
     auto result =
         registry.register_shader(
             astraea::execution::CreatedAgcShader{
-                .program_address =
+                .code_address =
                     astraea::graphics::
-                        PixelProgramGpuAddress{
+                        GpuVirtualAddress{
                             .value = program_address,
                         },
+                .stage =
+                    astraea::graphics::
+                        AgcShaderStage::pixel,
+                .preparation_profile =
+                    astraea::execution::
+                        SceAgcShaderPreparationProfile::
+                            v18_pixel_public_shape,
                 .shader_handle =
                     astraea::memory::GuestAddress{handle},
                 .shader_header_address =
