@@ -88,7 +88,7 @@
 
 ## Current frontier
 
-1. V1 is complete through #148/#149.
+1. V1 guest execution is proven through #148/#149 and persistent created-shader identity/transactional publication is complete through #162-#165.
 2. V2's first deterministic SPIR-V backend is complete through #150/#151.
 3. V3's first actual host-GPU proof is complete through #152/#153.
 4. #154/#155 capture a real SubmitDcb descriptor/stream.
