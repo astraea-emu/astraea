@@ -19,10 +19,11 @@ integration**.
 GitHub is authoritative.
 
 - `docs/PROJECT_PLAN.md` — durable strategy, architectural workstreams, and
-  vertical integration gate definitions. It intentionally does not own the
-  active branch/issue/next-action pointer.
-- `docs/STATUS.md` — the sole volatile frontier: current state, active
-  branch/issue, blockers, and exact next action.
+  vertical integration gate definitions.
+- `docs/STATUS.md` — the canonical **merged frontier**: completed state,
+  blockers, and exact next dependency/action expected on `main`.
+- Open GitHub issues / pull requests — authoritative in-flight work and branch
+  state. Unmerged PR behavior is not completed project behavior.
 - `docs/CHAT_HANDOFF.md` — procedure for moving to a fresh AI conversation.
 - `docs/adr/` — durable architecture decisions and their evidence.
 - `docs/research/` — evidence notes and bounded format/behavior research.
@@ -480,5 +481,6 @@ Platform HLE, RDNA2 coverage, GPU commands/resources, compiler lowering, and
 verification tooling feed this path only when the next owned workload requires
 them. They are not separate finish-all phases.
 
-The exact active branch/issue and next executable action are intentionally
-recorded only in `docs/STATUS.md`.
+The merged next dependency/action is recorded in `docs/STATUS.md`.
+Any in-flight branch/issue is discovered from live open GitHub PRs/issues
+rather than hard-coded into durable roadmap text.
