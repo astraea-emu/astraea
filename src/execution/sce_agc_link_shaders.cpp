@@ -520,4 +520,191 @@ apply_sce_agc_link_shaders_measured_output(
         });
 }
 
+
+namespace {
+
+template <typename T>
+void write_little_endian(
+    std::span<std::byte> output,
+    T value) noexcept {
+    for (std::size_t i = 0; i < sizeof(T); ++i) {
+        output[i] =
+            static_cast<std::byte>(
+                (value >> (i * 8U)) &
+                static_cast<T>(0xffU));
+    }
+}
+
+void encode_register_record(
+    std::span<std::byte, 8> output,
+    std::uint32_t offset,
+    std::uint32_t value) noexcept {
+    write_little_endian<std::uint32_t>(
+        output.first<4>(),
+        offset);
+    write_little_endian<std::uint32_t>(
+        output.last<4>(),
+        value);
+}
+
+[[nodiscard]]
+SceAgcLinkShadersMeasuredOutputApplyError
+measured_apply_error(
+    SceAgcLinkShadersMeasuredOutputApplyErrorCode code,
+    SceAgcLinkShadersMeasuredOutputRegion region,
+    std::size_t applied_region_count,
+    std::optional<GuestMemoryError> guest_memory_error =
+        std::nullopt) noexcept {
+    return SceAgcLinkShadersMeasuredOutputApplyError{
+        .code = code,
+        .region = region,
+        .applied_region_count = applied_region_count,
+        .guest_memory_error = guest_memory_error,
+    };
+}
+
+}  // namespace
+
+SceAgcLinkShadersMeasuredOutputPlanResult
+plan_measured_sce_agc_link_shaders_output(
+    const SceAgcLinkShadersPlan& request) noexcept {
+    if (request.context_output_range.base() !=
+            request.context_output_address ||
+        request.context_output_range.size().value() !=
+            kSceAgcLinkShadersContextOutputSize) {
+        return SceAgcLinkShadersMeasuredOutputPlanResult::failure(
+            SceAgcLinkShadersMeasuredOutputPlanError{
+                .code =
+                    SceAgcLinkShadersMeasuredOutputPlanErrorCode::
+                        unexpected_context_extent,
+            });
+    }
+
+    auto routing_address =
+        astraea::memory::GuestAddress::checked_add(
+            request.context_output_address,
+            astraea::memory::GuestSize{
+                kSceAgcLinkShadersMeasuredRoutingOffset});
+    if (!routing_address.has_value()) {
+        return SceAgcLinkShadersMeasuredOutputPlanResult::failure(
+            SceAgcLinkShadersMeasuredOutputPlanError{
+                .code =
+                    SceAgcLinkShadersMeasuredOutputPlanErrorCode::
+                        routing_address_overflow,
+            });
+    }
+
+    SceAgcLinkShadersMeasuredOutputPlan plan{
+        .request = request,
+        .routing_address =
+            routing_address.value(),
+    };
+
+    for (std::uint32_t index = 0;
+         index <
+         kSceAgcLinkShadersContextRecordCount - 2U;
+         ++index) {
+        const auto byte_offset =
+            static_cast<std::size_t>(index) *
+            kSceAgcLinkShadersRegisterRecordSize;
+        encode_register_record(
+            std::span<std::byte, 8>{
+                plan.interpolant_bytes.data() +
+                    byte_offset,
+                8},
+            0x191U + index,
+            index);
+    }
+
+    encode_register_record(
+        std::span<std::byte, 8>{
+            plan.routing_bytes.data(),
+            plan.routing_bytes.size()},
+        0x29bU,
+        2U);
+
+    return SceAgcLinkShadersMeasuredOutputPlanResult::success(
+        plan);
+}
+
+SceAgcLinkShadersMeasuredOutputApplyResult
+apply_measured_sce_agc_link_shaders_output(
+    const SceAgcLinkShadersMeasuredOutputPlan& plan,
+    const GuestMemoryAccess& guest_memory) noexcept {
+    const auto interpolant_preflight =
+        guest_memory.preflight_write(
+            plan.request.context_output_address,
+            plan.interpolant_bytes.size());
+    if (!interpolant_preflight.has_value()) {
+        return SceAgcLinkShadersMeasuredOutputApplyResult::failure(
+            measured_apply_error(
+                SceAgcLinkShadersMeasuredOutputApplyErrorCode::
+                    guest_memory_preflight_failure,
+                SceAgcLinkShadersMeasuredOutputRegion::
+                    interpolants,
+                0,
+                interpolant_preflight.error()));
+    }
+
+    const auto routing_preflight =
+        guest_memory.preflight_write(
+            plan.routing_address,
+            plan.routing_bytes.size());
+    if (!routing_preflight.has_value()) {
+        return SceAgcLinkShadersMeasuredOutputApplyResult::failure(
+            measured_apply_error(
+                SceAgcLinkShadersMeasuredOutputApplyErrorCode::
+                    guest_memory_preflight_failure,
+                SceAgcLinkShadersMeasuredOutputRegion::
+                    routing,
+                0,
+                routing_preflight.error()));
+    }
+
+    const auto interpolant_written =
+        guest_memory.write(
+            plan.request.context_output_address,
+            plan.interpolant_bytes);
+    if (!interpolant_written.has_value()) {
+        return SceAgcLinkShadersMeasuredOutputApplyResult::failure(
+            measured_apply_error(
+                SceAgcLinkShadersMeasuredOutputApplyErrorCode::
+                    guest_memory_write_failure,
+                SceAgcLinkShadersMeasuredOutputRegion::
+                    interpolants,
+                0,
+                interpolant_written.error()));
+    }
+
+    const auto routing_written =
+        guest_memory.write(
+            plan.routing_address,
+            plan.routing_bytes);
+    if (!routing_written.has_value()) {
+        return SceAgcLinkShadersMeasuredOutputApplyResult::failure(
+            measured_apply_error(
+                SceAgcLinkShadersMeasuredOutputApplyErrorCode::
+                    guest_memory_write_failure,
+                SceAgcLinkShadersMeasuredOutputRegion::
+                    routing,
+                1,
+                routing_written.error()));
+    }
+
+    return SceAgcLinkShadersMeasuredOutputApplyResult::success(
+        SceAgcLinkShadersMeasuredOutputApplyReport{
+            .coverage =
+                SceAgcLinkShadersOutputCoverage::
+                    measured_partial_v0,
+            .written_region_count = 2,
+            .written_byte_count =
+                plan.interpolant_bytes.size() +
+                plan.routing_bytes.size(),
+            .preserved_unmeasured_context_byte_count =
+                kSceAgcLinkShadersUnmeasuredContextBytes,
+            .preserved_unmeasured_user_config_byte_count =
+                kSceAgcLinkShadersUnmeasuredUserConfigBytes,
+        });
+}
+
 }  // namespace astraea::execution
