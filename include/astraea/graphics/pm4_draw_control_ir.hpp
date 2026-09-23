@@ -47,6 +47,6 @@ using Pm4DrawControlLowerResult =
 // Every other opcode remains typed unsupported Graphics IR.
 [[nodiscard]] Pm4DrawControlLowerResult
 lower_pm4_draw_control_frame_to_graphics_ir(
-    const Pm4Type3Frame& frame) noexcept;
+    const Pm4Type3Frame& frame);
 
 }  // namespace astraea::graphics
