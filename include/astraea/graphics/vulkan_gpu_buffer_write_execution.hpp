@@ -64,6 +64,7 @@ enum class VulkanGpuBufferWriteErrorCode {
     destination_mismatch,
     unaligned_write,
     payload_too_large,
+    buffer_size_unrepresentable,
     loader_unavailable,
     instance_creation_failure,
     physical_device_enumeration_failure,
