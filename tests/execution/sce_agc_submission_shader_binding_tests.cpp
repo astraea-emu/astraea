@@ -53,7 +53,12 @@ std::vector<std::byte> make_stream(
 astraea::execution::SceAgcDcbSubmission make_submission(
     std::initializer_list<std::uint32_t> words,
     std::uint8_t flag = 0U) {
-    astraea::execution::SceAgcDcbSubmission submission{};
+    astraea::execution::SceAgcDcbSubmission submission{
+        .submit_description_address =
+            astraea::memory::GuestAddress{0U},
+        .command_words_address =
+            astraea::memory::GuestAddress{0U},
+    };
     submission.submit_description_address =
         astraea::memory::GuestAddress{0x00100000ULL};
     submission.command_words_address =
@@ -605,7 +610,12 @@ TEST_CASE(
     astraea::execution::CreatedAgcShaderRegistry registry;
 
     SECTION("command bytes are not word aligned") {
-        astraea::execution::SceAgcDcbSubmission submission{};
+        astraea::execution::SceAgcDcbSubmission submission{
+        .submit_description_address =
+            astraea::memory::GuestAddress{0U},
+        .command_words_address =
+            astraea::memory::GuestAddress{0U},
+    };
         submission.flag = 0U;
         submission.command_buffer_bytes = {
             std::byte{0x01},
