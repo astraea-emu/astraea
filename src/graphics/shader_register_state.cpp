@@ -66,7 +66,7 @@ apply_shader_register_graphics_ir(
             write->start_offset);
     const auto count = write->values.size();
 
-    if (start > kShaderRegisterStateDwords ||
+    if (start >= kShaderRegisterStateDwords ||
         count >
             kShaderRegisterStateDwords -
                 start) {
