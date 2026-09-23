@@ -172,7 +172,7 @@ PS5-specific assumptions require documented evidence.
 
 ## Next action
 
-After #186, define the smallest evidence-bounded `sceAgcLinkShaders` contract
+Implement **#188**: the smallest evidence-bounded `sceAgcLinkShaders` contract
 that consumes stable created-shader handles and materializes only the linkage
 outputs required by #172's owned offscreen raster proof.
 
