@@ -840,6 +840,106 @@ TEST_CASE(
 }
 
 TEST_CASE(
+    "Geometry AGC preparation preserves shared unsafe-boundary failures",
+    "[execution][agc][prepare][v3][geometry][errors]") {
+    SECTION("misaligned code") {
+        auto create =
+            make_geometry_create_plan(
+                0x00100000U,
+                0x00200000U,
+                0x00300001U);
+
+        const auto result =
+            astraea::execution::
+                plan_sce_agc_shader_preparation(
+                    create);
+
+        REQUIRE_FALSE(result.has_value());
+        REQUIRE(
+            result.error().code ==
+            SceAgcShaderPreparationErrorCode::
+                shader_code_address_misaligned);
+    }
+
+    SECTION("unrepresentable code") {
+        auto create =
+            make_geometry_create_plan(
+                0x00100000U,
+                0x00200000U,
+                0x0001000000000000ULL);
+
+        const auto result =
+            astraea::execution::
+                plan_sce_agc_shader_preparation(
+                    create);
+
+        REQUIRE_FALSE(result.has_value());
+        REQUIRE(
+            result.error().code ==
+            SceAgcShaderPreparationErrorCode::
+                shader_code_address_unrepresentable);
+    }
+
+    SECTION("canonical list provenance mismatch") {
+        auto create =
+            make_geometry_create_plan();
+        create.shader
+            .shader_register_list_header_offset =
+            0x88U;
+
+        const auto result =
+            astraea::execution::
+                plan_sce_agc_shader_preparation(
+                    create);
+
+        REQUIRE_FALSE(result.has_value());
+        REQUIRE(
+            result.error().code ==
+            SceAgcShaderPreparationErrorCode::
+                canonical_register_list_mismatch);
+    }
+
+    SECTION("top-level self-relative pointer out of bounds") {
+        auto create =
+            make_geometry_create_plan();
+        write_little_endian<std::uint64_t>(
+            create.shader.shader_header_bytes,
+            0x28,
+            0x1000U);
+
+        const auto result =
+            astraea::execution::
+                plan_sce_agc_shader_preparation(
+                    create);
+
+        REQUIRE_FALSE(result.has_value());
+        REQUIRE(
+            result.error().code ==
+            SceAgcShaderPreparationErrorCode::
+                self_relative_pointer_out_of_bounds);
+    }
+
+    SECTION("output aliases shader header") {
+        auto create =
+            make_geometry_create_plan(
+                0x00200070U,
+                0x00200000U,
+                0x00300000U);
+
+        const auto result =
+            astraea::execution::
+                plan_sce_agc_shader_preparation(
+                    create);
+
+        REQUIRE_FALSE(result.has_value());
+        REQUIRE(
+            result.error().code ==
+            SceAgcShaderPreparationErrorCode::
+                output_aliases_shader_input);
+    }
+}
+
+TEST_CASE(
     "pixel AGC preparation rejects unsupported or unsafe profiles before mutation",
     "[execution][agc][prepare][v1][errors]") {
     SECTION("null output") {
@@ -1290,6 +1390,102 @@ TEST_CASE(
             unknown)
             .has_value());
     REQUIRE(unknown[0] == std::byte{0x6b});
+}
+
+TEST_CASE(
+    "Geometry AGC preparation preflight failure leaves header byte-identical",
+    "[execution][agc][prepare][apply][atomic][linux][geometry]") {
+    auto layout = make_mapped_fixture();
+    auto prepared =
+        astraea::execution::
+            prepare_linux_guest_memory(
+                layout.image);
+    REQUIRE(prepared.has_value());
+
+    GuestMemoryAccess memory{
+        layout.image,
+        prepared.value()};
+
+    auto fixture =
+        make_public_shape_geometry_fixture();
+    const auto header =
+        layout.data_base + 0x100U;
+    const auto text =
+        layout.data_base + layout.page;
+
+    REQUIRE(
+        memory.write(
+            GuestAddress{header},
+            fixture.header)
+            .has_value());
+    REQUIRE(
+        memory.write(
+            GuestAddress{text},
+            fixture.text)
+            .has_value());
+
+    auto captured =
+        astraea::execution::
+            plan_sce_agc_create_shader(
+                make_call(
+                    layout.code_base,
+                    header,
+                    text),
+                memory);
+    REQUIRE(captured.has_value());
+    REQUIRE(
+        captured->shader.program_type.known ==
+        std::optional<
+            astraea::graphics::AgcShaderStage>{
+            astraea::graphics::AgcShaderStage::
+                geometry});
+
+    auto plan =
+        astraea::execution::
+            plan_sce_agc_shader_preparation(
+                captured.value());
+    REQUIRE(plan.has_value());
+    REQUIRE(
+        plan->profile ==
+        astraea::execution::
+            SceAgcShaderPreparationProfile::
+                v18_geometry_es_public_shape);
+    REQUIRE(
+        plan->patches.back().kind ==
+        SceAgcShaderPatchKind::output_handle);
+
+    std::vector<std::byte> before(
+        fixture.header.size());
+    REQUIRE(
+        memory.read(
+            GuestAddress{header},
+            before)
+            .has_value());
+
+    const auto applied =
+        astraea::execution::
+            apply_sce_agc_shader_preparation(
+                plan.value(),
+                memory);
+
+    REQUIRE_FALSE(applied.has_value());
+    REQUIRE(
+        applied.error().code ==
+        SceAgcShaderApplyErrorCode::
+            guest_memory_preflight_failure);
+    REQUIRE(applied.error().applied_count == 0U);
+    REQUIRE(
+        applied.error().patch_index ==
+        plan->patches.size() - 1U);
+
+    std::vector<std::byte> after(
+        fixture.header.size());
+    REQUIRE(
+        memory.read(
+            GuestAddress{header},
+            after)
+            .has_value());
+    REQUIRE(after == before);
 }
 
 TEST_CASE(
