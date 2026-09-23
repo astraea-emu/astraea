@@ -172,25 +172,29 @@ PS5-specific assumptions require documented evidence.
 
 ## Next action
 
-Implement **#189**: materialize only the `sceAgcLinkShaders` output bytes
-justified by public/controlled evidence for #172's owned no-tessellation
-triangle-list raster path.
+Implement **#191**: obtain evidence for the four LinkShaders records that
+remain intentionally unknown after #189, then complete the 34+3 output and
+wire the real HLE transaction.
 
-#188 establishes the exact six-argument request contract, checked output
-extents, stable Geometry/Pixel handle resolution, and stage/profile validation
-without touching guest memory.
+#189 materializes every currently measured LinkShaders byte:
 
-Current output evidence is intentionally incomplete: the 32 default
-interpolant records and one context routing record are measured, while one
-context routing record and the three user-config values are not yet pinned
-strongly enough to fabricate.
+- 32 default interpolant context records at `+0x000..+0x0ff`;
+- measured `VGT_GS_OUT_PRIM_TYPE` record `{0x29b, 2}` at
+  `+0x108..+0x10f`.
 
-#189 must either obtain stronger evidence for every intended write or represent
-an explicitly partial measured output contract that preserves every unmeasured
-guest byte. Only then should LinkShaders be wired into runtime dispatch as a
-guest-visible successful HLE service.
+It deliberately preserves the unmeasured context record at `+0x100` and all
+three user-config records byte-identical, and reports its output as
+`measured_partial`.
 
-Do not fold submitted ES/Geometry register binding, DCB emission, draw
-execution, stage I/O, graphics SPIR-V, or Vulkan rasterization into #189.
+#191 must pin the exact offset/value pair for those four missing records.
+Only after that evidence is complete should internal LinkShaders HLE ID 5 be
+dispatched as guest-visible success and exercised through the owned
+`MqAdbRMdNz4#A#B` SCE fixture.
+
+Do not infer the missing records from allocation shape, generic AMD defaults,
+or shader-header “specials” alone.
+
+Do not fold submitted ES/Geometry binding, DCB emission, draw execution, stage
+I/O, graphics SPIR-V, or Vulkan rasterization into #191.
 
 The #172 raster target remains the owned offscreen 4x4 uniform-color proof.
