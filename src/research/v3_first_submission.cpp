@@ -159,8 +159,8 @@ plan_v3_first_submission(
                     std::move(error));
             }
 
-            auto emission =
-                std::move(lowered).value();
+            const auto& emission =
+                lowered.value();
             auto applied =
                 astraea::graphics::
                     apply_shader_register_graphics_ir(
@@ -226,8 +226,8 @@ plan_v3_first_submission(
                     std::move(error));
             }
 
-            auto emission =
-                std::move(lowered).value();
+            const auto& emission =
+                lowered.value();
             auto applied =
                 astraea::graphics::
                     apply_context_register_graphics_ir(
@@ -268,8 +268,8 @@ plan_v3_first_submission(
                     std::move(error));
             }
 
-            auto emission =
-                std::move(lowered).value();
+            const auto& emission =
+                lowered.value();
             auto applied =
                 astraea::graphics::
                     apply_user_config_register_graphics_ir(
@@ -311,8 +311,8 @@ plan_v3_first_submission(
                     std::move(error));
             }
 
-            auto emission =
-                std::move(lowered).value();
+            const auto& emission =
+                lowered.value();
             if (const auto* instances =
                     std::get_if<
                         astraea::graphics::
