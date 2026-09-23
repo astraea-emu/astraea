@@ -237,4 +237,121 @@ apply_sce_agc_link_shaders_measured_output(
     const SceAgcLinkShadersMeasuredOutputPlan& plan,
     const GuestMemoryAccess& guest_memory) noexcept;
 
+
+// Coverage marker for the only LinkShaders output bytes currently justified by
+// pinned public measurement. This is intentionally not a complete native
+// LinkShaders result.
+enum class SceAgcLinkShadersOutputCoverage {
+    measured_partial_v0,
+};
+
+inline constexpr std::size_t
+    kSceAgcLinkShadersMeasuredInterpolantBytes = 0x100;
+inline constexpr std::size_t
+    kSceAgcLinkShadersMeasuredRoutingOffset = 0x108;
+inline constexpr std::size_t
+    kSceAgcLinkShadersMeasuredRoutingBytes = 0x8;
+inline constexpr std::size_t
+    kSceAgcLinkShadersUnmeasuredContextBytes = 0x8;
+inline constexpr std::size_t
+    kSceAgcLinkShadersUnmeasuredUserConfigBytes =
+        kSceAgcLinkShadersUserConfigOutputSize;
+
+struct SceAgcLinkShadersMeasuredOutputPlan {
+    SceAgcLinkShadersPlan request;
+    std::array<
+        std::byte,
+        kSceAgcLinkShadersMeasuredInterpolantBytes>
+        interpolant_bytes{};
+    astraea::memory::GuestAddress routing_address;
+    std::array<
+        std::byte,
+        kSceAgcLinkShadersMeasuredRoutingBytes>
+        routing_bytes{};
+    SceAgcLinkShadersOutputCoverage coverage =
+        SceAgcLinkShadersOutputCoverage::
+            measured_partial_v0;
+
+    auto operator<=>(
+        const SceAgcLinkShadersMeasuredOutputPlan&) const = default;
+};
+
+enum class SceAgcLinkShadersMeasuredOutputPlanErrorCode {
+    unexpected_context_extent,
+    routing_address_overflow,
+};
+
+struct SceAgcLinkShadersMeasuredOutputPlanError {
+    SceAgcLinkShadersMeasuredOutputPlanErrorCode code =
+        SceAgcLinkShadersMeasuredOutputPlanErrorCode::
+            unexpected_context_extent;
+
+    auto operator<=>(
+        const SceAgcLinkShadersMeasuredOutputPlanError&) const = default;
+};
+
+using SceAgcLinkShadersMeasuredOutputPlanResult =
+    astraea::core::Result<
+        SceAgcLinkShadersMeasuredOutputPlan,
+        SceAgcLinkShadersMeasuredOutputPlanError>;
+
+[[nodiscard]]
+SceAgcLinkShadersMeasuredOutputPlanResult
+plan_measured_sce_agc_link_shaders_output(
+    const SceAgcLinkShadersPlan& request) noexcept;
+
+enum class SceAgcLinkShadersMeasuredOutputRegion {
+    interpolants,
+    routing,
+};
+
+enum class SceAgcLinkShadersMeasuredOutputApplyErrorCode {
+    guest_memory_preflight_failure,
+    guest_memory_write_failure,
+};
+
+struct SceAgcLinkShadersMeasuredOutputApplyError {
+    SceAgcLinkShadersMeasuredOutputApplyErrorCode code =
+        SceAgcLinkShadersMeasuredOutputApplyErrorCode::
+            guest_memory_preflight_failure;
+    SceAgcLinkShadersMeasuredOutputRegion region =
+        SceAgcLinkShadersMeasuredOutputRegion::
+            interpolants;
+    std::size_t applied_region_count = 0;
+    std::optional<GuestMemoryError> guest_memory_error;
+
+    auto operator<=>(
+        const SceAgcLinkShadersMeasuredOutputApplyError&) const = default;
+};
+
+struct SceAgcLinkShadersMeasuredOutputApplyReport {
+    SceAgcLinkShadersOutputCoverage coverage =
+        SceAgcLinkShadersOutputCoverage::
+            measured_partial_v0;
+    std::size_t written_region_count = 0;
+    std::size_t written_byte_count = 0;
+    std::size_t preserved_unmeasured_context_byte_count =
+        kSceAgcLinkShadersUnmeasuredContextBytes;
+    std::size_t preserved_unmeasured_user_config_byte_count =
+        kSceAgcLinkShadersUnmeasuredUserConfigBytes;
+
+    auto operator<=>(
+        const SceAgcLinkShadersMeasuredOutputApplyReport&) const = default;
+};
+
+using SceAgcLinkShadersMeasuredOutputApplyResult =
+    astraea::core::Result<
+        SceAgcLinkShadersMeasuredOutputApplyReport,
+        SceAgcLinkShadersMeasuredOutputApplyError>;
+
+// Applies only the two measured LinkShaders output regions. It deliberately
+// preserves the unmeasured context record at +0x100 and the entire user-config
+// output block. A successful return is NOT sufficient to report native
+// sceAgcLinkShaders success to the guest.
+[[nodiscard]]
+SceAgcLinkShadersMeasuredOutputApplyResult
+apply_measured_sce_agc_link_shaders_output(
+    const SceAgcLinkShadersMeasuredOutputPlan& plan,
+    const GuestMemoryAccess& guest_memory) noexcept;
+
 }  // namespace astraea::execution
