@@ -3,6 +3,7 @@
 
 #include <array>
 #include <cstdint>
+#include <limits>
 #include <optional>
 #include <utility>
 #include <vector>
@@ -304,7 +305,7 @@ TEST_CASE(
             astraea::execution::
                 plan_sce_agc_link_shaders(
                     make_call(
-                        UINT64_MAX - 0x80U,
+                        std::numeric_limits<std::uint64_t>::max() - 0x80U,
                         kUserConfigOutput),
                     registry);
         REQUIRE_FALSE(result.has_value());
@@ -315,7 +316,7 @@ TEST_CASE(
         REQUIRE(
             result.error().guest_address ==
             std::optional<GuestAddress>{
-                GuestAddress{UINT64_MAX - 0x80U}});
+                GuestAddress{std::numeric_limits<std::uint64_t>::max() - 0x80U}});
     }
 
     SECTION("user-config range overflow") {
@@ -324,7 +325,7 @@ TEST_CASE(
                 plan_sce_agc_link_shaders(
                     make_call(
                         kContextOutput,
-                        UINT64_MAX - 0x10U),
+                        std::numeric_limits<std::uint64_t>::max() - 0x10U),
                     registry);
         REQUIRE_FALSE(result.has_value());
         REQUIRE(
@@ -334,7 +335,7 @@ TEST_CASE(
         REQUIRE(
             result.error().guest_address ==
             std::optional<GuestAddress>{
-                GuestAddress{UINT64_MAX - 0x10U}});
+                GuestAddress{std::numeric_limits<std::uint64_t>::max() - 0x10U}});
     }
 
     SECTION("overlap") {
