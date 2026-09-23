@@ -36,6 +36,10 @@ namespace {
             std::nullopt,
         .sce_agc_shader_apply_error =
             std::nullopt,
+        .sce_agc_shader_materialization_error =
+            std::nullopt,
+        .sce_agc_shader_registration_error =
+            std::nullopt,
     };
 }
 
@@ -60,6 +64,10 @@ namespace {
         .sce_agc_shader_preparation_error =
             std::nullopt,
         .sce_agc_shader_apply_error =
+            std::nullopt,
+        .sce_agc_shader_materialization_error =
+            std::nullopt,
+        .sce_agc_shader_registration_error =
             std::nullopt,
     };
 }
@@ -117,6 +125,10 @@ namespace {
             std::nullopt,
         .sce_agc_shader_apply_error =
             std::nullopt,
+        .sce_agc_shader_materialization_error =
+            std::nullopt,
+        .sce_agc_shader_registration_error =
+            std::nullopt,
     };
 }
 
@@ -146,6 +158,10 @@ agc_preparation_runtime_error(
         .sce_agc_shader_preparation_error =
             std::move(detail),
         .sce_agc_shader_apply_error =
+            std::nullopt,
+        .sce_agc_shader_materialization_error =
+            std::nullopt,
+        .sce_agc_shader_registration_error =
             std::nullopt,
     };
 }
@@ -183,6 +199,10 @@ agc_preparation_runtime_error(
             std::nullopt,
         .sce_agc_shader_apply_error =
             std::move(detail),
+        .sce_agc_shader_materialization_error =
+            std::nullopt,
+        .sce_agc_shader_registration_error =
+            std::nullopt,
     };
 }
 
