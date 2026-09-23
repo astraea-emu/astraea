@@ -1,5 +1,8 @@
 #include <astraea/graphics/vulkan_gpu_buffer_write_execution.hpp>
 
+#include <astraea/graphics/pm4_type3_framing.hpp>
+#include <astraea/graphics/pm4_write_data_ir.hpp>
+
 #include <array>
 #include <cstddef>
 #include <cstdint>
@@ -444,7 +447,7 @@ TEST_CASE(
 }
 
 TEST_CASE(
-    "Vulkan buffer-write proof returns exact full-buffer bytes",
+    "Vulkan WRITE_DATA proof runs W0 W1 W2 end to end",
     "[graphics][vulkan][write-data][live][oracle]") {
     if (!live_vulkan_required()) {
         SKIP(
@@ -452,35 +455,131 @@ TEST_CASE(
             "ASTRAEA_REQUIRE_VULKAN_PROBE=1");
     }
 
-    const auto guest_region = region();
-    const auto resolved = resolution();
-    const auto write = operation();
+    constexpr std::uint64_t buffer_base = 0x4000U;
+    constexpr std::uint64_t buffer_size = 64U;
+    constexpr std::uint64_t write_address = 0x4008U;
+
+    const auto make_type3_header =
+        [](std::uint8_t opcode,
+           std::uint16_t encoded_count) {
+            return
+                (static_cast<std::uint32_t>(
+                     astraea::graphics::
+                         kPm4Type3PacketType)
+                 << 30U) |
+                ((static_cast<std::uint32_t>(
+                      encoded_count) &
+                  0x3fffU)
+                 << 16U) |
+                (static_cast<std::uint32_t>(
+                     opcode)
+                 << 8U);
+        };
+
+    std::vector<std::byte> dcb;
+    const auto append_word =
+        [&dcb](std::uint32_t word) {
+            for (std::size_t index = 0;
+                 index < 4U;
+                 ++index) {
+                dcb.push_back(
+                    std::byte{
+                        static_cast<unsigned char>(
+                            (word >> (index * 8U)) &
+                            0xffU)});
+            }
+        };
+
+    append_word(
+        make_type3_header(
+            astraea::graphics::kPm4WriteDataOpcode,
+            6U));
+    append_word(
+        astraea::graphics::
+            kPm4WriteDataSupportedControlWord);
+    append_word(
+        static_cast<std::uint32_t>(
+            write_address & 0xffffffffULL));
+    append_word(
+        static_cast<std::uint32_t>(
+            write_address >> 32U));
+    append_word(0x11223344U);
+    append_word(0x55667788U);
+    append_word(0x99aabbccU);
+    append_word(0xddeeff00U);
+
+    const auto framed =
+        astraea::graphics::
+            frame_pm4_type3_stream(dcb);
+    REQUIRE(framed.has_value());
+    REQUIRE(framed->frames.size() == 1U);
+
+    const auto lowered =
+        astraea::graphics::
+            lower_pm4_write_data_frame_to_graphics_ir(
+                framed->frames[0]);
+    REQUIRE(lowered.has_value());
+    REQUIRE(
+        std::holds_alternative<
+            GraphicsIrGpuMemoryWrite>(
+            lowered->operation));
+    const auto& write =
+        std::get<GraphicsIrGpuMemoryWrite>(
+            lowered->operation);
+
+    astraea::graphics::GuestGpuBufferAddressSpace
+        address_space;
+    const auto buffer_id =
+        address_space.register_buffer(
+            GpuVirtualAddress{
+                .value = buffer_base,
+            },
+            buffer_size);
+    REQUIRE(buffer_id.has_value());
+
+    const auto resolved =
+        astraea::graphics::resolve_gpu_memory_write(
+            write,
+            address_space);
+    REQUIRE(resolved.has_value());
+
+    const auto* guest_region =
+        address_space.entry_at(
+            buffer_id.value());
+    REQUIRE(guest_region != nullptr);
+    REQUIRE(
+        resolved->buffer_id ==
+        buffer_id.value());
+    REQUIRE(resolved->byte_offset == 8U);
+    REQUIRE(resolved->byte_count == 16U);
 
     const auto executed =
         astraea::graphics::
             execute_gpu_buffer_write_on_vulkan(
-                guest_region,
-                resolved,
+                *guest_region,
+                resolved.value(),
                 write);
     REQUIRE(executed.has_value());
-    REQUIRE(executed->buffer_id == guest_region.id);
+    REQUIRE(
+        executed->buffer_id ==
+        buffer_id.value());
     REQUIRE(
         executed->final_bytes.size() ==
         static_cast<std::size_t>(
-            guest_region.byte_size));
+            buffer_size));
     REQUIRE_FALSE(executed->device.name.empty());
 
     std::vector<std::byte> expected(
         static_cast<std::size_t>(
-            guest_region.byte_size),
+            buffer_size),
         std::byte{0});
     std::memcpy(
         expected.data() +
             static_cast<std::size_t>(
-                resolved.byte_offset),
+                resolved->byte_offset),
         write.values.data(),
         static_cast<std::size_t>(
-            resolved.byte_count));
+            resolved->byte_count));
 
     REQUIRE(executed->final_bytes == expected);
 }
