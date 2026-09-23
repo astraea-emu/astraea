@@ -271,7 +271,7 @@ select_physical_device(VkInstance instance) {
             candidates.reserve(
                 queue_properties.size());
             for (const auto& queue : queue_properties) {
-                const auto supported_flags =
+                const VkQueueFlags supported_flags =
                     VK_QUEUE_TRANSFER_BIT |
                     VK_QUEUE_GRAPHICS_BIT |
                     VK_QUEUE_COMPUTE_BIT;
