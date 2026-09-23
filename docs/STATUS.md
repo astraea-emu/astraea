@@ -1,7 +1,7 @@
 # Project Status
 
 **Integration gate:** V3 — submitted guest GPU state/resources -> Vulkan -> deterministic result  
-**State:** V0/V1/V2 complete; V3 active; host-GPU semantic proof and submission-side shader binding complete; owned offscreen graphics workload selected; next dependency is generic SET_CONTEXT_REG state  
+**State:** V0/V1/V2 complete; V3 active; host-GPU semantic proof, submitted shader binding, and generic context-register state complete; next dependency is mixed submitted shader/context state orchestration  
 **Repository:** astraea-emu/astraea  
 **In-flight work:** inspect live open GitHub PRs/issues; this file describes the expected merged frontier on `main`.
 
@@ -81,6 +81,7 @@
 - Post-V1/V2/V3 architecture synchronization and the separate semantic-IR/compiler-IR contract are complete (#166/#167, ADR 0007).
 - Evidence-bounded submitted pixel-shader binding is complete (#169): flag-zero captured DCB -> zero-control Type-3 frames -> SET_SH_REG Graphics IR -> fresh shader-register state -> typed pixel program GPU address -> duplicate-safe unique created-shader selection, with final PGM_LO/PGM_HI DCB word provenance and no fake SubmitDcb success or Vulkan work.
 - The first resource-backed V3 target is selected (#172): an Astraea-owned offscreen 4x4 uniform-color graphics workload with no depth/blend/MSAA/textures/presentation; the first missing dependency is generic submitted context-register transport/state (#173).
+- Generic AMD SET_CONTEXT_REG (0x69) lowering plus separate persistent initialized-vs-zero ContextRegisterState is complete (#173), with exact RawPacket provenance, explicit control/range failures, Trace v0 semantics, and no PS5-specific register meanings.
 - Public five-gate CI remains the merge requirement:
   - Linux x64
   - Windows x64
@@ -102,7 +103,8 @@
 10. #166/#167 reconcile durable V1/V2/V3 documentation and record the semantic-IR/compiler-IR boundary after the rapid proof-chain merges.
 11. #169 composes the captured DCB/state path through final pixel-program address resolution and unique created-shader selection with exact PGM source provenance.
 12. #172 selects the first resource-backed V3 workload: a tiny owned offscreen uniform-color graphics proof, deliberately excluding presentation.
-13. #173 is the next code dependency: generic PM4 SET_CONTEXT_REG lowering plus persistent initialized-vs-zero context-register state. PS5-specific render-target/viewport meanings remain later workload-driven dependencies.
+13. #173 adds generic PM4 SET_CONTEXT_REG lowering plus a separate persistent initialized-vs-zero ContextRegisterState without assigning PS5 meanings.
+14. The next code dependency is a bounded submitted-state orchestration slice that routes supported SET_SH_REG and SET_CONTEXT_REG frames into separate staged states in source order while preserving exact packet provenance and explicit failure on all other packet semantics.
 
 ## SCE metadata boundary
 
@@ -162,23 +164,29 @@ PS5-specific assumptions require documented evidence.
 
 ## Next action
 
-Implement #173: the generic submitted context-register boundary required by
-the #172 offscreen graphics workload.
+Add the smallest **mixed submitted graphics-state planner** required by the
+#172 offscreen workload.
 
-The bounded path is:
+The planner must consume one already captured flag-zero DCB and, in source
+order:
 
-`PM4 Type-3 SET_CONTEXT_REG (0x69) -> GraphicsIrContextRegisterWriteRange -> ContextRegisterState`.
+- frame the stream with the existing Type-3 framer;
+- route opcode 0x76 through the SET_SH_REG-specific lowerer and stage writes in
+  `ShaderRegisterState`;
+- route opcode 0x69 through the SET_CONTEXT_REG-specific lowerer and stage
+  writes in `ContextRegisterState`;
+- preserve exact RawPacket/frame/word provenance for effective state;
+- retain the existing unique created-pixel-shader selection proof;
+- fail explicitly on every other packet semantic.
 
-Preserve RawPacket provenance and explicit initialized-vs-zero state. Validate
-the full destination range before mutation. Support only the generic
-consecutive-write envelope justified by AMD/public-driver evidence and reject
-unsupported control/index bits explicitly.
+The planner must not mutate caller-owned state on failure and must not call
+Vulkan or return guest-visible SubmitDcb success.
 
-Do **not** assign PS5 meaning to any context-register offset yet. Do not decode
-render-target/viewport/scissor/blend/depth fields, implement draw packets,
-resolve guest resources, call Vulkan, or return fake SubmitDcb success.
+Do **not** assign PS5 meaning to any context-register offset in this slice.
+Render-target/viewport field semantics remain the next workload-driven evidence
+question after mixed state survives the submitted frontend boundary.
 
-The selected V3 workload and its deferred dependency questions are recorded in
+The selected workload remains
 `docs/research/v3_offscreen_graphics_workload.md`.
 
 Separately, add PM4 Type-3 stream and bounded RDNA2 stream fuzz-smoke coverage
