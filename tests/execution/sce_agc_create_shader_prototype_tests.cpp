@@ -1555,6 +1555,306 @@ TEST_CASE(
     }
 
     SECTION(
+        "type-2 Geometry shader uses the same real CreateShader transaction") {
+        const std::array geometry_type{
+            std::byte{2},
+        };
+        REQUIRE(
+            memory.write(
+                astraea::memory::GuestAddress{
+                    fixture.shader_header_address +
+                    0x5aU},
+                geometry_type)
+            .has_value());
+
+        std::array<std::byte, 2> es_lo{
+            std::byte{0xc8},
+            std::byte{0x00},
+        };
+        std::array<std::byte, 2> es_hi{
+            std::byte{0xc9},
+            std::byte{0x00},
+        };
+        REQUIRE(
+            memory.write(
+                astraea::memory::GuestAddress{
+                    fixture.shader_header_address +
+                    kShaderRegistersOffset},
+                es_lo)
+            .has_value());
+        REQUIRE(
+            memory.write(
+                astraea::memory::GuestAddress{
+                    fixture.shader_header_address +
+                    kShaderRegistersOffset +
+                    8U},
+                es_hi)
+            .has_value());
+
+        auto first_stop =
+            astraea::execution::
+                enter_linux_guest(
+                    built.value(),
+                    prepared.value(),
+                    gates.value(),
+                    astraea::execution::
+                        make_synthetic_initial_context(
+                            built.value()));
+        REQUIRE(first_stop.has_value());
+        REQUIRE(
+            first_stop->reason ==
+            astraea::execution::
+                ExecutionStopReason::host_gate);
+        REQUIRE(first_stop->gate_slot == 0U);
+
+        const auto create_result =
+            astraea::execution::dispatch_hle(
+                registry,
+                gates.value(),
+                first_stop.value(),
+                memory,
+                dispatch_state);
+        REQUIRE(create_result.has_value());
+        REQUIRE(
+            create_result->action ==
+            astraea::execution::
+                HleHandlerAction::resume);
+        REQUIRE(create_result->value == 0U);
+        REQUIRE(
+            dispatch_state.created_agc_shaders.size() ==
+            1U);
+
+        const auto by_handle =
+            dispatch_state.created_agc_shaders.
+                lookup_unique_by_handle(
+                    astraea::memory::GuestAddress{
+                        fixture.shader_header_address});
+        REQUIRE(by_handle.has_value());
+        const auto& created =
+            by_handle.value().get();
+        REQUIRE(
+            created.stage ==
+            astraea::graphics::AgcShaderStage::
+                geometry);
+        REQUIRE(
+            created.preparation_profile ==
+            astraea::execution::
+                SceAgcShaderPreparationProfile::
+                    v18_geometry_es_public_shape);
+        REQUIRE(
+            created.code_address ==
+            astraea::graphics::GpuVirtualAddress{
+                .value =
+                    fixture.shader_text_address});
+        REQUIRE(
+            created.shader.program_type.raw ==
+            2U);
+        REQUIRE(
+            created.shader.program_type.known ==
+            std::optional<
+                astraea::graphics::AgcShaderStage>{
+                astraea::graphics::AgcShaderStage::
+                    geometry});
+        REQUIRE(created.shader_ir.source_word_count == 2U);
+
+        const auto pixel_lookup =
+            dispatch_state.created_agc_shaders.lookup_unique(
+                astraea::graphics::
+                    PixelProgramGpuAddress{
+                        .value =
+                            fixture.shader_text_address});
+        REQUIRE_FALSE(pixel_lookup.has_value());
+        REQUIRE(
+            pixel_lookup.error().code ==
+            astraea::execution::
+                CreatedAgcShaderLookupErrorCode::
+                    not_found);
+
+        const auto header =
+            fixture.shader_header_address;
+        const auto text =
+            fixture.shader_text_address;
+        REQUIRE(
+            read_guest_value<std::uint32_t>(
+                memory,
+                header +
+                    kShaderRegistersOffset +
+                    4U) ==
+            static_cast<std::uint32_t>(
+                (text >> 8U) &
+                0xffffffffU));
+        REQUIRE(
+            read_guest_value<std::uint32_t>(
+                memory,
+                header +
+                    kShaderRegistersOffset +
+                    12U) ==
+            static_cast<std::uint32_t>(
+                (text >> 40U) &
+                0xffU));
+        REQUIRE(
+            read_guest_value<std::uint64_t>(
+                memory,
+                fixture.output_address) ==
+            header);
+
+        const auto resumed =
+            astraea::execution::
+                apply_hle_resume(
+                    first_stop->context,
+                    create_result.value(),
+                    memory);
+        REQUIRE(resumed.has_value());
+        REQUIRE(resumed->rax == 0U);
+        REQUIRE(
+            resumed->rip ==
+            fixture.after_create_rip);
+    }
+
+    SECTION(
+        "type-2 apply failure rolls back only the temporary Geometry record") {
+        auto preexisting =
+            astraea::execution::CreatedAgcShader{
+                .code_address =
+                    astraea::graphics::
+                        GpuVirtualAddress{
+                            .value = 0x00900000ULL,
+                        },
+                .stage =
+                    astraea::graphics::
+                        AgcShaderStage::pixel,
+                .preparation_profile =
+                    astraea::execution::
+                        SceAgcShaderPreparationProfile::
+                            v18_pixel_public_shape,
+                .shader_handle =
+                    astraea::memory::GuestAddress{
+                        0x00800000ULL},
+                .shader_header_address =
+                    astraea::memory::GuestAddress{
+                        0x00800000ULL},
+                .shader_text_address =
+                    astraea::memory::GuestAddress{
+                        0x00900000ULL},
+                .shader = {},
+                .shader_ir = {},
+            };
+        REQUIRE(
+            dispatch_state.created_agc_shaders.
+                register_shader(
+                    std::move(preexisting))
+                .has_value());
+        REQUIRE(
+            dispatch_state.created_agc_shaders.size() ==
+            1U);
+
+        const std::array geometry_type{
+            std::byte{2},
+        };
+        const std::array<std::byte, 2> es_lo{
+            std::byte{0xc8},
+            std::byte{0x00},
+        };
+        const std::array<std::byte, 2> es_hi{
+            std::byte{0xc9},
+            std::byte{0x00},
+        };
+        REQUIRE(
+            memory.write(
+                astraea::memory::GuestAddress{
+                    fixture.shader_header_address +
+                    0x5aU},
+                geometry_type)
+            .has_value());
+        REQUIRE(
+            memory.write(
+                astraea::memory::GuestAddress{
+                    fixture.shader_header_address +
+                    kShaderRegistersOffset},
+                es_lo)
+            .has_value());
+        REQUIRE(
+            memory.write(
+                astraea::memory::GuestAddress{
+                    fixture.shader_header_address +
+                    kShaderRegistersOffset +
+                    8U},
+                es_hi)
+            .has_value());
+
+        const auto header_before =
+            read_guest_bytes(
+                memory,
+                fixture.shader_header_address,
+                kShaderHeaderSize);
+
+        const auto result =
+            astraea::execution::dispatch_hle(
+                registry,
+                gates.value(),
+                make_agc_stop(
+                    fixture.code_base,
+                    fixture.shader_header_address,
+                    fixture.shader_text_address),
+                memory,
+                dispatch_state);
+
+        REQUIRE_FALSE(result.has_value());
+        REQUIRE(
+            result.error().code ==
+            astraea::execution::
+                HleRuntimeErrorCode::
+                    sce_agc_shader_apply_failure);
+        REQUIRE(
+            result.error().
+                sce_agc_shader_apply_error
+                .has_value());
+        REQUIRE(
+            result.error().
+                sce_agc_shader_apply_error->
+                code ==
+            astraea::execution::
+                SceAgcShaderApplyErrorCode::
+                    guest_memory_preflight_failure);
+        REQUIRE(
+            result.error().
+                sce_agc_shader_apply_error->
+                applied_count == 0U);
+
+        REQUIRE(
+            read_guest_bytes(
+                memory,
+                fixture.shader_header_address,
+                kShaderHeaderSize) ==
+            header_before);
+        REQUIRE(
+            dispatch_state.created_agc_shaders.size() ==
+            1U);
+
+        const auto preserved =
+            dispatch_state.created_agc_shaders.
+                lookup_unique_by_handle(
+                    astraea::memory::GuestAddress{
+                        0x00800000ULL});
+        REQUIRE(preserved.has_value());
+        REQUIRE(
+            preserved.value().get().stage ==
+            astraea::graphics::AgcShaderStage::pixel);
+
+        const auto rolled_back =
+            dispatch_state.created_agc_shaders.
+                lookup_unique_by_handle(
+                    astraea::memory::GuestAddress{
+                        fixture.shader_header_address});
+        REQUIRE_FALSE(rolled_back.has_value());
+        REQUIRE(
+            rolled_back.error().code ==
+            astraea::execution::
+                CreatedAgcShaderHandleLookupErrorCode::
+                    not_found);
+    }
+
+    SECTION(
         "guest call returns through generic HLE and publishes shader handle") {
         auto first_stop =
             astraea::execution::
@@ -1621,12 +1921,29 @@ TEST_CASE(
             astraea::memory::GuestAddress{
                 fixture.shader_text_address});
         REQUIRE(
-            created.program_address ==
+            created.code_address ==
             astraea::graphics::
-                PixelProgramGpuAddress{
+                GpuVirtualAddress{
                     .value =
                         fixture.shader_text_address,
                 });
+        REQUIRE(
+            created.stage ==
+            astraea::graphics::AgcShaderStage::pixel);
+        REQUIRE(
+            created.preparation_profile ==
+            astraea::execution::
+                SceAgcShaderPreparationProfile::
+                    v18_pixel_public_shape);
+        const auto created_by_handle =
+            dispatch_state.created_agc_shaders.
+                lookup_unique_by_handle(
+                    astraea::memory::GuestAddress{
+                        fixture.shader_header_address});
+        REQUIRE(created_by_handle.has_value());
+        REQUIRE(
+            &created_by_handle.value().get() ==
+            &created);
         REQUIRE(created.shader.rdna2_words.size() == 2U);
         REQUIRE(created.shader_ir.source_word_count == 2U);
         REQUIRE(created.shader_ir.emissions.size() == 2U);
