@@ -179,17 +179,21 @@ MappedFixture make_mapped_fixture(
 
     const auto page = page_size();
     REQUIRE(
-        page * 3U <=
+        page * 4U <=
         static_cast<std::uint64_t>(
             std::numeric_limits<std::size_t>::max()));
 
+    // Reserve four pages so the fixture has an intentional unmapped guard
+    // page between writable data and the synthetic stack. Negative range
+    // tests can therefore end the measured interpolant region at the data
+    // boundary without accidentally landing in mapped stack storage.
     const auto base =
         find_free_block(
             static_cast<std::size_t>(
-                page * 3U));
+                page * 4U));
     const auto code_base = base;
     const auto data_base = base + page;
-    const auto stack_base = base + 2U * page;
+    const auto stack_base = base + 3U * page;
 
     std::vector<std::byte> image_bytes{
         std::byte{0x0f},
