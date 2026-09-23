@@ -3,6 +3,7 @@
 #include <astraea/graphics/pm4_set_context_reg_ir.hpp>
 #include <astraea/graphics/pm4_set_sh_reg_ir.hpp>
 #include <astraea/graphics/pm4_type3_framing.hpp>
+#include <astraea/graphics/pm4_write_data_ir.hpp>
 #include <astraea/graphics/rdna2_decoder.hpp>
 #include <astraea/graphics/shader_cfg.hpp>
 #include <astraea/graphics/shader_control_execution.hpp>
@@ -2239,4 +2240,227 @@ TEST_CASE(
         diff->first_divergence->kind ==
         astraea::trace::TraceDivergenceKindV0::
             event_identity_mismatch);
+}
+
+
+TEST_CASE(
+    "Graphics IR WRITE_DATA trace exposes stable guest GPU memory-write semantics",
+    "[trace][graphics][v0][write-data]") {
+    constexpr std::uint64_t address =
+        0x0000123456789000ULL;
+    const std::vector<std::byte> bytes{
+        std::byte{0x00}, std::byte{0x37},
+        std::byte{0x04}, std::byte{0xc0},
+        std::byte{0x00}, std::byte{0x05},
+        std::byte{0x10}, std::byte{0x00},
+        std::byte{0x00}, std::byte{0x90},
+        std::byte{0x78}, std::byte{0x56},
+        std::byte{0x34}, std::byte{0x12},
+        std::byte{0x00}, std::byte{0x00},
+        std::byte{0x44}, std::byte{0x33},
+        std::byte{0x22}, std::byte{0x11},
+        std::byte{0x88}, std::byte{0x77},
+        std::byte{0x66}, std::byte{0x55},
+    };
+
+    const auto framed =
+        astraea::graphics::
+            frame_pm4_type3_stream(bytes);
+    REQUIRE(framed.has_value());
+    REQUIRE(framed->frames.size() == 1U);
+
+    const auto lowered =
+        astraea::graphics::
+            lower_pm4_write_data_frame_to_graphics_ir(
+                framed->frames[0]);
+    REQUIRE(lowered.has_value());
+
+    auto event =
+        astraea::trace::trace_graphics_ir_v0(
+            29,
+            lowered.value());
+    REQUIRE(event.has_value());
+    REQUIRE(event->subsystem == "graphics.ir");
+    REQUIRE(event->type == "gpu_memory_write");
+    REQUIRE(event->stable.size() == 3U);
+    REQUIRE(
+        event->stable[0].name ==
+        "destination_gpu_address");
+    REQUIRE(
+        event->stable[0].value ==
+        astraea::trace::TraceValueV0{
+            address});
+    REQUIRE(
+        event->stable[1].name ==
+        "value_count");
+    REQUIRE(
+        event->stable[1].value ==
+        astraea::trace::TraceValueV0{
+            std::uint64_t{2U}});
+    REQUIRE(
+        event->stable[2].name ==
+        "value_bits");
+    REQUIRE(
+        event->stable[2].value ==
+        astraea::trace::TraceValueV0{
+            std::vector<std::byte>{
+                std::byte{0x44},
+                std::byte{0x33},
+                std::byte{0x22},
+                std::byte{0x11},
+                std::byte{0x88},
+                std::byte{0x77},
+                std::byte{0x66},
+                std::byte{0x55}}});
+    REQUIRE(event->diagnostics.size() == 3U);
+}
+
+TEST_CASE(
+    "Graphics IR WRITE_DATA trace detects destination and payload divergence",
+    "[trace][graphics][v0][write-data][diff]") {
+    auto make_event =
+        [](std::uint64_t address,
+           std::uint32_t value)
+        -> astraea::trace::TraceEventV0 {
+        const astraea::graphics::GraphicsIrEmission emission{
+            .operation =
+                astraea::graphics::
+                    GraphicsIrGpuMemoryWrite{
+                        .destination =
+                            astraea::graphics::
+                                GpuVirtualAddress{
+                                    .value = address,
+                                },
+                        .values =
+                            std::vector<std::uint32_t>{
+                                value},
+                    },
+            .provenance = {},
+        };
+        auto event =
+            astraea::trace::trace_graphics_ir_v0(
+                30,
+                emission);
+        REQUIRE(event.has_value());
+        return std::move(event).value();
+    };
+
+    auto address_diff =
+        astraea::trace::diff_trace_v0(
+            document(
+                make_event(
+                    0x1000U,
+                    0x11111111U)),
+            document(
+                make_event(
+                    0x2000U,
+                    0x11111111U)));
+    REQUIRE(address_diff.has_value());
+    REQUIRE_FALSE(address_diff->equivalent);
+    REQUIRE(
+        address_diff->first_divergence->kind ==
+        astraea::trace::TraceDivergenceKindV0::
+            stable_field_value_mismatch);
+    REQUIRE(
+        address_diff->first_divergence->field_name ==
+        std::optional<std::string>{
+            "destination_gpu_address"});
+
+    auto payload_diff =
+        astraea::trace::diff_trace_v0(
+            document(
+                make_event(
+                    0x1000U,
+                    0x11111111U)),
+            document(
+                make_event(
+                    0x1000U,
+                    0x22222222U)));
+    REQUIRE(payload_diff.has_value());
+    REQUIRE_FALSE(payload_diff->equivalent);
+    REQUIRE(
+        payload_diff->first_divergence->kind ==
+        astraea::trace::TraceDivergenceKindV0::
+            stable_field_value_mismatch);
+    REQUIRE(
+        payload_diff->first_divergence->field_name ==
+        std::optional<std::string>{
+            "value_bits"});
+}
+
+TEST_CASE(
+    "Graphics IR WRITE_DATA Trace equality excludes source packet position",
+    "[trace][graphics][v0][write-data][provenance]") {
+    constexpr std::uint64_t address =
+        0x0000123456789000ULL;
+
+    const std::vector<std::byte> single{
+        std::byte{0x00}, std::byte{0x37},
+        std::byte{0x03}, std::byte{0xc0},
+        std::byte{0x00}, std::byte{0x05},
+        std::byte{0x10}, std::byte{0x00},
+        std::byte{0x00}, std::byte{0x90},
+        std::byte{0x78}, std::byte{0x56},
+        std::byte{0x34}, std::byte{0x12},
+        std::byte{0x00}, std::byte{0x00},
+        std::byte{0xef}, std::byte{0xbe},
+        std::byte{0xad}, std::byte{0xde},
+    };
+    const std::vector<std::byte> prefixed{
+        std::byte{0x00}, std::byte{0x70},
+        std::byte{0x00}, std::byte{0xc0},
+        std::byte{0x11}, std::byte{0x11},
+        std::byte{0x11}, std::byte{0x11},
+        std::byte{0x00}, std::byte{0x37},
+        std::byte{0x03}, std::byte{0xc0},
+        std::byte{0x00}, std::byte{0x05},
+        std::byte{0x10}, std::byte{0x00},
+        std::byte{0x00}, std::byte{0x90},
+        std::byte{0x78}, std::byte{0x56},
+        std::byte{0x34}, std::byte{0x12},
+        std::byte{0x00}, std::byte{0x00},
+        std::byte{0xef}, std::byte{0xbe},
+        std::byte{0xad}, std::byte{0xde},
+    };
+
+    const auto left_frames =
+        astraea::graphics::
+            frame_pm4_type3_stream(single);
+    const auto right_frames =
+        astraea::graphics::
+            frame_pm4_type3_stream(prefixed);
+    REQUIRE(left_frames.has_value());
+    REQUIRE(right_frames.has_value());
+    REQUIRE(right_frames->frames.size() == 2U);
+
+    const auto left_ir =
+        astraea::graphics::
+            lower_pm4_write_data_frame_to_graphics_ir(
+                left_frames->frames[0]);
+    const auto right_ir =
+        astraea::graphics::
+            lower_pm4_write_data_frame_to_graphics_ir(
+                right_frames->frames[1]);
+    REQUIRE(left_ir.has_value());
+    REQUIRE(right_ir.has_value());
+    REQUIRE(
+        right_ir->provenance.source_packet.extent.word_offset ==
+        2U);
+
+    auto left =
+        astraea::trace::trace_graphics_ir_v0(
+            31,
+            left_ir.value());
+    auto right =
+        astraea::trace::trace_graphics_ir_v0(
+            31,
+            right_ir.value());
+    REQUIRE(left.has_value());
+    REQUIRE(right.has_value());
+
+    require_equivalent(
+        std::move(left).value(),
+        std::move(right).value());
+
+    REQUIRE(address == 0x0000123456789000ULL);
 }

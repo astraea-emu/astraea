@@ -1,7 +1,7 @@
 # Project Status
 
 **Integration gate:** V3 — submitted guest GPU state/resources -> Vulkan -> deterministic result  
-**State:** V0/V1/V2 complete; V3 active; host-GPU semantic proof, submitted shader binding, and generic context-register state complete; next dependency is #175 W0 bounded WRITE_DATA semantics  
+**State:** V0/V1/V2 complete; V3 active; shader/context frontend proofs and bounded WRITE_DATA semantics complete; next dependency is #175 W1 guest GPU buffer address-space resolution  
 **Repository:** astraea-emu/astraea  
 **In-flight work:** inspect live open GitHub PRs/issues; this file describes the expected merged frontier on `main`.
 
@@ -82,6 +82,7 @@
 - Evidence-bounded submitted pixel-shader binding is complete (#169): flag-zero captured DCB -> zero-control Type-3 frames -> SET_SH_REG Graphics IR -> fresh shader-register state -> typed pixel program GPU address -> duplicate-safe unique created-shader selection, with final PGM_LO/PGM_HI DCB word provenance and no fake SubmitDcb success or Vulkan work.
 - The first resource-backed V3 target is selected (#172): an Astraea-owned offscreen 4x4 uniform-color graphics workload with no depth/blend/MSAA/textures/presentation; the first missing dependency is generic submitted context-register transport/state (#173).
 - Generic AMD SET_CONTEXT_REG (0x69) lowering plus separate persistent initialized-vs-zero ContextRegisterState is complete (#173), with exact RawPacket provenance, explicit control/range failures, Trace v0 semantics, and no PS5-specific register meanings.
+- #175 W0 bounded WRITE_DATA memory profile is complete (#177): exact first-profile PM4 0x37 control, typed guest GpuVirtualAddress + ordered inline payload Graphics IR, exact RawPacket provenance, and Trace v0 semantics, with no resource lookup, memory mutation, or Vulkan dependency.
 - Public five-gate CI remains the merge requirement:
   - Linux x64
   - Windows x64
@@ -105,7 +106,8 @@
 12. #172 selects the first resource-backed V3 workload: a tiny owned offscreen uniform-color graphics proof, deliberately excluding presentation.
 13. #173 adds generic PM4 SET_CONTEXT_REG lowering plus a separate persistent initialized-vs-zero ContextRegisterState without assigning PS5 meanings.
 14. #175 inserts a bounded WRITE_DATA guest-buffer micro-gate before further raster orchestration so Astraea can establish guest GPU address/resource resolution independently of shader linkage, draw, export, and render-target semantics.
-15. The immediate next code dependency is #175 W0: ordinary AMD PM4 WRITE_DATA (0x37) memory-profile lowering to typed guest-GPU memory-write Graphics IR with no memory mutation or Vulkan.
+15. #177 completes #175 W0: ordinary AMD PM4 WRITE_DATA (0x37) direct-memory profile -> typed guest-GPU memory-write Graphics IR, preserving destination/payload semantics and packet provenance without resolving or mutating memory.
+16. The next dependency is #175 W1: resolve a checked guest GPU address range against explicitly registered Astraea-owned guest buffers while keeping guest allocation identity independent from CPU pointers and Vulkan objects.
 
 ## SCE metadata boundary
 
@@ -165,38 +167,34 @@ PS5-specific assumptions require documented evidence.
 
 ## Next action
 
-Implement **#175 W0**: the first bounded generic AMD PM4 WRITE_DATA semantic
-slice for the resource-substrate micro-workload.
+Define and implement **#175 W1**: the smallest predeclared guest GPU buffer
+address space needed to resolve W0's typed `GraphicsIrGpuMemoryWrite`.
 
-The first supported profile is:
+W1 must:
 
-- Type-3 opcode `0x37`;
-- Type-3 low control byte = 0;
-- destination selector = 5 (direct memory);
-- increment-address = 0;
-- write-confirm = 1;
-- cache policy = 0 (LRU);
-- engine select = 0 (ME);
-- all other unsupported/reserved control bits = 0;
-- dword-aligned destination GPU address;
-- at least one inline payload dword.
+- register explicit Astraea-owned guest GPU buffer regions using
+  `GpuVirtualAddress` plus checked byte size;
+- resolve a requested half-open GPU range
+  `[address, address + byte_count)` using checked arithmetic;
+- return stable guest buffer identity plus byte offset within that buffer;
+- reject unmapped, partially mapped, overflowed, and ambiguous/overlapping
+  mappings explicitly;
+- keep guest GPU identity separate from CPU guest pointers, host pointers,
+  Vulkan handles, and `VkDeviceAddress`;
+- remain backend-independent and perform no memory mutation.
 
-Lower that packet to a typed Graphics IR guest-GPU memory write containing the
-destination GPU-domain address, ordered inline dword payload, and exact
-RawPacket provenance.
+Use W0's payload length to derive the requested byte range, but do not execute
+the write in W1.
 
-W0 must not mutate memory, resolve guest resources, cast the guest GPU address
-to any CPU/host/Vulkan address, call Vulkan, or return guest-visible SubmitDcb
-success.
+Do not guess PS5 OS GPU-VA allocation policy, page tables, tiling, descriptors,
+or resource lifetime. The first W1 registry is for explicitly declared
+Astraea-owned buffers only.
 
-The evidence and W0-W2 resource plan are recorded in GitHub issue #175. W1
-will introduce a bounded predeclared guest GPU buffer address space; W2 will
-prove the same write through a real Vulkan buffer/readback path. After W0-W2,
-return to the #172 offscreen raster workload and select its next first missing
-dependency.
+Only after W1 is proven should #175 W2 materialize one resolved buffer through
+the Vulkan backend and require deterministic readback.
 
-#173 context-register state remains part of that later raster path and is not
-superseded by #175.
+After #175 W0-W2, return to the #172 offscreen raster workload and select its
+next first missing dependency from actual evidence.
 
 Separately, add PM4 Type-3 stream and bounded RDNA2 stream fuzz-smoke coverage
 as a hardening follow-up when it can proceed without displacing the V3

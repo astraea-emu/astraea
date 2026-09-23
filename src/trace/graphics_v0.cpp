@@ -80,7 +80,7 @@ namespace {
 }
 
 template <typename RegisterWriteRange>
-[[nodiscard]] std::vector<std::byte> graphics_ir_register_value_bytes(
+[[nodiscard]] std::vector<std::byte> graphics_ir_dword_value_bytes(
     const RegisterWriteRange& operation) {
     std::vector<std::byte> bytes;
     bytes.reserve(operation.values.size() * 4U);
@@ -669,7 +669,7 @@ trace_graphics_ir_v0(
                     stable.push_back(
                         bytes_field(
                             "value_bits",
-                            graphics_ir_register_value_bytes(
+                            graphics_ir_dword_value_bytes(
                                 operation)));
                 } else if constexpr (
                     std::is_same_v<
@@ -689,7 +689,26 @@ trace_graphics_ir_v0(
                     stable.push_back(
                         bytes_field(
                             "value_bits",
-                            graphics_ir_register_value_bytes(
+                            graphics_ir_dword_value_bytes(
+                                operation)));
+                } else if constexpr (
+                    std::is_same_v<
+                        Operation,
+                        astraea::graphics::
+                            GraphicsIrGpuMemoryWrite>) {
+                    event_type = "gpu_memory_write";
+                    stable.push_back(
+                        u64_field(
+                            "destination_gpu_address",
+                            operation.destination.value));
+                    stable.push_back(
+                        u64_field(
+                            "value_count",
+                            operation.values.size()));
+                    stable.push_back(
+                        bytes_field(
+                            "value_bits",
+                            graphics_ir_dword_value_bytes(
                                 operation)));
                 }
             },

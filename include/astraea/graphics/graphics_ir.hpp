@@ -5,6 +5,7 @@
 #include <variant>
 #include <vector>
 
+#include <astraea/graphics/gpu_address.hpp>
 #include <astraea/graphics/packet.hpp>
 
 namespace astraea::graphics {
@@ -36,11 +37,19 @@ struct GraphicsIrContextRegisterWriteRange {
         default;
 };
 
+struct GraphicsIrGpuMemoryWrite {
+    GpuVirtualAddress destination;
+    std::vector<std::uint32_t> values;
+
+    auto operator<=>(const GraphicsIrGpuMemoryWrite&) const = default;
+};
+
 using GraphicsIrOperation =
     std::variant<
         GraphicsIrUnsupported,
         GraphicsIrShaderRegisterWriteRange,
-        GraphicsIrContextRegisterWriteRange>;
+        GraphicsIrContextRegisterWriteRange,
+        GraphicsIrGpuMemoryWrite>;
 
 struct GraphicsIrProvenance {
     RawPacket source_packet;
