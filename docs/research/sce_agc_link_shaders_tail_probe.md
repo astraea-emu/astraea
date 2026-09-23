@@ -143,7 +143,7 @@ Each is returned only as an eight-byte little-endian offset/value record. The
 validator assigns no register name or semantic interpretation to these records.
 
 For each unknown record it also reports whether all eight bytes remained equal
-to the supplied sentinel. An untouched record is a valid observation and must
+to the supplied sentinel. A sentinel-matching record is a valid observation and must
 not be rewritten into an assumed zero/default value.
 
 ## Repeat-run rule
