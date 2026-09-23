@@ -70,8 +70,36 @@ SceAgcLinkShadersPlan make_link_plan(
                 astraea::execution::
                     kSceAgcLinkShadersUserConfigOutputSize),
         .hull_shader_handle = GuestAddress{0},
-        .pre_raster_shader = {},
-        .pixel_shader = {},
+        .pre_raster_shader =
+            astraea::execution::
+                SceAgcLinkedShaderIdentity{
+                    .shader_handle = GuestAddress{0},
+                    .code_address =
+                        astraea::graphics::
+                            GpuVirtualAddress{.value = 0},
+                    .stage =
+                        astraea::graphics::
+                            AgcShaderStage::geometry,
+                    .preparation_profile =
+                        astraea::execution::
+                            SceAgcShaderPreparationProfile::
+                                v18_geometry_es_public_shape,
+                },
+        .pixel_shader =
+            astraea::execution::
+                SceAgcLinkedShaderIdentity{
+                    .shader_handle = GuestAddress{0},
+                    .code_address =
+                        astraea::graphics::
+                            GpuVirtualAddress{.value = 0},
+                    .stage =
+                        astraea::graphics::
+                            AgcShaderStage::pixel,
+                    .preparation_profile =
+                        astraea::execution::
+                            SceAgcShaderPreparationProfile::
+                                v18_pixel_public_shape,
+                },
         .primitive_type =
             astraea::execution::
                 kSceAgcLinkShadersTriangleListPrimitiveType,
