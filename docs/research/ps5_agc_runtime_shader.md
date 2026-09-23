@@ -316,6 +316,14 @@ known PS/ES/GS/HS/compute PGM pairs and applies the same address encoding.
 This independently supports ES as a real prepared-program pair and the
 stage-independent address encoding.
 
+Generic AMD register maps provide an additional family-level corroboration for
+the ES offsets. For example, pinned Linux AMD register definitions at
+`torvalds/linux@fe2ec83746e501645709761605c2464a44fd2929` expose
+`mmSPI_SHADER_PGM_LO_ES = 0x2CC8` and
+`mmSPI_SHADER_PGM_HI_ES = 0x2CC9`, consistent with the AGC shader-register
+relative offsets `0xC8/0xC9`. This is generic AMD-family evidence only; it
+does not by itself establish PS5 AGC program-kind semantics.
+
 These are public emulator/research observations, not an official Sony
 specification. Astraea therefore supports only the exact type-2 / leading
 ES-pair profile required by the owned raster path.
