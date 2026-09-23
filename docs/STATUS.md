@@ -186,7 +186,7 @@ preserving the four unknown native records.
   must reproduce before a tail observation is accepted;
 - `CX[32]` and `UC[0..2]` are extracted without assigning candidate
   register identities or values;
-- sentinel-preservation is reported rather than normalized away;
+- sentinel equality is reported rather than normalized away;
 - two consecutive validated runs of the same probe case must have identical
   complete raw CX and UC outputs before promotion into #191.
 
