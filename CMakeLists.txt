@@ -131,6 +131,7 @@ add_library(astraea_core STATIC
     src/graphics/agc_shader_container.cpp
     src/graphics/packet.cpp
     src/graphics/pm4_type3_framing.cpp
+    src/graphics/pm4_draw_control_ir.cpp
     src/graphics/pm4_set_sh_reg_ir.cpp
     src/graphics/pm4_set_context_reg_ir.cpp
     src/graphics/pm4_set_uconfig_reg_ir.cpp
