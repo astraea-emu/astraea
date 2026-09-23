@@ -2238,5 +2238,5 @@ TEST_CASE(
     REQUIRE(
         diff->first_divergence->kind ==
         astraea::trace::TraceDivergenceKindV0::
-            event_type_mismatch);
+            event_identity_mismatch);
 }
