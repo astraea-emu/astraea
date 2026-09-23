@@ -172,29 +172,40 @@ PS5-specific assumptions require documented evidence.
 
 ## Next action
 
-Implement **#191**: obtain evidence for the four LinkShaders records that
-remain intentionally unknown after #189, then complete the 34+3 output and
-wire the real HLE transaction.
+Use **#193**'s `astraea.ps5.agc.link-shaders-tail/v0` observation validator to
+obtain the controlled reference-hardware evidence required by **#191**.
 
-#189 materializes every currently measured LinkShaders byte:
+#189 remains the implementation ceiling until that evidence exists. It
+materializes every currently measured LinkShaders byte while explicitly
+preserving the four unknown native records.
 
-- 32 default interpolant context records at `+0x000..+0x0ff`;
-- measured `VGT_GS_OUT_PRIM_TYPE` record `{0x29b, 2}` at
-  `+0x108..+0x10f`.
+#193 makes the evidence gap reproducible rather than speculative:
 
-It deliberately preserves the unmeasured context record at `+0x100` and all
-three user-config records byte-identical, and reports its output as
-`measured_partial`.
+- the complete `0x110` CX and `0x18` UC raw blocks are the source of truth;
+- the already-measured 32 interpolant records and `{0x29b,2}` routing record
+  must reproduce before a tail observation is accepted;
+- `CX[32]` and `UC[0..2]` are extracted without assigning candidate
+  register identities or values;
+- sentinel-preservation is reported rather than normalized away;
+- two consecutive validated runs of the same probe case must have identical
+  complete raw CX and UC outputs before promotion into #191.
 
-#191 must pin the exact offset/value pair for those four missing records.
-Only after that evidence is complete should internal LinkShaders HLE ID 5 be
-dispatched as guest-visible success and exercised through the owned
-`MqAdbRMdNz4#A#B` SCE fixture.
+The reference-hardware adapter remains outside Astraea core. Do not add console
+transport, firmware/keys, proprietary SDK material, retail assets, or
+proprietary shader binaries to the repository.
 
-Do not infer the missing records from allocation shape, generic AMD defaults,
-or shader-header “specials” alone.
+Only after #191 receives reproducible evidence for all four unknown records
+should Astraea:
 
-Do not fold submitted ES/Geometry binding, DCB emission, draw execution, stage
-I/O, graphics SPIR-V, or Vulkan rasterization into #191.
+1. extend LinkShaders from `measured_partial` to the complete 34+3 output;
+2. wire internal HLE ID 5 into guest-visible runtime dispatch;
+3. exercise `MqAdbRMdNz4#A#B` through the owned SCE fixture.
+
+Do not infer the missing records from generic AMD defaults, public allocation
+shape, compiler candidate values, or shader-header “specials”.
+
+Do not move to submitted ES/Geometry binding, DCB emission, draw execution,
+stage I/O, graphics SPIR-V, or Vulkan rasterization before the LinkShaders
+evidence gate is complete.
 
 The #172 raster target remains the owned offscreen 4x4 uniform-color proof.
