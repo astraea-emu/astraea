@@ -16,6 +16,13 @@ When starting a fresh chat, trust sources in this order:
 
 If a chat conflicts with merged repository documentation, stop and resolve the discrepancy explicitly.
 
+`docs/STATUS.md` is the only document intended to carry the volatile active
+branch, active issue, blocker, and exact next action. README.md and
+docs/PROJECT_PLAN.md intentionally describe durable architecture/gates and
+must not be used to infer a newer active frontier when STATUS/open GitHub state
+says otherwise. If STATUS itself is stale immediately after a merge, reconcile
+it in the next reviewed documentation change before beginning unrelated work.
+
 ## When to roll to a new chat
 
 The lead assistant should recommend a fresh chat when one or more of these becomes true:
@@ -39,10 +46,10 @@ The assistant cannot measure the ChatGPT UI's latency or exact remaining context
 Before recommending a new chat:
 
 1. merge or clearly identify all active work
-2. update `docs/STATUS.md`
+2. update `docs/STATUS.md` with the exact active branch/issue and next action
 3. record any new architectural decision in an ADR
 4. record unresolved research questions
-5. list active PRs/issues and exact next action
+5. reconcile STATUS against currently open GitHub PRs/issues
 6. ensure no important conclusion exists only in the chat
 7. produce a concise handoff prompt pointing the next chat to the repository
 
@@ -64,9 +71,12 @@ The new chat should retrieve current GitHub state instead of trusting a pasted h
 
 Update `docs/STATUS.md`:
 - after every meaningful merge
+- when the active branch/issue changes
 - when a blocker changes
 - after hardware/probe findings
 - before a chat handoff
-- when milestone state changes
+- when milestone/gate state changes
 
-The status file should stay concise enough to read in under two minutes.
+Do not duplicate the exact active branch/issue/next action into README.md or
+docs/PROJECT_PLAN.md. The status file should stay concise enough to read in
+under two minutes.
