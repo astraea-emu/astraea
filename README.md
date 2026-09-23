@@ -104,6 +104,7 @@ See:
 - `docs/PROJECT_PLAN.md`
 - `docs/STATUS.md`
 - `docs/adr/0006-dependency-driven-vertical-integration.md`
+- `docs/adr/0007-separate-shader-semantic-and-compiler-ir.md`
 - `docs/DEVELOPMENT_MACOS.md`
 - `docs/CHAT_HANDOFF.md`
 
