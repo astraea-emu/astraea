@@ -40,6 +40,9 @@ struct CreatedAgcShaderMaterializationError {
             unsupported_preparation_profile;
     std::optional<astraea::graphics::ShaderIrProgramError>
         shader_ir_error;
+
+    auto operator<=>(
+        const CreatedAgcShaderMaterializationError&) const = default;
 };
 
 using CreatedAgcShaderMaterializationResult =
@@ -62,6 +65,9 @@ struct CreatedAgcShaderRegistrationError {
     CreatedAgcShaderRegistrationErrorCode code =
         CreatedAgcShaderRegistrationErrorCode::
             host_allocation_failure;
+
+    auto operator<=>(
+        const CreatedAgcShaderRegistrationError&) const = default;
 };
 
 using CreatedAgcShaderRegistrationResult =
@@ -92,6 +98,12 @@ public:
     // stable even if vector storage later moves.
     [[nodiscard]] CreatedAgcShaderRegistrationResult
     register_shader(CreatedAgcShader shader);
+
+    // Transaction helper for the real create-shader HLE path. Removes only
+    // the exact current final logical registration and never an earlier
+    // record. No allocation is performed.
+    [[nodiscard]] bool rollback_last_registration(
+        std::size_t index) noexcept;
 
     // Returns a record only when the requested program address identifies
     // exactly one created object. Duplicate program addresses remain

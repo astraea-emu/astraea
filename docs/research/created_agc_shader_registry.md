@@ -70,3 +70,28 @@ guest code by GPU address, or call Vulkan.
 The next dependency is rollback-safe integration of this registry with the real
 `sceAgcCreateShader` service, followed by the smallest submission-side lookup
 bridge from persistent pixel shader-register state.
+
+
+## Transactional HLE integration
+
+Issue #164 moves the pure registry into the real `sceAgcCreateShader` service.
+
+The ordering is intentionally:
+
+1. validate/materialize all immutable host state;
+2. register the created shader;
+3. apply the already-preflighted guest preparation patches;
+4. return success only after both host and guest state agree.
+
+Registering after guest publication is unsafe because host allocation failure
+could leave a guest-visible handle with no host-side object.
+
+The temporary registration is therefore inserted before guest mutation. If
+guest application fails, Astraea removes only the exact final logical
+registration index with a no-throw `pop_back`-style rollback. A stale or
+non-final rollback request is rejected rather than deleting another object.
+
+Shader IR lowering is also moved ahead of guest mutation through
+`materialize_created_agc_shader`. A valid AGC envelope whose RDNA2 stream
+cannot be lowered therefore fails before either guest publication or registry
+mutation.

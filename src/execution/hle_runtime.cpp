@@ -36,6 +36,10 @@ namespace {
             std::nullopt,
         .sce_agc_shader_apply_error =
             std::nullopt,
+        .sce_agc_shader_materialization_error =
+            std::nullopt,
+        .sce_agc_shader_registration_error =
+            std::nullopt,
     };
 }
 
@@ -60,6 +64,10 @@ namespace {
         .sce_agc_shader_preparation_error =
             std::nullopt,
         .sce_agc_shader_apply_error =
+            std::nullopt,
+        .sce_agc_shader_materialization_error =
+            std::nullopt,
+        .sce_agc_shader_registration_error =
             std::nullopt,
     };
 }
@@ -117,6 +125,10 @@ namespace {
             std::nullopt,
         .sce_agc_shader_apply_error =
             std::nullopt,
+        .sce_agc_shader_materialization_error =
+            std::nullopt,
+        .sce_agc_shader_registration_error =
+            std::nullopt,
     };
 }
 
@@ -146,6 +158,10 @@ agc_preparation_runtime_error(
         .sce_agc_shader_preparation_error =
             std::move(detail),
         .sce_agc_shader_apply_error =
+            std::nullopt,
+        .sce_agc_shader_materialization_error =
+            std::nullopt,
+        .sce_agc_shader_registration_error =
             std::nullopt,
     };
 }
@@ -183,7 +199,48 @@ agc_preparation_runtime_error(
             std::nullopt,
         .sce_agc_shader_apply_error =
             std::move(detail),
+        .sce_agc_shader_materialization_error =
+            std::nullopt,
+        .sce_agc_shader_registration_error =
+            std::nullopt,
     };
+}
+
+
+[[nodiscard]] HleRuntimeError
+agc_materialization_runtime_error(
+    HleFunctionId function_id,
+    std::uint32_t gate_slot,
+    CreatedAgcShaderMaterializationError detail) noexcept {
+    auto result =
+        runtime_error(
+            HleRuntimeErrorCode::
+                sce_agc_shader_materialization_failure,
+            true,
+            function_id,
+            true,
+            gate_slot);
+    result.sce_agc_shader_materialization_error =
+        std::move(detail);
+    return result;
+}
+
+[[nodiscard]] HleRuntimeError
+agc_registration_runtime_error(
+    HleFunctionId function_id,
+    std::uint32_t gate_slot,
+    CreatedAgcShaderRegistrationError detail) noexcept {
+    auto result =
+        runtime_error(
+            HleRuntimeErrorCode::
+                sce_agc_shader_registration_failure,
+            true,
+            function_id,
+            true,
+            gate_slot);
+    result.sce_agc_shader_registration_error =
+        detail;
+    return result;
 }
 
 }  // namespace
@@ -258,11 +315,46 @@ HleDispatchResult dispatch_hle(
                     preparation.error()));
         }
 
+        auto created_shader =
+            materialize_created_agc_shader(
+                preparation.value());
+        if (!created_shader.has_value()) {
+            return HleDispatchResult::failure(
+                agc_materialization_runtime_error(
+                    descriptor->id,
+                    stop.gate_slot,
+                    created_shader.error()));
+        }
+
+        auto registration =
+            state.created_agc_shaders.register_shader(
+                std::move(created_shader).value());
+        if (!registration.has_value()) {
+            return HleDispatchResult::failure(
+                agc_registration_runtime_error(
+                    descriptor->id,
+                    stop.gate_slot,
+                    registration.error()));
+        }
+
         auto applied =
             apply_sce_agc_shader_preparation(
                 preparation.value(),
                 guest_memory);
         if (!applied.has_value()) {
+            if (!state.created_agc_shaders.
+                    rollback_last_registration(
+                        registration.value())) {
+                return HleDispatchResult::failure(
+                    runtime_error(
+                        HleRuntimeErrorCode::
+                            sce_agc_shader_registry_rollback_failure,
+                        true,
+                        descriptor->id,
+                        true,
+                        stop.gate_slot));
+            }
+
             return HleDispatchResult::failure(
                 agc_apply_runtime_error(
                     descriptor->id,

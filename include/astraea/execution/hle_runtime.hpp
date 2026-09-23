@@ -13,6 +13,7 @@
 #include <astraea/execution/hle.hpp>
 #include <astraea/execution/sce_agc_create_shader.hpp>
 #include <astraea/execution/sce_agc_shader_preparation.hpp>
+#include <astraea/execution/sce_agc_shader_registry.hpp>
 
 namespace astraea::execution {
 
@@ -31,6 +32,9 @@ enum class HleRuntimeErrorCode {
     guest_return_address_not_executable,
     sce_agc_create_shader_plan_failure,
     sce_agc_shader_preparation_failure,
+    sce_agc_shader_materialization_failure,
+    sce_agc_shader_registration_failure,
+    sce_agc_shader_registry_rollback_failure,
     sce_agc_shader_apply_failure,
 };
 
@@ -51,6 +55,10 @@ struct HleRuntimeError {
         sce_agc_shader_preparation_error;
     std::optional<SceAgcShaderApplyError>
         sce_agc_shader_apply_error;
+    std::optional<CreatedAgcShaderMaterializationError>
+        sce_agc_shader_materialization_error;
+    std::optional<CreatedAgcShaderRegistrationError>
+        sce_agc_shader_registration_error;
 
     auto operator<=>(const HleRuntimeError&) const = default;
 };
@@ -68,9 +76,11 @@ struct HleHandlerResult {
 };
 
 struct HleDispatchState {
-    // Test-only write-service output currently uses this buffer. Real services
-    // do not depend on it.
+    // Test-only write-service output remains isolated from real service state.
     std::vector<std::byte> output;
+
+    // Persistent host-side identity for successfully created AGC shaders.
+    CreatedAgcShaderRegistry created_agc_shaders;
 };
 
 // Compatibility name retained for existing synthetic-service tests.

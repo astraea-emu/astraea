@@ -1,9 +1,9 @@
 # Project Status
 
 **Integration gate:** PS5 graphics frontend after V3  
-**State:** V1/V2/V3 proof chain complete; SET_SH_REG persistent shader state complete; created-shader address registry active  
+**State:** V1/V2/V3 proof chain complete; created-shader registry complete; transactional sceAgcCreateShader registration active  
 **Repository:** astraea-emu/astraea  
-**Active branch:** `feat/ps5-created-shader-registry`
+**Active branch:** `feat/v1-register-created-shaders-transactionally`
 
 ## Complete
 
@@ -76,6 +76,7 @@
 - Generic AMD PM4 Type-3 framing of captured DCB streams is complete and five-gate validated (#156/#157), preserving opcode/control fields structurally and exact RawPacket provenance without assigning opcode behavior.
 - Workload-driven generic AMD SET_SH_REG (0x76) lowering to typed consecutive relative shader-register Graphics IR is complete and five-gate validated (#158/#159), with unsupported control bits and out-of-window ranges failing explicitly.
 - Persistent shader-register state with explicit initialized-vs-zero semantics plus evidence-scoped pixel PGM_LO/PGM_HI GPU-address reconstruction is complete and five-gate validated (#160/#161).
+- Created pixel shader materialization plus duplicate-safe not-found/unique/ambiguous lookup by typed program GPU address is complete and five-gate validated (#162/#163).
 - Public five-gate CI remains the merge requirement:
   - Linux x64
   - Windows x64
@@ -88,12 +89,13 @@
 1. V1 is complete through #148/#149.
 2. V2's first deterministic SPIR-V backend is complete through #150/#151.
 3. V3's first actual host-GPU proof is complete through #152/#153.
-4. #154/#155 capture a real SubmitDcb descriptor/stream without claiming execution.
-5. #156/#157 deterministically frame that stream as generic AMD PM4 Type-3 packets.
-6. #158/#159 lower SET_SH_REG packets to typed shader-register Graphics IR.
-7. #160/#161 persist that shader-register state and resolve only the existing pixel PGM_LO/PGM_HI profile to a typed GPU virtual address.
-8. #162 is active: materialize created pixel shader records and provide explicit not-found/unique/ambiguous lookup by that typed program GPU address.
-9. HLE registry mutation, whole-submission state application, draw/dispatch semantics, resource meaning, other shader stages, and real guest-resource Vulkan execution remain later dependencies.
+4. #154/#155 capture a real SubmitDcb descriptor/stream.
+5. #156/#157 frame that stream as generic AMD PM4 Type-3 packets.
+6. #158/#159 lower SET_SH_REG to typed shader-register Graphics IR.
+7. #160/#161 persist shader-register state and reconstruct the existing pixel program GPU address.
+8. #162/#163 materialize validated created pixel shaders and provide duplicate-safe lookup by that address.
+9. #164 is active: integrate created-shader registration transactionally into the real sceAgcCreateShader HLE path, rolling back the exact temporary record if guest preparation fails.
+10. Submission-side shader binding, draw/dispatch semantics, resource meaning, other shader stages, and real guest-resource Vulkan execution remain later dependencies.
 
 ## SCE metadata boundary
 
@@ -152,14 +154,16 @@ PS5-specific assumptions require documented evidence.
 
 ## Next action
 
-Finish #162 on `feat/ps5-created-shader-registry`.
+Finish #164 on `feat/v1-register-created-shaders-transactionally`.
 
-The bounded proof is:
+The service transaction is:
 
-`validated sceAgcCreateShader preparation -> created shader record (AGC + RDNA2 + Shader IR) -> lookup by typed pixel program GPU address`.
+`plan create -> plan preparation -> materialize record -> register record -> apply guest patches -> resume`.
 
-Program addresses are not assumed globally unique. The registry must preserve duplicates and report ambiguous lookup rather than overwrite or choose arbitrarily.
+If guest application fails, roll back exactly the just-added final registry entry before surfacing the existing apply failure. Materialization and registration failures must happen before guest publication and preserve typed nested provenance.
 
-Do not modify HLE dispatch, mutate guest memory, resume SubmitDcb, read shader code by GPU address, decode resources/descriptors, process draw packets, infer other stages, or call Vulkan.
+Do not process SubmitDcb in HLE runtime, resolve submitted pixel state here, add destruction/lifetime APIs, decode resources/descriptors, interpret draw packets, call Vulkan, or add RDNA2 instructions.
 
-After merge, integrate registry insertion into the real sceAgcCreateShader service with rollback-safe failure handling, then bridge persistent submitted pixel state to unique created-shader lookup.
+After merge, build the smallest owned submission-side bridge:
+
+`captured DCB -> Type-3 framing -> SET_SH_REG IR -> persistent shader state -> pixel program address -> unique created-shader lookup`.

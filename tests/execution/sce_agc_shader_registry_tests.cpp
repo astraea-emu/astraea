@@ -455,3 +455,63 @@ TEST_CASE(
         astraea::memory::GuestAddress{
             0x00110000ULL});
 }
+
+
+TEST_CASE(
+    "created AGC shader registry rolls back only the exact last registration",
+    "[execution][agc][shader-registry][rollback]") {
+    astraea::execution::CreatedAgcShaderRegistry registry;
+
+    auto first =
+        require_created(
+            0x00100000ULL,
+            0x00200000ULL,
+            0x00100000ULL);
+    auto second =
+        require_created(
+            0x00110000ULL,
+            0x00300000ULL,
+            0x00110000ULL);
+
+    const auto first_index =
+        registry.register_shader(
+            std::move(first));
+    const auto second_index =
+        registry.register_shader(
+            std::move(second));
+    REQUIRE(first_index.has_value());
+    REQUIRE(second_index.has_value());
+    REQUIRE(first_index.value() == 0U);
+    REQUIRE(second_index.value() == 1U);
+    REQUIRE(registry.size() == 2U);
+
+    REQUIRE_FALSE(
+        registry.rollback_last_registration(
+            first_index.value()));
+    REQUIRE_FALSE(
+        registry.rollback_last_registration(
+            99U));
+    REQUIRE(registry.size() == 2U);
+    REQUIRE(
+        registry.entry_at(0U)->shader_header_address ==
+        astraea::memory::GuestAddress{
+            0x00100000ULL});
+    REQUIRE(
+        registry.entry_at(1U)->shader_header_address ==
+        astraea::memory::GuestAddress{
+            0x00110000ULL});
+
+    REQUIRE(
+        registry.rollback_last_registration(
+            second_index.value()));
+    REQUIRE(registry.size() == 1U);
+    REQUIRE(registry.entry_at(0U) != nullptr);
+    REQUIRE(registry.entry_at(1U) == nullptr);
+
+    REQUIRE(
+        registry.rollback_last_registration(
+            first_index.value()));
+    REQUIRE(registry.size() == 0U);
+    REQUIRE_FALSE(
+        registry.rollback_last_registration(0U));
+}

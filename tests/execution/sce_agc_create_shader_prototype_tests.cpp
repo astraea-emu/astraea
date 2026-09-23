@@ -1305,6 +1305,9 @@ TEST_CASE(
                 kShaderHeaderSize) ==
             before);
 
+        REQUIRE(
+            dispatch_state.created_agc_shaders.size() == 0U);
+
         std::array<std::byte, 4> restored{};
         for (std::size_t index = 0;
              index < restored.size();
@@ -1319,6 +1322,115 @@ TEST_CASE(
                 astraea::memory::GuestAddress{
                     fixture.shader_header_address},
                 restored)
+            .has_value());
+    }
+
+    SECTION(
+        "RDNA2 lowering failure precedes guest mutation and registry insertion") {
+        const auto header_before =
+            read_guest_bytes(
+                memory,
+                fixture.shader_header_address,
+                kShaderHeaderSize);
+        const auto output_before =
+            read_guest_bytes(
+                memory,
+                fixture.output_address,
+                8U);
+
+        // V_MOV_B32 with literal source selector 255 requires one extension
+        // dword. Making it the final program word keeps the AGC envelope
+        // valid but forces Shader IR materialization to fail after the
+        // leading NOP has already lowered successfully.
+        const std::array<std::byte, 4> missing_extension{
+            std::byte{0xff},
+            std::byte{0x02},
+            std::byte{0x0a},
+            std::byte{0x7e},
+        };
+        REQUIRE(
+            memory.write(
+                astraea::memory::GuestAddress{
+                    fixture.shader_text_address + 4U},
+                missing_extension)
+            .has_value());
+
+        auto result =
+            astraea::execution::dispatch_hle(
+                registry,
+                gates.value(),
+                make_agc_stop(
+                    fixture.output_address,
+                    fixture.shader_header_address,
+                    fixture.shader_text_address),
+                memory,
+                dispatch_state);
+
+        REQUIRE_FALSE(result.has_value());
+        REQUIRE(
+            result.error().code ==
+            astraea::execution::
+                HleRuntimeErrorCode::
+                    sce_agc_shader_materialization_failure);
+        REQUIRE(
+            result.error().
+                sce_agc_shader_materialization_error
+                .has_value());
+        REQUIRE(
+            result.error().
+                sce_agc_shader_materialization_error->
+                code ==
+            astraea::execution::
+                CreatedAgcShaderMaterializationErrorCode::
+                    shader_ir_lowering_failure);
+        REQUIRE(
+            result.error().
+                sce_agc_shader_materialization_error->
+                shader_ir_error.has_value());
+        REQUIRE(
+            result.error().
+                sce_agc_shader_materialization_error->
+                shader_ir_error->
+                code ==
+            astraea::graphics::
+                ShaderIrProgramErrorCode::
+                    decode_failure);
+        REQUIRE(
+            result.error().
+                sce_agc_shader_materialization_error->
+                shader_ir_error->
+                word_index == 1U);
+        REQUIRE(
+            result.error().
+                sce_agc_shader_materialization_error->
+                shader_ir_error->
+                lowered_instruction_count == 1U);
+        REQUIRE(
+            dispatch_state.created_agc_shaders.size() == 0U);
+        REQUIRE(
+            read_guest_bytes(
+                memory,
+                fixture.shader_header_address,
+                kShaderHeaderSize) ==
+            header_before);
+        REQUIRE(
+            read_guest_bytes(
+                memory,
+                fixture.output_address,
+                8U) ==
+            output_before);
+
+        const std::array<std::byte, 4> restored_end{
+            std::byte{0x00},
+            std::byte{0x00},
+            std::byte{0x81},
+            std::byte{0xbf},
+        };
+        REQUIRE(
+            memory.write(
+                astraea::memory::GuestAddress{
+                    fixture.shader_text_address + 4U},
+                restored_end)
             .has_value());
     }
 
@@ -1366,6 +1478,8 @@ TEST_CASE(
                 SceAgcShaderPreparationErrorCode::
                     unsupported_shader_stage);
 
+        REQUIRE(
+            dispatch_state.created_agc_shaders.size() == 0U);
         REQUIRE(
             memory.write(
                 astraea::memory::GuestAddress{
@@ -1436,6 +1550,8 @@ TEST_CASE(
                 fixture.shader_header_address,
                 kShaderHeaderSize) ==
             before);
+        REQUIRE(
+            dispatch_state.created_agc_shaders.size() == 0U);
     }
 
     SECTION(
@@ -1479,6 +1595,41 @@ TEST_CASE(
             astraea::execution::
                 HleHandlerAction::resume);
         REQUIRE(create_result->value == 0);
+        REQUIRE(
+            dispatch_state.created_agc_shaders.size() == 1U);
+
+        const auto created_lookup =
+            dispatch_state.created_agc_shaders.lookup_unique(
+                astraea::graphics::
+                    PixelProgramGpuAddress{
+                        .value =
+                            fixture.shader_text_address,
+                    });
+        REQUIRE(created_lookup.has_value());
+        const auto& created =
+            created_lookup.value().get();
+        REQUIRE(
+            created.shader_handle ==
+            astraea::memory::GuestAddress{
+                fixture.shader_header_address});
+        REQUIRE(
+            created.shader_header_address ==
+            astraea::memory::GuestAddress{
+                fixture.shader_header_address});
+        REQUIRE(
+            created.shader_text_address ==
+            astraea::memory::GuestAddress{
+                fixture.shader_text_address});
+        REQUIRE(
+            created.program_address ==
+            astraea::graphics::
+                PixelProgramGpuAddress{
+                    .value =
+                        fixture.shader_text_address,
+                });
+        REQUIRE(created.shader.rdna2_words.size() == 2U);
+        REQUIRE(created.shader_ir.source_word_count == 2U);
+        REQUIRE(created.shader_ir.emissions.size() == 2U);
 
         const auto header =
             fixture.shader_header_address;

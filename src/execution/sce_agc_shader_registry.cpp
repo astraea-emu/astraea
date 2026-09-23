@@ -134,6 +134,17 @@ CreatedAgcShaderRegistry::register_shader(
     }
 }
 
+bool CreatedAgcShaderRegistry::rollback_last_registration(
+    std::size_t index) noexcept {
+    if (shaders_.empty() ||
+        index != shaders_.size() - 1U) {
+        return false;
+    }
+
+    shaders_.pop_back();
+    return true;
+}
+
 CreatedAgcShaderLookupResult
 CreatedAgcShaderRegistry::lookup_unique(
     astraea::graphics::PixelProgramGpuAddress
