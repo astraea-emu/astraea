@@ -1,7 +1,7 @@
 # Project Status
 
 **Integration gate:** V3 — submitted guest GPU state/resources -> Vulkan -> deterministic result  
-**State:** V0/V1/V2 complete; V3 active; #175 resource proof complete; v0x18 Geometry/ES preparation complete; next dependency is stage-aware created-shader materialization/registration  
+**State:** V0/V1/V2 complete; V3 active; stage-aware shader creation, bounded LinkShaders request validation, measured-partial output, and the reference-hardware tail validator are complete; #191 is evidence-blocked on four native tail records  
 **Repository:** astraea-emu/astraea  
 **In-flight work:** inspect live open GitHub PRs/issues; this file describes the expected merged frontier on `main`.
 
@@ -86,6 +86,10 @@
 - #175 W1 guest GPU buffer address-space resolution is complete (#179): explicitly registered non-overlapping GPU-domain buffer regions, stable logical buffer IDs, checked half-open range lookup, exact byte offsets/counts, and W0 payload-range composition with no backing memory or Vulkan identity.
 - #175 W2 Vulkan transfer/readback proof is complete (#181): real vkCmdUpdateBuffer execution over the W0/W1 resolved guest buffer, explicit transfer->host synchronization, non-coherent flush/invalidate handling, stable guest buffer identity, and mandatory full-buffer Lavapipe readback with surrounding-byte verification.
 - Evidence-bounded v0x18 type-2 Geometry/fused-pre-raster preparation is complete (#184): the existing transactional pointer preparation now supports the exact leading ES PGM_LO/HI pair 0xC8/0xC9 with stage-specific patches, synthetic-only fixtures, and no registry/linkage generalization.
+- Stage-aware created-shader materialization/registration is complete (#186): the persistent registry now carries typed Pixel or Geometry stage plus preparation profile, keeps Pixel program-address lookup stage-filtered, adds duplicate-safe handle lookup for LinkShaders, and routes type-2 Geometry through the existing transactional `sceAgcCreateShader` path.
+- Bounded `sceAgcLinkShaders` request validation is complete (#188): the pure planner accepts only the evidenced null-hull, type-2 Geometry + Pixel, primitive-4 profile; validates exact context/UC extents and non-overlap; and copies stable shader identities without mutating guest memory.
+- Measured-partial LinkShaders output materialization is complete (#189): 32 measured interpolant records plus measured `{0x29b, 2}` routing output are preflighted and written exactly, while context `+0x100` and all three UC records remain intentionally untouched and runtime success remains unwired.
+- Transport-neutral LinkShaders tail observation validation is complete (#193): AstraeaProbe v0 validates known native output, extracts the four unknown tail records opaquely, reports sentinel equality without inferring write provenance, and requires byte-identical complete CX/UC output across repeated runs before promotion into #191.
 - Public five-gate CI remains the merge requirement:
   - Linux x64
   - Windows x64
@@ -113,6 +117,12 @@
 16. #179 completes #175 W1: non-overlapping predeclared guest GPU buffer regions resolve checked W0 write ranges to stable guest buffer IDs plus byte offsets/counts without backing-memory mutation or backend identity.
 17. #181 completes #175 W2: raw bounded WRITE_DATA -> typed W0 operation -> W1 guest-buffer resolution -> real queued Vulkan transfer -> deterministic full-buffer Lavapipe readback, without exposing Vulkan handles as guest identity.
 18. #175 is therefore complete as a resource-substrate micro-gate. Planning now returns to #172's offscreen raster workload; the next raster dependency must be selected from the expanded verified state rather than assumed from the pre-W0 ordering.
+19. #184 prepares the exact evidenced v0x18 type-2 Geometry/fused-pre-raster ES program pair needed by the selected workload.
+20. #186 makes created AGC shader identity stage-aware and adds duplicate-safe handle lookup while preserving the existing real `sceAgcCreateShader` transaction.
+21. #188 validates the bounded six-argument LinkShaders request for the owned null-hull Geometry + Pixel triangle-list profile without mutating guest memory.
+22. #189 materializes only the native LinkShaders bytes supported by measurement: CX[0..31] and CX[33]; CX[32] and UC[0..2] remain preserved/unknown and guest-visible LinkShaders success remains deliberately unwired.
+23. #193/#194 make the remaining evidence gap reproducibly measurable: two valid runs must reproduce the known CX records and have byte-identical complete CX/UC outputs before the four tail records can be promoted.
+24. #191 is now the V3 raster critical path and is evidence-blocked, not implementation-blocked. No submitted Geometry binding, draw, stage-I/O, graphics SPIR-V, or Vulkan raster work should bypass this gate.
 
 ## SCE metadata boundary
 
