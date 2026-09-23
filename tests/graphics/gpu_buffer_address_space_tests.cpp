@@ -109,7 +109,7 @@ TEST_CASE(
             0x100U);
     REQUIRE(first.has_value());
 
-    for (const auto [base, size] :
+    for (const auto& [base, size] :
          std::vector<std::pair<std::uint64_t, std::uint64_t>>{
              {0x1000U, 0x100U},
              {0x0ff0U, 0x20U},
