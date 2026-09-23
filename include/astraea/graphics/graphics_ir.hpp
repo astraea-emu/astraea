@@ -37,6 +37,14 @@ struct GraphicsIrContextRegisterWriteRange {
         default;
 };
 
+struct GraphicsIrUserConfigRegisterWriteRange {
+    std::uint16_t start_offset = 0;
+    std::vector<std::uint32_t> values;
+
+    auto operator<=>(
+        const GraphicsIrUserConfigRegisterWriteRange&) const = default;
+};
+
 struct GraphicsIrGpuMemoryWrite {
     GpuVirtualAddress destination;
     std::vector<std::uint32_t> values;
@@ -49,6 +57,7 @@ using GraphicsIrOperation =
         GraphicsIrUnsupported,
         GraphicsIrShaderRegisterWriteRange,
         GraphicsIrContextRegisterWriteRange,
+        GraphicsIrUserConfigRegisterWriteRange,
         GraphicsIrGpuMemoryWrite>;
 
 struct GraphicsIrProvenance {
