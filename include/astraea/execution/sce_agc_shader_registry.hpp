@@ -93,6 +93,12 @@ public:
     [[nodiscard]] CreatedAgcShaderRegistrationResult
     register_shader(CreatedAgcShader shader);
 
+    // Transaction helper for the real create-shader HLE path. Removes only
+    // the exact current final logical registration and never an earlier
+    // record. No allocation is performed.
+    [[nodiscard]] bool rollback_last_registration(
+        std::size_t index) noexcept;
+
     // Returns a record only when the requested program address identifies
     // exactly one created object. Duplicate program addresses remain
     // preserved and are reported as ambiguous rather than overwritten.
