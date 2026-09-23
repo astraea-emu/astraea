@@ -43,7 +43,7 @@ namespace {
 }  // namespace
 
 Pm4SetShRegLowerResult
-lower_pm4_type3_frame_to_graphics_ir(
+lower_pm4_set_sh_reg_frame_to_graphics_ir(
     const Pm4Type3Frame& frame) {
     try {
         if (frame.header.opcode !=
