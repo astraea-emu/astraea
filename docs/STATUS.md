@@ -172,24 +172,25 @@ PS5-specific assumptions require documented evidence.
 
 ## Next action
 
-Implement **#188**: the smallest evidence-bounded `sceAgcLinkShaders` contract
-that consumes stable created-shader handles and materializes only the linkage
-outputs required by #172's owned offscreen raster proof.
+Implement **#189**: materialize only the `sceAgcLinkShaders` output bytes
+justified by public/controlled evidence for #172's owned no-tessellation
+triangle-list raster path.
 
-Public evidence currently indicates that LinkShaders consumes the created
-pre-raster and pixel shader handles and writes two register-record blocks:
+#188 establishes the exact six-argument request contract, checked output
+extents, stable Geometry/Pixel handle resolution, and stage/profile validation
+without touching guest memory.
 
-- 34 context-register records for shader linkage/interpolant mapping plus
-  shader-unit/output-primitive state;
-- 3 user-config primitive-state records.
+Current output evidence is intentionally incomplete: the 32 default
+interpolant records and one context routing record are measured, while one
+context routing record and the three user-config values are not yet pinned
+strongly enough to fabricate.
 
-The next slice must first pin the exact import identity, argument roles, output
-record shape, primitive-type treatment, null-hull behavior, and failure
-semantics before any HLE mutation is added.
+#189 must either obtain stronger evidence for every intended write or represent
+an explicitly partial measured output contract that preserves every unmeasured
+guest byte. Only then should LinkShaders be wired into runtime dispatch as a
+guest-visible successful HLE service.
 
-Do not fold command-buffer emission, draw packets, stage I/O execution,
-resource descriptors, graphics SPIR-V, or Vulkan rasterization into the
-linkage slice. The output should remain typed guest-visible register records
-until later frontend state consumption requires more semantics.
+Do not fold submitted ES/Geometry register binding, DCB emission, draw
+execution, stage I/O, graphics SPIR-V, or Vulkan rasterization into #189.
 
 The #172 raster target remains the owned offscreen 4x4 uniform-color proof.
