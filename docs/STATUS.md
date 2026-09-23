@@ -172,9 +172,9 @@ PS5-specific assumptions require documented evidence.
 
 ## Next action
 
-Extend the created-shader materialization/registry boundary just enough for the
-new #184 type-2 Geometry/fused-pre-raster preparation profile to reach the real
-`sceAgcCreateShader` service transactionally.
+Implement **#186**: extend the created-shader materialization/registry boundary
+just enough for the new #184 type-2 Geometry/fused-pre-raster preparation
+profile to reach the real `sceAgcCreateShader` service transactionally.
 
 The next slice must preserve existing pixel submission behavior while adding a
 stage-aware persistent identity suitable for later `sceAgcLinkShaders`.
