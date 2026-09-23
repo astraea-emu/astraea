@@ -1,5 +1,6 @@
 #include <astraea/graphics/graphics_ir.hpp>
 #include <astraea/graphics/packet.hpp>
+#include <astraea/graphics/pm4_set_context_reg_ir.hpp>
 #include <astraea/graphics/pm4_set_sh_reg_ir.hpp>
 #include <astraea/graphics/pm4_type3_framing.hpp>
 #include <astraea/graphics/rdna2_decoder.hpp>
@@ -1995,7 +1996,7 @@ TEST_CASE(
 
     const auto lowered =
         astraea::graphics::
-            lower_pm4_type3_frame_to_graphics_ir(
+            lower_pm4_set_sh_reg_frame_to_graphics_ir(
                 framed->frames[0]);
     REQUIRE(lowered.has_value());
 
@@ -2072,7 +2073,7 @@ TEST_CASE(
         REQUIRE(framed.has_value());
         auto lowered =
             astraea::graphics::
-                lower_pm4_type3_frame_to_graphics_ir(
+                lower_pm4_set_sh_reg_frame_to_graphics_ir(
                     framed->frames[0]);
         REQUIRE(lowered.has_value());
         return std::move(lowered).value();
@@ -2105,4 +2106,137 @@ TEST_CASE(
         diff->first_divergence->field_name ==
         std::optional<std::string>{
             "value_bits"});
+}
+
+
+TEST_CASE(
+    "Graphics IR SET_CONTEXT_REG trace exposes stable range semantics",
+    "[trace][graphics][v0][set-context-reg]") {
+    const std::vector<std::byte> bytes{
+        std::byte{0x00}, std::byte{0x69},
+        std::byte{0x02}, std::byte{0xc0},
+        std::byte{0x10}, std::byte{0x00},
+        std::byte{0x00}, std::byte{0x00},
+        std::byte{0x44}, std::byte{0x33},
+        std::byte{0x22}, std::byte{0x11},
+        std::byte{0x88}, std::byte{0x77},
+        std::byte{0x66}, std::byte{0x55},
+    };
+
+    const auto framed =
+        astraea::graphics::
+            frame_pm4_type3_stream(bytes);
+    REQUIRE(framed.has_value());
+    REQUIRE(framed->frames.size() == 1U);
+
+    const auto lowered =
+        astraea::graphics::
+            lower_pm4_set_context_reg_frame_to_graphics_ir(
+                framed->frames[0]);
+    REQUIRE(lowered.has_value());
+
+    auto event =
+        astraea::trace::trace_graphics_ir_v0(
+            27,
+            lowered.value());
+    REQUIRE(event.has_value());
+    REQUIRE(event->subsystem == "graphics.ir");
+    REQUIRE(
+        event->type ==
+        "context_register_write_range");
+    REQUIRE(event->stable.size() == 3U);
+    REQUIRE(
+        event->stable[0].name ==
+        "start_offset");
+    REQUIRE(
+        event->stable[0].value ==
+        astraea::trace::TraceValueV0{
+            std::uint64_t{0x10U}});
+    REQUIRE(
+        event->stable[1].name ==
+        "value_count");
+    REQUIRE(
+        event->stable[1].value ==
+        astraea::trace::TraceValueV0{
+            std::uint64_t{2U}});
+    REQUIRE(
+        event->stable[2].name ==
+        "value_bits");
+    REQUIRE(
+        event->stable[2].value ==
+        astraea::trace::TraceValueV0{
+            std::vector<std::byte>{
+                std::byte{0x44},
+                std::byte{0x33},
+                std::byte{0x22},
+                std::byte{0x11},
+                std::byte{0x88},
+                std::byte{0x77},
+                std::byte{0x66},
+                std::byte{0x55}}});
+    REQUIRE(event->diagnostics.size() == 3U);
+}
+
+TEST_CASE(
+    "Graphics IR context and shader register writes are distinct semantics",
+    "[trace][graphics][v0][register-domain]") {
+    const std::vector<std::byte> sh_bytes{
+        std::byte{0x00}, std::byte{0x76},
+        std::byte{0x01}, std::byte{0xc0},
+        std::byte{0x20}, std::byte{0x00},
+        std::byte{0x00}, std::byte{0x00},
+        std::byte{0x78}, std::byte{0x56},
+        std::byte{0x34}, std::byte{0x12},
+    };
+    const std::vector<std::byte> cx_bytes{
+        std::byte{0x00}, std::byte{0x69},
+        std::byte{0x01}, std::byte{0xc0},
+        std::byte{0x20}, std::byte{0x00},
+        std::byte{0x00}, std::byte{0x00},
+        std::byte{0x78}, std::byte{0x56},
+        std::byte{0x34}, std::byte{0x12},
+    };
+
+    const auto sh_framed =
+        astraea::graphics::frame_pm4_type3_stream(
+            sh_bytes);
+    const auto cx_framed =
+        astraea::graphics::frame_pm4_type3_stream(
+            cx_bytes);
+    REQUIRE(sh_framed.has_value());
+    REQUIRE(cx_framed.has_value());
+
+    const auto sh_lowered =
+        astraea::graphics::
+            lower_pm4_set_sh_reg_frame_to_graphics_ir(
+                sh_framed->frames[0]);
+    const auto cx_lowered =
+        astraea::graphics::
+            lower_pm4_set_context_reg_frame_to_graphics_ir(
+                cx_framed->frames[0]);
+    REQUIRE(sh_lowered.has_value());
+    REQUIRE(cx_lowered.has_value());
+
+    auto left =
+        astraea::trace::trace_graphics_ir_v0(
+            28,
+            sh_lowered.value());
+    auto right =
+        astraea::trace::trace_graphics_ir_v0(
+            28,
+            cx_lowered.value());
+    REQUIRE(left.has_value());
+    REQUIRE(right.has_value());
+
+    auto diff =
+        astraea::trace::diff_trace_v0(
+            document(std::move(left).value()),
+            document(std::move(right).value()));
+
+    REQUIRE(diff.has_value());
+    REQUIRE_FALSE(diff->equivalent);
+    REQUIRE(
+        diff->first_divergence->kind ==
+        astraea::trace::TraceDivergenceKindV0::
+            event_type_mismatch);
 }
