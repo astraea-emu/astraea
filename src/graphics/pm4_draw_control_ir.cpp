@@ -39,7 +39,7 @@ namespace {
 
 Pm4DrawControlLowerResult
 lower_pm4_draw_control_frame_to_graphics_ir(
-    const Pm4Type3Frame& frame) noexcept {
+    const Pm4Type3Frame& frame) {
     if (frame.header.opcode == kPm4NumInstancesOpcode) {
         constexpr std::size_t kExpectedWords = 2U;
         if (frame.header.encoded_count != 0U ||
