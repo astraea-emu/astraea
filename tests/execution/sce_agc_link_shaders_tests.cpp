@@ -743,3 +743,122 @@ TEST_CASE(
             unresolved.function_id.has_value());
     }
 }
+
+
+TEST_CASE(
+    "sceAgcLinkShaders measured output contains only the pinned context records",
+    "[execution][agc][link-shaders][measured-output]") {
+    const auto registry = make_registry();
+    const auto request =
+        astraea::execution::
+            plan_sce_agc_link_shaders(
+                make_call(),
+                registry);
+    REQUIRE(request.has_value());
+
+    const auto output =
+        astraea::execution::
+            materialize_sce_agc_link_shaders_measured_output(
+                request.value());
+    REQUIRE(output.has_value());
+
+    REQUIRE(
+        output->completeness ==
+        astraea::execution::
+            SceAgcLinkShadersOutputCompleteness::
+                measured_partial);
+    REQUIRE(
+        output->interpolant_records.size() ==
+        astraea::execution::
+            kSceAgcLinkShadersMeasuredInterpolantRecordCount);
+    REQUIRE(
+        output->interpolant_records.front() ==
+        astraea::execution::
+            SceAgcLinkShadersRegisterRecord{
+                .offset = 0x191U,
+                .value = 0U,
+            });
+    REQUIRE(
+        output->interpolant_records[1] ==
+        astraea::execution::
+            SceAgcLinkShadersRegisterRecord{
+                .offset = 0x192U,
+                .value = 1U,
+            });
+    REQUIRE(
+        output->interpolant_records.back() ==
+        astraea::execution::
+            SceAgcLinkShadersRegisterRecord{
+                .offset = 0x1b0U,
+                .value = 31U,
+            });
+    REQUIRE(
+        output->routing_record ==
+        astraea::execution::
+            SceAgcLinkShadersRegisterRecord{
+                .offset = 0x29bU,
+                .value = 2U,
+            });
+
+    REQUIRE(
+        output->interpolant_output_address ==
+        GuestAddress{kContextOutput});
+    REQUIRE(
+        output->interpolant_output_range.size().value() ==
+        0x100U);
+    REQUIRE(
+        output->routing_output_address ==
+        GuestAddress{kContextOutput + 0x108U});
+    REQUIRE(
+        output->routing_output_range.size().value() ==
+        8U);
+    REQUIRE(
+        output->preserved_user_config_address ==
+        GuestAddress{kUserConfigOutput});
+
+    // The measured patches intentionally leave exactly one eight-byte context
+    // record at +0x100 untouched.
+    REQUIRE(
+        output->routing_output_address.value() -
+            (output->interpolant_output_address.value() +
+             output->interpolant_output_range.size().value()) ==
+        8U);
+}
+
+TEST_CASE(
+    "sceAgcLinkShaders measured output reports routing address overflow",
+    "[execution][agc][link-shaders][measured-output][negative]") {
+    const auto registry = make_registry();
+    auto request =
+        astraea::execution::
+            plan_sce_agc_link_shaders(
+                make_call(),
+                registry);
+    REQUIRE(request.has_value());
+
+    request->context_output_address =
+        GuestAddress{
+            std::numeric_limits<std::uint64_t>::max() -
+            0x100U};
+
+    const auto output =
+        astraea::execution::
+            materialize_sce_agc_link_shaders_measured_output(
+                request.value());
+    REQUIRE_FALSE(output.has_value());
+    REQUIRE(
+        output.error().code ==
+        astraea::execution::
+            SceAgcLinkShadersMeasuredOutputPlanErrorCode::
+                measured_output_address_overflow);
+    REQUIRE(
+        output.error().base_address ==
+        std::optional<GuestAddress>{
+            GuestAddress{
+                std::numeric_limits<std::uint64_t>::max() -
+                0x100U}});
+    REQUIRE(
+        output.error().byte_offset ==
+        astraea::execution::
+            kSceAgcLinkShadersMeasuredRoutingByteOffset);
+}

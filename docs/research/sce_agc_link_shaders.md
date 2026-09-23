@@ -174,3 +174,82 @@ independent C++ code against Astraea-owned synthetic fixtures.
 
 No Sony firmware, keys, proprietary SDK material, decrypted retail assets, or
 third-party shader binaries are committed.
+
+
+## #189 measured-partial output decision
+
+A deeper evidence sweep before writing any LinkShaders output compared:
+
+- the published Orbistoun/obSCEne measurements;
+- the pinned ps5-agc-gears FW 12.02 allocation structures and shader-header
+  “specials” inputs;
+- generic AMD register maps from pinned Linux sources.
+
+The result strengthens one record but does **not** justify a complete 37-record
+write.
+
+### Generic AMD corroboration for the measured routing record
+
+Pinned Linux AMD register maps at
+`torvalds/linux@fe2ec83746e501645709761605c2464a44fd2929`
+identify `VGT_GS_OUT_PRIM_TYPE` at context register address `0xA29B`.
+
+Under the compact context-offset convention used by the public AGC
+offset/value arrays, that corroborates the measured LinkShaders record offset
+`0x29b`.
+
+This is family-level register-name corroboration only. The PS5-specific value
+`2` remains justified by the hardware measurement, not by desktop defaults.
+
+### Why shader-header “specials” are not copied into output
+
+Pinned `ps5-agc-gears` builds a type-2 shader specials block containing
+candidate inputs named GE_CNTL, shader-stages state, output-primitive state,
+and a GE_USER_VGPR_EN slot. Those are useful clues about LinkShaders inputs,
+but they do not prove the native LinkShaders output transformation.
+
+In particular, one published specials slot uses offset `0x2ce` for a field
+named `gs_out_prim_type`, while generic AMD maps and the measured LinkShaders
+output identify `VGT_GS_OUT_PRIM_TYPE` at `0x29b`. Astraea therefore does
+not treat the specials block as a verbatim output template.
+
+The companion primitive-state measurements likewise do not recover the
+missing UC records: they measure topology in a separate secondary-state field,
+while another routing word is explicitly described as touched but unmeasured.
+
+### Exact #189 write contract
+
+#189 writes exactly two measured context regions:
+
+1. `context + 0x000 .. +0x0ff`
+   - 32 records
+   - record `i = {offset 0x191 + i, value i}`
+2. `context + 0x108 .. +0x10f`
+   - one record
+   - `{offset 0x29b, value 2}`
+
+It intentionally preserves:
+
+- `context + 0x100 .. +0x107`;
+- all `0x18` user-config output bytes;
+- all unrelated bytes before and after both blocks.
+
+The output plan and apply report are explicitly tagged
+`measured_partial`. No runtime dispatch branch returns LinkShaders success
+from this partial state.
+
+The apply path preflights both measured write ranges before the first guest
+mutation. A preflight failure therefore leaves every measured and preserved
+byte unchanged.
+
+## Completion follow-up
+
+Issue #191 owns the four missing native records:
+
+- context `+0x100`;
+- UC record 0;
+- UC record 1;
+- UC record 2;
+
+and only after those are measured strongly enough does it wire internal HLE ID
+5 into runtime dispatch and the owned SCE end-to-end fixture.

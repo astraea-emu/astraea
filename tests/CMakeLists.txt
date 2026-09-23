@@ -48,6 +48,7 @@ add_executable(astraea_core_tests
     execution/hle_runtime_tests.cpp
     execution/sce_agc_create_shader_tests.cpp
     execution/sce_agc_link_shaders_tests.cpp
+    execution/sce_agc_link_shaders_output_tests.cpp
     execution/sce_agc_driver_submit_dcb_tests.cpp
     execution/sce_agc_shader_preparation_tests.cpp
     execution/sce_agc_shader_registry_tests.cpp
