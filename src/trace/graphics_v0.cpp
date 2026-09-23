@@ -80,7 +80,7 @@ namespace {
 }
 
 template <typename RegisterWriteRange>
-[[nodiscard]] std::vector<std::byte> graphics_ir_register_value_bytes(
+[[nodiscard]] std::vector<std::byte> graphics_ir_dword_value_bytes(
     const RegisterWriteRange& operation) {
     std::vector<std::byte> bytes;
     bytes.reserve(operation.values.size() * 4U);
@@ -669,7 +669,7 @@ trace_graphics_ir_v0(
                     stable.push_back(
                         bytes_field(
                             "value_bits",
-                            graphics_ir_register_value_bytes(
+                            graphics_ir_dword_value_bytes(
                                 operation)));
                 } else if constexpr (
                     std::is_same_v<
@@ -689,7 +689,7 @@ trace_graphics_ir_v0(
                     stable.push_back(
                         bytes_field(
                             "value_bits",
-                            graphics_ir_register_value_bytes(
+                            graphics_ir_dword_value_bytes(
                                 operation)));
                 } else if constexpr (
                     std::is_same_v<
@@ -708,7 +708,7 @@ trace_graphics_ir_v0(
                     stable.push_back(
                         bytes_field(
                             "value_bits",
-                            graphics_ir_register_value_bytes(
+                            graphics_ir_dword_value_bytes(
                                 operation)));
                 }
             },
