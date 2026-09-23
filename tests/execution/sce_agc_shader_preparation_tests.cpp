@@ -237,12 +237,62 @@ ShaderFixture make_public_shape_pixel_fixture() {
     return fixture;
 }
 
+ShaderFixture make_public_shape_geometry_fixture() {
+    auto fixture =
+        make_public_shape_pixel_fixture();
+
+    fixture.header[0x5a] = std::byte{2};
+
+    // Evidence-bounded type-2 Geometry/fused-pre-raster profile uses the
+    // leading ES PGM_LO/HI register pair.
+    write_little_endian<std::uint16_t>(
+        fixture.header,
+        kShaderOffset,
+        0x00c8U);
+    write_little_endian<std::uint16_t>(
+        fixture.header,
+        kShaderOffset + 8U,
+        0x00c9U);
+
+    // Distinct unknown byte used by the type-2 apply regression.
+    fixture.header[0x71] = std::byte{0x6b};
+
+    return fixture;
+}
+
 SceAgcCreateShaderPlan make_create_plan(
     std::uint64_t output_address = 0x00100000U,
     std::uint64_t header_address = 0x00200000U,
     std::uint64_t text_address = 0x00300000U) {
     auto fixture =
         make_public_shape_pixel_fixture();
+    auto shader =
+        astraea::graphics::
+            parse_agc_shader_binary(
+                fixture.header,
+                fixture.text);
+    REQUIRE(shader.has_value());
+
+    return SceAgcCreateShaderPlan{
+        .request =
+            {
+                .output_pointer_address =
+                    GuestAddress{output_address},
+                .shader_header_address =
+                    GuestAddress{header_address},
+                .shader_text_address =
+                    GuestAddress{text_address},
+            },
+        .shader = std::move(shader).value(),
+    };
+}
+
+SceAgcCreateShaderPlan make_geometry_create_plan(
+    std::uint64_t output_address = 0x00100000U,
+    std::uint64_t header_address = 0x00200000U,
+    std::uint64_t text_address = 0x00300000U) {
+    auto fixture =
+        make_public_shape_geometry_fixture();
     auto shader =
         astraea::graphics::
             parse_agc_shader_binary(
@@ -523,6 +573,10 @@ TEST_CASE(
 
     const auto& plan = result.value();
     REQUIRE(
+        plan.profile ==
+        astraea::execution::SceAgcShaderPreparationProfile::
+            v18_pixel_public_shape);
+    REQUIRE(
         plan.shader_handle ==
         create.request.shader_header_address);
     REQUIRE(
@@ -648,6 +702,141 @@ TEST_CASE(
             SceAgcShaderPatchKind::
                 output_handle) ==
         header);
+}
+
+TEST_CASE(
+    "Geometry AGC preparation plan patches the evidenced ES program pair",
+    "[execution][agc][prepare][v3][geometry]") {
+    const auto create =
+        make_geometry_create_plan();
+    REQUIRE(
+        create.shader.program_type.raw ==
+        2U);
+    REQUIRE(
+        create.shader.program_type.known ==
+        std::optional<
+            astraea::graphics::AgcShaderStage>{
+            astraea::graphics::AgcShaderStage::
+                geometry});
+
+    const auto original_header =
+        create.shader.shader_header_bytes;
+    const auto result =
+        astraea::execution::
+            plan_sce_agc_shader_preparation(
+                create);
+
+    REQUIRE(result.has_value());
+    const auto& plan = result.value();
+    REQUIRE(
+        plan.profile ==
+        astraea::execution::SceAgcShaderPreparationProfile::
+            v18_geometry_es_public_shape);
+    REQUIRE(
+        plan.shader_handle ==
+        create.request.shader_header_address);
+    REQUIRE(
+        plan.create_shader.shader.shader_header_bytes ==
+        original_header);
+    REQUIRE(
+        plan.patches.back().kind ==
+        SceAgcShaderPatchKind::output_handle);
+
+    const auto header =
+        create.request.shader_header_address.value();
+    const auto text =
+        create.request.shader_text_address.value();
+
+    REQUIRE(
+        require_patch(
+            plan,
+            SceAgcShaderPatchKind::
+                geometry_es_pgm_lo_value)
+            .address ==
+        GuestAddress{
+            header + kShaderOffset + 4U});
+    REQUIRE(
+        patch_u32(
+            plan,
+            SceAgcShaderPatchKind::
+                geometry_es_pgm_lo_value) ==
+        static_cast<std::uint32_t>(
+            (text >> 8U) & 0xffffffffU));
+    REQUIRE(
+        require_patch(
+            plan,
+            SceAgcShaderPatchKind::
+                geometry_es_pgm_hi_value)
+            .address ==
+        GuestAddress{
+            header + kShaderOffset + 12U});
+    REQUIRE(
+        patch_u32(
+            plan,
+            SceAgcShaderPatchKind::
+                geometry_es_pgm_hi_value) ==
+        static_cast<std::uint32_t>(
+            (text >> 40U) & 0xffU));
+
+    for (const auto& patch : plan.patches) {
+        REQUIRE(
+            patch.kind !=
+            SceAgcShaderPatchKind::
+                pixel_pgm_lo_value);
+        REQUIRE(
+            patch.kind !=
+            SceAgcShaderPatchKind::
+                pixel_pgm_hi_value);
+    }
+
+    REQUIRE(
+        patch_u64(
+            plan,
+            SceAgcShaderPatchKind::
+                output_handle) ==
+        header);
+}
+
+TEST_CASE(
+    "Geometry AGC preparation rejects wrong leading program-register pair",
+    "[execution][agc][prepare][v3][geometry][negative]") {
+    SECTION("pixel pair") {
+        auto create =
+            make_geometry_create_plan();
+        create.shader.shader_registers[0]
+            .register_offset = 0x0008U;
+        create.shader.shader_registers[1]
+            .register_offset = 0x0009U;
+
+        const auto result =
+            astraea::execution::
+                plan_sce_agc_shader_preparation(
+                    create);
+        REQUIRE_FALSE(result.has_value());
+        REQUIRE(
+            result.error().code ==
+            SceAgcShaderPreparationErrorCode::
+                unsupported_geometry_program_register_pair);
+    }
+
+    SECTION("GS pair") {
+        auto create =
+            make_geometry_create_plan();
+        create.shader.shader_registers[0]
+            .register_offset = 0x0088U;
+        create.shader.shader_registers[1]
+            .register_offset = 0x0089U;
+
+        const auto result =
+            astraea::execution::
+                plan_sce_agc_shader_preparation(
+                    create);
+        REQUIRE_FALSE(result.has_value());
+        REQUIRE(
+            result.error().code ==
+            SceAgcShaderPreparationErrorCode::
+                unsupported_geometry_program_register_pair);
+    }
 }
 
 TEST_CASE(
