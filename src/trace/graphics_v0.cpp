@@ -79,8 +79,9 @@ namespace {
     };
 }
 
+template <typename RegisterWriteRange>
 [[nodiscard]] std::vector<std::byte> graphics_ir_register_value_bytes(
-    const astraea::graphics::GraphicsIrShaderRegisterWriteRange& operation) {
+    const RegisterWriteRange& operation) {
     std::vector<std::byte> bytes;
     bytes.reserve(operation.values.size() * 4U);
 
@@ -657,6 +658,26 @@ trace_graphics_ir_v0(
                             GraphicsIrShaderRegisterWriteRange>) {
                     event_type =
                         "shader_register_write_range";
+                    stable.push_back(
+                        u64_field(
+                            "start_offset",
+                            operation.start_offset));
+                    stable.push_back(
+                        u64_field(
+                            "value_count",
+                            operation.values.size()));
+                    stable.push_back(
+                        bytes_field(
+                            "value_bits",
+                            graphics_ir_register_value_bytes(
+                                operation)));
+                } else if constexpr (
+                    std::is_same_v<
+                        Operation,
+                        astraea::graphics::
+                            GraphicsIrContextRegisterWriteRange>) {
+                    event_type =
+                        "context_register_write_range";
                     stable.push_back(
                         u64_field(
                             "start_offset",

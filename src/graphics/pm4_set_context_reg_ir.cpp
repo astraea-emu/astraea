@@ -1,8 +1,7 @@
-#include <astraea/graphics/pm4_set_sh_reg_ir.hpp>
+#include <astraea/graphics/pm4_set_context_reg_ir.hpp>
 
 #include <cstddef>
 #include <cstdint>
-#include <limits>
 #include <new>
 #include <stdexcept>
 #include <utility>
@@ -26,12 +25,12 @@ namespace {
     return value;
 }
 
-[[nodiscard]] Pm4SetShRegLowerError lower_error(
-    Pm4SetShRegLowerErrorCode code,
+[[nodiscard]] Pm4SetContextRegLowerError lower_error(
+    Pm4SetContextRegLowerErrorCode code,
     const Pm4Type3Frame& frame,
     std::uint32_t raw_offset_control_word = 0,
     std::size_t value_count = 0) noexcept {
-    return Pm4SetShRegLowerError{
+    return Pm4SetContextRegLowerError{
         .code = code,
         .word_offset = frame.word_offset,
         .raw_offset_control_word =
@@ -42,13 +41,13 @@ namespace {
 
 }  // namespace
 
-Pm4SetShRegLowerResult
-lower_pm4_set_sh_reg_frame_to_graphics_ir(
+Pm4SetContextRegLowerResult
+lower_pm4_set_context_reg_frame_to_graphics_ir(
     const Pm4Type3Frame& frame) {
     try {
         if (frame.header.opcode !=
-            kPm4SetShRegOpcode) {
-            return Pm4SetShRegLowerResult::success(
+            kPm4SetContextRegOpcode) {
+            return Pm4SetContextRegLowerResult::success(
                 make_unsupported_packet_ir(
                     frame.raw_packet));
         }
@@ -62,10 +61,10 @@ lower_pm4_set_sh_reg_frame_to_graphics_ir(
                 value_count + 2U ||
             frame.header.total_word_count !=
                 value_count + 2U) {
-            return Pm4SetShRegLowerResult::failure(
+            return Pm4SetContextRegLowerResult::failure(
                 lower_error(
-                    Pm4SetShRegLowerErrorCode::
-                        malformed_set_sh_reg,
+                    Pm4SetContextRegLowerErrorCode::
+                        malformed_set_context_reg,
                     frame,
                     0U,
                     value_count));
@@ -77,9 +76,9 @@ lower_pm4_set_sh_reg_frame_to_graphics_ir(
         const auto control_bits =
             offset_control_word & 0xffff0000U;
         if (control_bits != 0U) {
-            return Pm4SetShRegLowerResult::failure(
+            return Pm4SetContextRegLowerResult::failure(
                 lower_error(
-                    Pm4SetShRegLowerErrorCode::
+                    Pm4SetContextRegLowerErrorCode::
                         unsupported_register_control_bits,
                     frame,
                     offset_control_word,
@@ -94,13 +93,13 @@ lower_pm4_set_sh_reg_frame_to_graphics_ir(
                 start_offset);
 
         if (start >=
-                kPm4ShaderRegisterWindowDwords ||
+                kPm4ContextRegisterWindowDwords ||
             value_count >
-                kPm4ShaderRegisterWindowDwords -
+                kPm4ContextRegisterWindowDwords -
                     start) {
-            return Pm4SetShRegLowerResult::failure(
+            return Pm4SetContextRegLowerResult::failure(
                 lower_error(
-                    Pm4SetShRegLowerErrorCode::
+                    Pm4SetContextRegLowerErrorCode::
                         register_range_out_of_bounds,
                     frame,
                     offset_control_word,
@@ -118,10 +117,10 @@ lower_pm4_set_sh_reg_frame_to_graphics_ir(
                         index + 2U]));
         }
 
-        return Pm4SetShRegLowerResult::success(
+        return Pm4SetContextRegLowerResult::success(
             GraphicsIrEmission{
                 .operation =
-                    GraphicsIrShaderRegisterWriteRange{
+                    GraphicsIrContextRegisterWriteRange{
                         .start_offset =
                             start_offset,
                         .values =
@@ -134,15 +133,15 @@ lower_pm4_set_sh_reg_frame_to_graphics_ir(
                     },
             });
     } catch (const std::bad_alloc&) {
-        return Pm4SetShRegLowerResult::failure(
+        return Pm4SetContextRegLowerResult::failure(
             lower_error(
-                Pm4SetShRegLowerErrorCode::
+                Pm4SetContextRegLowerErrorCode::
                     host_allocation_failure,
                 frame));
     } catch (const std::length_error&) {
-        return Pm4SetShRegLowerResult::failure(
+        return Pm4SetContextRegLowerResult::failure(
             lower_error(
-                Pm4SetShRegLowerErrorCode::
+                Pm4SetContextRegLowerErrorCode::
                     host_allocation_failure,
                 frame));
     }

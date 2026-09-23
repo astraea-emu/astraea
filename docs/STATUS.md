@@ -1,7 +1,7 @@
 # Project Status
 
 **Integration gate:** V3 — submitted guest GPU state/resources -> Vulkan -> deterministic result  
-**State:** V0/V1/V2 complete; V3 active; host-GPU semantic proof and submission-side shader binding complete; owned offscreen graphics workload selected; next dependency is generic SET_CONTEXT_REG state  
+**State:** V0/V1/V2 complete; V3 active; host-GPU semantic proof, submitted shader binding, and generic context-register state complete; next dependency is #175 W0 bounded WRITE_DATA semantics  
 **Repository:** astraea-emu/astraea  
 **In-flight work:** inspect live open GitHub PRs/issues; this file describes the expected merged frontier on `main`.
 
@@ -81,6 +81,7 @@
 - Post-V1/V2/V3 architecture synchronization and the separate semantic-IR/compiler-IR contract are complete (#166/#167, ADR 0007).
 - Evidence-bounded submitted pixel-shader binding is complete (#169): flag-zero captured DCB -> zero-control Type-3 frames -> SET_SH_REG Graphics IR -> fresh shader-register state -> typed pixel program GPU address -> duplicate-safe unique created-shader selection, with final PGM_LO/PGM_HI DCB word provenance and no fake SubmitDcb success or Vulkan work.
 - The first resource-backed V3 target is selected (#172): an Astraea-owned offscreen 4x4 uniform-color graphics workload with no depth/blend/MSAA/textures/presentation; the first missing dependency is generic submitted context-register transport/state (#173).
+- Generic AMD SET_CONTEXT_REG (0x69) lowering plus separate persistent initialized-vs-zero ContextRegisterState is complete (#173), with exact RawPacket provenance, explicit control/range failures, Trace v0 semantics, and no PS5-specific register meanings.
 - Public five-gate CI remains the merge requirement:
   - Linux x64
   - Windows x64
@@ -102,7 +103,9 @@
 10. #166/#167 reconcile durable V1/V2/V3 documentation and record the semantic-IR/compiler-IR boundary after the rapid proof-chain merges.
 11. #169 composes the captured DCB/state path through final pixel-program address resolution and unique created-shader selection with exact PGM source provenance.
 12. #172 selects the first resource-backed V3 workload: a tiny owned offscreen uniform-color graphics proof, deliberately excluding presentation.
-13. #173 is the next code dependency: generic PM4 SET_CONTEXT_REG lowering plus persistent initialized-vs-zero context-register state. PS5-specific render-target/viewport meanings remain later workload-driven dependencies.
+13. #173 adds generic PM4 SET_CONTEXT_REG lowering plus a separate persistent initialized-vs-zero ContextRegisterState without assigning PS5 meanings.
+14. #175 inserts a bounded WRITE_DATA guest-buffer micro-gate before further raster orchestration so Astraea can establish guest GPU address/resource resolution independently of shader linkage, draw, export, and render-target semantics.
+15. The immediate next code dependency is #175 W0: ordinary AMD PM4 WRITE_DATA (0x37) memory-profile lowering to typed guest-GPU memory-write Graphics IR with no memory mutation or Vulkan.
 
 ## SCE metadata boundary
 
@@ -162,24 +165,38 @@ PS5-specific assumptions require documented evidence.
 
 ## Next action
 
-Implement #173: the generic submitted context-register boundary required by
-the #172 offscreen graphics workload.
+Implement **#175 W0**: the first bounded generic AMD PM4 WRITE_DATA semantic
+slice for the resource-substrate micro-workload.
 
-The bounded path is:
+The first supported profile is:
 
-`PM4 Type-3 SET_CONTEXT_REG (0x69) -> GraphicsIrContextRegisterWriteRange -> ContextRegisterState`.
+- Type-3 opcode `0x37`;
+- Type-3 low control byte = 0;
+- destination selector = 5 (direct memory);
+- increment-address = 0;
+- write-confirm = 1;
+- cache policy = 0 (LRU);
+- engine select = 0 (ME);
+- all other unsupported/reserved control bits = 0;
+- dword-aligned destination GPU address;
+- at least one inline payload dword.
 
-Preserve RawPacket provenance and explicit initialized-vs-zero state. Validate
-the full destination range before mutation. Support only the generic
-consecutive-write envelope justified by AMD/public-driver evidence and reject
-unsupported control/index bits explicitly.
+Lower that packet to a typed Graphics IR guest-GPU memory write containing the
+destination GPU-domain address, ordered inline dword payload, and exact
+RawPacket provenance.
 
-Do **not** assign PS5 meaning to any context-register offset yet. Do not decode
-render-target/viewport/scissor/blend/depth fields, implement draw packets,
-resolve guest resources, call Vulkan, or return fake SubmitDcb success.
+W0 must not mutate memory, resolve guest resources, cast the guest GPU address
+to any CPU/host/Vulkan address, call Vulkan, or return guest-visible SubmitDcb
+success.
 
-The selected V3 workload and its deferred dependency questions are recorded in
-`docs/research/v3_offscreen_graphics_workload.md`.
+The evidence and W0-W2 resource plan are recorded in GitHub issue #175. W1
+will introduce a bounded predeclared guest GPU buffer address space; W2 will
+prove the same write through a real Vulkan buffer/readback path. After W0-W2,
+return to the #172 offscreen raster workload and select its next first missing
+dependency.
+
+#173 context-register state remains part of that later raster path and is not
+superseded by #175.
 
 Separately, add PM4 Type-3 stream and bounded RDNA2 stream fuzz-smoke coverage
 as a hardening follow-up when it can proceed without displacing the V3

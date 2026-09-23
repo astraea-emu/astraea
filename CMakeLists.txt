@@ -129,8 +129,10 @@ add_library(astraea_core STATIC
     src/graphics/packet.cpp
     src/graphics/pm4_type3_framing.cpp
     src/graphics/pm4_set_sh_reg_ir.cpp
+    src/graphics/pm4_set_context_reg_ir.cpp
     src/graphics/graphics_ir.cpp
     src/graphics/shader_register_state.cpp
+    src/graphics/context_register_state.cpp
     src/graphics/rdna2_decoder.cpp
     src/graphics/shader_ir.cpp
     src/graphics/shader_program.cpp

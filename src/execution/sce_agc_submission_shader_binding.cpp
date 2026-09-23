@@ -110,7 +110,7 @@ plan_sce_agc_submitted_pixel_shader_binding(
 
         auto lowered =
             astraea::graphics::
-                lower_pm4_type3_frame_to_graphics_ir(
+                lower_pm4_set_sh_reg_frame_to_graphics_ir(
                     frame);
         if (!lowered.has_value()) {
             auto error =

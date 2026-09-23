@@ -28,10 +28,19 @@ struct GraphicsIrShaderRegisterWriteRange {
         default;
 };
 
+struct GraphicsIrContextRegisterWriteRange {
+    std::uint16_t start_offset = 0;
+    std::vector<std::uint32_t> values;
+
+    auto operator<=>(const GraphicsIrContextRegisterWriteRange&) const =
+        default;
+};
+
 using GraphicsIrOperation =
     std::variant<
         GraphicsIrUnsupported,
-        GraphicsIrShaderRegisterWriteRange>;
+        GraphicsIrShaderRegisterWriteRange,
+        GraphicsIrContextRegisterWriteRange>;
 
 struct GraphicsIrProvenance {
     RawPacket source_packet;

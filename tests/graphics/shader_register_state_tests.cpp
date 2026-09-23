@@ -419,3 +419,34 @@ TEST_CASE(
     right.values[0U] = 1U;
     REQUIRE_FALSE(left == right);
 }
+
+
+TEST_CASE(
+    "context register Graphics IR does not mutate shader state",
+    "[graphics][shader-register-state][domain]") {
+    astraea::graphics::ShaderRegisterState state{};
+    state.values[2U] = 0x12345678U;
+    state.initialized.set(2U);
+    const auto before = state;
+
+    const auto result =
+        astraea::graphics::
+            apply_shader_register_graphics_ir(
+                make_emission(
+                    astraea::graphics::
+                        GraphicsIrContextRegisterWriteRange{
+                            .start_offset = 2U,
+                            .values =
+                                std::vector<std::uint32_t>{
+                                    0xdeadbeefU},
+                        }),
+                state);
+
+    REQUIRE_FALSE(result.has_value());
+    REQUIRE(
+        result.error().code ==
+        astraea::graphics::
+            ShaderRegisterApplyErrorCode::
+                unsupported_operation);
+    REQUIRE(state == before);
+}

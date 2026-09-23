@@ -1,11 +1,11 @@
-#include <astraea/graphics/pm4_set_sh_reg_ir.hpp>
+#include <astraea/graphics/pm4_set_context_reg_ir.hpp>
 
 #include <array>
 #include <cstddef>
 #include <cstdint>
 #include <initializer_list>
-#include <optional>
 #include <utility>
+#include <variant>
 #include <vector>
 
 #include <astraea/graphics/pm4_type3_framing.hpp>
@@ -55,10 +55,9 @@ std::vector<std::byte> make_stream(
 
 astraea::graphics::Pm4Type3Frame frame_one(
     std::initializer_list<std::uint32_t> words) {
-    auto bytes = make_stream(words);
     auto framed =
         astraea::graphics::frame_pm4_type3_stream(
-            bytes);
+            make_stream(words));
     REQUIRE(framed.has_value());
     REQUIRE(framed->frames.size() == 1U);
     return std::move(framed->frames.front());
@@ -69,44 +68,44 @@ astraea::graphics::GraphicsIrEmission lower_one(
     auto frame = frame_one(words);
     auto lowered =
         astraea::graphics::
-            lower_pm4_set_sh_reg_frame_to_graphics_ir(
+            lower_pm4_set_context_reg_frame_to_graphics_ir(
                 frame);
     REQUIRE(lowered.has_value());
     return std::move(lowered).value();
 }
 
-const astraea::graphics::GraphicsIrShaderRegisterWriteRange&
-require_register_range(
+const astraea::graphics::GraphicsIrContextRegisterWriteRange&
+require_context_range(
     const astraea::graphics::GraphicsIrEmission& emission) {
     REQUIRE(
         std::holds_alternative<
             astraea::graphics::
-                GraphicsIrShaderRegisterWriteRange>(
+                GraphicsIrContextRegisterWriteRange>(
             emission.operation));
     return std::get<
-        astraea::graphics::GraphicsIrShaderRegisterWriteRange>(
+        astraea::graphics::GraphicsIrContextRegisterWriteRange>(
         emission.operation);
 }
 
 }  // namespace
 
 TEST_CASE(
-    "SET_SH_REG one-value packet lowers relative offset and exact value",
-    "[graphics][pm4][set-sh-reg]") {
-    constexpr std::uint32_t offset = 0U;
+    "SET_CONTEXT_REG one-value packet lowers relative offset and exact value",
+    "[graphics][pm4][set-context-reg]") {
     constexpr std::uint32_t value = 0x78563412U;
     const auto emission =
         lower_one({
             make_type3_header(
-                astraea::graphics::kPm4SetShRegOpcode,
+                astraea::graphics::
+                    kPm4SetContextRegOpcode,
                 1U),
-            offset,
+            0x0010U,
             value,
         });
 
     const auto& operation =
-        require_register_range(emission);
-    REQUIRE(operation.start_offset == 0U);
+        require_context_range(emission);
+    REQUIRE(operation.start_offset == 0x0010U);
     REQUIRE(operation.values.size() == 1U);
     REQUIRE(operation.values[0] == value);
     REQUIRE(
@@ -120,22 +119,23 @@ TEST_CASE(
 }
 
 TEST_CASE(
-    "SET_SH_REG multi-value packet preserves ordered consecutive values",
-    "[graphics][pm4][set-sh-reg]") {
+    "SET_CONTEXT_REG multi-value packet preserves consecutive values",
+    "[graphics][pm4][set-context-reg]") {
     const auto emission =
         lower_one({
             make_type3_header(
-                astraea::graphics::kPm4SetShRegOpcode,
+                astraea::graphics::
+                    kPm4SetContextRegOpcode,
                 3U),
-            0x20U,
+            0x0020U,
             0x01020304U,
             0x11121314U,
             0xaabbccddU,
         });
 
     const auto& operation =
-        require_register_range(emission);
-    REQUIRE(operation.start_offset == 0x20U);
+        require_context_range(emission);
+    REQUIRE(operation.start_offset == 0x0020U);
     REQUIRE(
         operation.values ==
         std::vector<std::uint32_t>{
@@ -145,12 +145,12 @@ TEST_CASE(
 }
 
 TEST_CASE(
-    "non-SET_SH_REG Type-3 opcode remains unsupported Graphics IR",
-    "[graphics][pm4][set-sh-reg][unsupported]") {
+    "non-SET_CONTEXT_REG Type-3 opcode remains unsupported Graphics IR",
+    "[graphics][pm4][set-context-reg][unsupported]") {
     const auto emission =
         lower_one({
-            make_type3_header(0x75U, 1U),
-            0x00000000U,
+            make_type3_header(0x68U, 1U),
+            0U,
             0x12345678U,
         });
 
@@ -168,37 +168,39 @@ TEST_CASE(
 }
 
 TEST_CASE(
-    "SET_SH_REG without value payload fails explicitly",
-    "[graphics][pm4][set-sh-reg][negative]") {
+    "SET_CONTEXT_REG without value payload fails explicitly",
+    "[graphics][pm4][set-context-reg][negative]") {
     auto frame =
         frame_one({
             make_type3_header(
-                astraea::graphics::kPm4SetShRegOpcode,
+                astraea::graphics::
+                    kPm4SetContextRegOpcode,
                 0U),
-            0x00000000U,
+            0U,
         });
 
     const auto result =
         astraea::graphics::
-            lower_pm4_set_sh_reg_frame_to_graphics_ir(
+            lower_pm4_set_context_reg_frame_to_graphics_ir(
                 frame);
 
     REQUIRE_FALSE(result.has_value());
     REQUIRE(
         result.error().code ==
         astraea::graphics::
-            Pm4SetShRegLowerErrorCode::
-                malformed_set_sh_reg);
+            Pm4SetContextRegLowerErrorCode::
+                malformed_set_context_reg);
     REQUIRE(result.error().value_count == 0U);
 }
 
 TEST_CASE(
-    "SET_SH_REG rejects unsupported upper control bits",
-    "[graphics][pm4][set-sh-reg][negative]") {
+    "SET_CONTEXT_REG rejects unsupported upper control bits",
+    "[graphics][pm4][set-context-reg][negative]") {
     auto frame =
         frame_one({
             make_type3_header(
-                astraea::graphics::kPm4SetShRegOpcode,
+                astraea::graphics::
+                    kPm4SetContextRegOpcode,
                 1U),
             0x00010012U,
             0x12345678U,
@@ -206,14 +208,14 @@ TEST_CASE(
 
     const auto result =
         astraea::graphics::
-            lower_pm4_set_sh_reg_frame_to_graphics_ir(
+            lower_pm4_set_context_reg_frame_to_graphics_ir(
                 frame);
 
     REQUIRE_FALSE(result.has_value());
     REQUIRE(
         result.error().code ==
         astraea::graphics::
-            Pm4SetShRegLowerErrorCode::
+            Pm4SetContextRegLowerErrorCode::
                 unsupported_register_control_bits);
     REQUIRE(
         result.error().raw_offset_control_word ==
@@ -221,30 +223,32 @@ TEST_CASE(
 }
 
 TEST_CASE(
-    "SET_SH_REG accepts range ending at final supported shader register",
-    "[graphics][pm4][set-sh-reg][boundary]") {
+    "SET_CONTEXT_REG accepts range ending at final context register",
+    "[graphics][pm4][set-context-reg][boundary]") {
     const auto emission =
         lower_one({
             make_type3_header(
-                astraea::graphics::kPm4SetShRegOpcode,
+                astraea::graphics::
+                    kPm4SetContextRegOpcode,
                 1U),
             0x03ffU,
             0xabcdef01U,
         });
 
     const auto& operation =
-        require_register_range(emission);
+        require_context_range(emission);
     REQUIRE(operation.start_offset == 0x03ffU);
     REQUIRE(operation.values.size() == 1U);
 }
 
 TEST_CASE(
-    "SET_SH_REG rejects range crossing supported shader register window",
-    "[graphics][pm4][set-sh-reg][boundary][negative]") {
+    "SET_CONTEXT_REG rejects range crossing context register window",
+    "[graphics][pm4][set-context-reg][boundary][negative]") {
     auto frame =
         frame_one({
             make_type3_header(
-                astraea::graphics::kPm4SetShRegOpcode,
+                astraea::graphics::
+                    kPm4SetContextRegOpcode,
                 2U),
             0x03ffU,
             0x11111111U,
@@ -253,25 +257,26 @@ TEST_CASE(
 
     const auto result =
         astraea::graphics::
-            lower_pm4_set_sh_reg_frame_to_graphics_ir(
+            lower_pm4_set_context_reg_frame_to_graphics_ir(
                 frame);
 
     REQUIRE_FALSE(result.has_value());
     REQUIRE(
         result.error().code ==
         astraea::graphics::
-            Pm4SetShRegLowerErrorCode::
+            Pm4SetContextRegLowerErrorCode::
                 register_range_out_of_bounds);
     REQUIRE(result.error().value_count == 2U);
 }
 
 TEST_CASE(
-    "SET_SH_REG semantic equality ignores raw packet provenance",
-    "[graphics][pm4][set-sh-reg][equality]") {
+    "SET_CONTEXT_REG semantic equality ignores raw packet provenance",
+    "[graphics][pm4][set-context-reg][equality]") {
     const auto left =
         lower_one({
             make_type3_header(
-                astraea::graphics::kPm4SetShRegOpcode,
+                astraea::graphics::
+                    kPm4SetContextRegOpcode,
                 1U,
                 0x01U),
             0x0020U,
@@ -280,7 +285,8 @@ TEST_CASE(
     const auto right =
         lower_one({
             make_type3_header(
-                astraea::graphics::kPm4SetShRegOpcode,
+                astraea::graphics::
+                    kPm4SetContextRegOpcode,
                 1U,
                 0x7fU),
             0x0020U,
@@ -298,7 +304,7 @@ TEST_CASE(
 
     auto changed_offset = right;
     std::get<
-        astraea::graphics::GraphicsIrShaderRegisterWriteRange>(
+        astraea::graphics::GraphicsIrContextRegisterWriteRange>(
         changed_offset.operation)
         .start_offset = 0x21U;
     REQUIRE_FALSE(
@@ -309,7 +315,7 @@ TEST_CASE(
 
     auto changed_value = right;
     std::get<
-        astraea::graphics::GraphicsIrShaderRegisterWriteRange>(
+        astraea::graphics::GraphicsIrContextRegisterWriteRange>(
         changed_value.operation)
         .values[0] = 0x87654321U;
     REQUIRE_FALSE(
@@ -320,33 +326,31 @@ TEST_CASE(
 }
 
 TEST_CASE(
-    "framed PM4 stream hands SET_SH_REG directly to Graphics IR lowerer",
-    "[graphics][pm4][set-sh-reg][handoff]") {
-    const auto bytes =
-        make_stream({
-            make_type3_header(0x70U, 0U),
-            0x11111111U,
-            make_type3_header(
-                astraea::graphics::kPm4SetShRegOpcode,
-                2U),
-            0x0010U,
-            0x11223344U,
-            0x55667788U,
-        });
-
+    "framed PM4 stream preserves SET_CONTEXT_REG packet provenance",
+    "[graphics][pm4][set-context-reg][handoff]") {
     const auto framed =
-        astraea::graphics::
-            frame_pm4_type3_stream(bytes);
+        astraea::graphics::frame_pm4_type3_stream(
+            make_stream({
+                make_type3_header(0x70U, 0U),
+                0x11111111U,
+                make_type3_header(
+                    astraea::graphics::
+                        kPm4SetContextRegOpcode,
+                    2U),
+                0x0010U,
+                0x11223344U,
+                0x55667788U,
+            }));
     REQUIRE(framed.has_value());
     REQUIRE(framed->frames.size() == 2U);
 
     const auto first =
         astraea::graphics::
-            lower_pm4_set_sh_reg_frame_to_graphics_ir(
+            lower_pm4_set_context_reg_frame_to_graphics_ir(
                 framed->frames[0]);
     const auto second =
         astraea::graphics::
-            lower_pm4_set_sh_reg_frame_to_graphics_ir(
+            lower_pm4_set_context_reg_frame_to_graphics_ir(
                 framed->frames[1]);
 
     REQUIRE(first.has_value());
@@ -357,8 +361,8 @@ TEST_CASE(
             first->operation));
 
     const auto& operation =
-        require_register_range(second.value());
-    REQUIRE(operation.start_offset == 0x10U);
+        require_context_range(second.value());
+    REQUIRE(operation.start_offset == 0x0010U);
     REQUIRE(
         operation.values ==
         std::vector<std::uint32_t>{
