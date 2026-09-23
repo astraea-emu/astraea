@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <limits>
 #include <new>
+#include <stdexcept>
 #include <utility>
 #include <vector>
 
@@ -11,7 +12,7 @@ namespace astraea::graphics {
 namespace {
 
 [[nodiscard]] std::uint32_t raw_word_value(
-    const RawWord& word) noexcept {
+    const RawPacketWord& word) noexcept {
     std::uint32_t value = 0;
     for (std::size_t index = 0;
          index < word.bytes.size();
