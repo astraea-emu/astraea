@@ -40,6 +40,9 @@ struct CreatedAgcShaderMaterializationError {
             unsupported_preparation_profile;
     std::optional<astraea::graphics::ShaderIrProgramError>
         shader_ir_error;
+
+    auto operator<=>(
+        const CreatedAgcShaderMaterializationError&) const = default;
 };
 
 using CreatedAgcShaderMaterializationResult =
@@ -62,6 +65,9 @@ struct CreatedAgcShaderRegistrationError {
     CreatedAgcShaderRegistrationErrorCode code =
         CreatedAgcShaderRegistrationErrorCode::
             host_allocation_failure;
+
+    auto operator<=>(
+        const CreatedAgcShaderRegistrationError&) const = default;
 };
 
 using CreatedAgcShaderRegistrationResult =
