@@ -40,7 +40,7 @@ using Pm4SetShRegLowerResult =
 // Only SET_SH_REG (0x76) receives semantics in this profile. Every other
 // opcode remains the existing typed unsupported Graphics IR operation.
 [[nodiscard]] Pm4SetShRegLowerResult
-lower_pm4_type3_frame_to_graphics_ir(
+lower_pm4_set_sh_reg_frame_to_graphics_ir(
     const Pm4Type3Frame& frame);
 
 }  // namespace astraea::graphics
