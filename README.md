@@ -4,10 +4,12 @@ A verification-first PlayStation 5 compatibility research and emulation
 project.
 
 > **Status:** Controlled Astraea-owned x86-64 guest execution is established on
-> Linux and Windows. The first PS5-specific graphics bridge is also established:
-> an evidence-backed AGC shader container can be reduced to bounded RDNA2 code
-> and the existing Shader IR pipeline. Astraea does not currently claim retail
-> PlayStation 5 software compatibility.
+> Linux and Windows. V0 shader ingestion, V1 guest-created shader identity, and
+> the bounded V2 validated-SPIR-V proof are complete. V3 is active: Astraea has
+> a mandatory headless Vulkan semantic proof, captured AGC submissions, typed
+> PM4 shader-register state, and created-shader identity, but submitted guest
+> state/resources do not yet execute end to end on Vulkan. Astraea does not
+> currently claim retail PlayStation 5 software compatibility.
 
 ## Principles
 
@@ -37,8 +39,9 @@ Astraea keeps guest-domain behavior separate from host implementation.
    exact import identity, native x86-64 execution, and HLE platform services.
 2. **PS5 GPU frontend** — AGC shader containers/objects, command buffers,
    register/state, guest resources, synchronization, and presentation state.
-3. **Shader semantics/compiler** — AMD-documented RDNA2 decoding, Shader IR and
-   CFG, semantic-oracle execution for verified subsets, then SPIR-V lowering.
+3. **Shader semantics/compiler** — AMD-documented RDNA2 decoding, semantic
+   Shader IR and CFG, semantic-oracle execution for verified subsets, a
+   workload-driven compiler/value IR when required, then SPIR-V lowering.
 4. **Host GPU backend** — Vulkan resource/pipeline/synchronization
    materialization from the guest GPU model. Vulkan is not the guest API.
 5. **Astraea Lab** — trace capture, normalization, diffing, regression
@@ -59,7 +62,10 @@ macOS remains a first-class development host for portable components, but it
 is not treated as an x86-64 execution host.
 
 The first graphics backend target is Vulkan. SPIR-V is the first host shader
-IR; Astraea's Shader IR remains backend-independent.
+IR. Astraea's existing Shader IR remains the backend-independent
+guest-semantic/oracle representation; a separate compiler/value IR is
+introduced only when a concrete workload requires structured control flow,
+resources, or stage I/O. See ADR 0007.
 
 ## Current integration path
 
@@ -67,17 +73,17 @@ Astraea now uses vertical gates rather than a strict "finish all HLE, then
 graphics" waterfall:
 
 ```text
-V0  AGC container -> RDNA2 -> Shader IR                    COMPLETE
+V0  AGC container -> RDNA2 -> semantic Shader IR           COMPLETE
  |
  v
-V1  owned guest -> guest-domain AGC shader object          NEXT
+V1  owned guest -> guest-domain AGC shader identity         COMPLETE
  |
  v
-V2  supported Shader IR -> validated SPIR-V
+V2  supported semantic Shader IR -> validated SPIR-V        COMPLETE
  |
  v
-V3  guest GPU state/resources -> Vulkan -> headless result
- |
+V3  submitted guest state/resources -> Vulkan -> result     ACTIVE
+ |   (first headless Vulkan semantic proof is complete)
  v
 V4  controlled PS5 differential when evidence requires it
  |
@@ -88,6 +94,10 @@ V5  guest flip/VideoOut -> host presentation
 Platform HLE, RDNA2 instruction coverage, resource semantics, and command
 decoding are pulled into this path when a gate needs them. Unknown
 Sony-specific behavior is recorded as an evidence blocker rather than guessed.
+
+The exact active branch, issue, blocker, and next action live only in
+`docs/STATUS.md`; this README intentionally describes durable architecture
+rather than duplicating the volatile frontier.
 
 See:
 
