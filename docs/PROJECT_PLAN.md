@@ -205,7 +205,7 @@ AGC shader container
     -> validated PS5-specific envelope
     -> bounded RDNA2 words
     -> existing RDNA2 decoder
-    -> Shader IR
+    -> semantic Shader IR
 ```
 
 Completed by #134/#135 with owned synthetic fixtures, opaque provenance
