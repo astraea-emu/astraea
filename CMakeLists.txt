@@ -152,6 +152,7 @@ add_library(astraea_core STATIC
     src/graphics/shader_control_execution.cpp
     src/graphics/shader_program_execution.cpp
     src/graphics/shader_vector_execution.cpp
+    src/graphics/shader_export_execution.cpp
     src/graphics/shader_wave_block_execution.cpp
     src/graphics/shader_wave_program_execution.cpp
     src/graphics/spirv_vector_probe.cpp
