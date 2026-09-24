@@ -2008,6 +2008,7 @@ run_guest_worker_process_session(
         }
 
         std::optional<GuestWorkerStop> stop;
+        std::optional<GuestWorkerFault> terminal_fault;
         std::size_t syscall_request_count = 0U;
 
         while (!stop.has_value()) {
@@ -2031,8 +2032,62 @@ run_guest_worker_process_session(
                             GuestWorkerProcessSessionErrorCode::
                                 worker_identity_mismatch));
                 }
+
+                if (terminal_fault.has_value()) {
+                    if (worker_stop->reason !=
+                            GuestWorkerStopReason::guest_fault ||
+                        worker_stop->thread_id !=
+                            terminal_fault->thread_id ||
+                        worker_stop->guest_rip !=
+                            terminal_fault->guest_rip) {
+                        return GuestWorkerProcessSessionRunResult::failure(
+                            error(
+                                GuestWorkerProcessSessionErrorCode::
+                                    protocol_failure));
+                    }
+                } else if (
+                    worker_stop->reason ==
+                    GuestWorkerStopReason::guest_fault) {
+                    return GuestWorkerProcessSessionRunResult::failure(
+                        error(
+                            GuestWorkerProcessSessionErrorCode::
+                                protocol_failure));
+                }
+
                 stop = *worker_stop;
                 continue;
+            }
+
+            if (const auto* worker_fault =
+                    std::get_if<GuestWorkerFault>(
+                        &worker_message.value());
+                worker_fault != nullptr) {
+                if (terminal_fault.has_value() ||
+                    worker_fault->worker_id !=
+                        ready->worker_id) {
+                    return GuestWorkerProcessSessionRunResult::failure(
+                        error(
+                            terminal_fault.has_value()
+                                ? GuestWorkerProcessSessionErrorCode::
+                                      protocol_failure
+                                : GuestWorkerProcessSessionErrorCode::
+                                      worker_identity_mismatch));
+                }
+                if (worker_fault->thread_id.value == 0U) {
+                    return GuestWorkerProcessSessionRunResult::failure(
+                        error(
+                            GuestWorkerProcessSessionErrorCode::
+                                protocol_failure));
+                }
+                terminal_fault = *worker_fault;
+                continue;
+            }
+
+            if (terminal_fault.has_value()) {
+                return GuestWorkerProcessSessionRunResult::failure(
+                    error(
+                        GuestWorkerProcessSessionErrorCode::
+                            protocol_failure));
             }
 
             const auto* syscall_request =
@@ -2094,8 +2149,11 @@ run_guest_worker_process_session(
 
         const GuestWorkerTerminate terminate{
             .reason =
-                GuestWorkerTerminationReason::
-                    user_request,
+                terminal_fault.has_value()
+                    ? GuestWorkerTerminationReason::
+                          fatal_guest_fault
+                    : GuestWorkerTerminationReason::
+                          user_request,
         };
         const auto terminate_sent =
             send_message(
@@ -2131,6 +2189,8 @@ run_guest_worker_process_session(
                     child_exit.value(),
                 .syscall_request_count =
                     syscall_request_count,
+                .terminal_fault =
+                    terminal_fault,
             });
 #endif
     } catch (const std::bad_alloc&) {
