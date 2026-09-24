@@ -1,4 +1,5 @@
 #include <astraea/execution/linux_retail_diagnostic.hpp>
+#include <astraea/execution/guest_worker_process_session.hpp>
 
 #include <algorithm>
 #include <array>
@@ -10,6 +11,10 @@
 #include <vector>
 
 #include <catch2/catch_test_macros.hpp>
+
+#ifndef ASTRAEA_APP_PATH
+#define ASTRAEA_APP_PATH ""
+#endif
 
 namespace {
 
@@ -705,6 +710,159 @@ TEST_CASE(
             GuestFaultKind::illegal_instruction);
     REQUIRE(boundary.guest_rip.value() == kEntry);
     REQUIRE_FALSE(boundary.backend_error.has_value());
+}
+
+#endif
+
+
+#if defined(__linux__) && defined(__x86_64__)
+
+astraea::execution::GuestWorkerProcessSessionConfig
+production_worker_config(
+    std::vector<std::byte> artifact) {
+    return astraea::execution::
+        GuestWorkerProcessSessionConfig{
+            .worker_executable =
+                ASTRAEA_APP_PATH,
+            .worker_arguments = {
+                "--internal-retail-diagnostic-worker"},
+            .run_budget_microseconds =
+                1'000'000U,
+            .timeout_milliseconds =
+                10'000U,
+            .syscall_service = {},
+            .max_syscall_requests = 0U,
+            .resource_policy = std::nullopt,
+            .linux_artifact_bytes =
+                std::move(artifact),
+        };
+}
+
+TEST_CASE(
+    "production worker reports pre-entry dependency boundary from sealed artifact",
+    "[execution][c0][retail][production][preflight]") {
+    auto bytes =
+        make_sce_fixture(
+            FixtureOptions{
+                .generic_needed = true,
+            });
+
+    const auto result =
+        astraea::execution::
+            run_guest_worker_process_session(
+                production_worker_config(
+                    std::move(bytes)));
+
+    REQUIRE(result.has_value());
+    REQUIRE(result->terminal_diagnostic.has_value());
+    REQUIRE_FALSE(result->terminal_fault.has_value());
+    REQUIRE(
+        result->terminal_diagnostic->kind ==
+        astraea::execution::
+            GuestWorkerDiagnosticKind::
+                unsupported_dynamic_dependencies);
+    REQUIRE(result->terminal_diagnostic->detail0 == 1U);
+    REQUIRE(
+        result->stop.reason ==
+        astraea::execution::
+            GuestWorkerStopReason::
+                diagnostic_boundary);
+    REQUIRE(
+        result->stop.guest_rip ==
+        result->terminal_diagnostic->guest_rip);
+    REQUIRE(result->child_exit_code == 0);
+}
+
+TEST_CASE(
+    "production worker turns literal syscall into first diagnostic boundary",
+    "[execution][c0][retail][production][seccomp]") {
+    if (!astraea::execution::
+            linux_guest_syscall_seccomp_available()) {
+        SKIP("Linux seccomp syscall trap unavailable");
+    }
+
+    auto bytes = make_sce_fixture();
+
+    // mov rax, 0x1234; syscall; ud2
+    const std::array<std::byte, 11> code{
+        std::byte{0x48},
+        std::byte{0xc7},
+        std::byte{0xc0},
+        std::byte{0x34},
+        std::byte{0x12},
+        std::byte{0x00},
+        std::byte{0x00},
+        std::byte{0x0f},
+        std::byte{0x05},
+        std::byte{0x0f},
+        std::byte{0x0b},
+    };
+    std::copy(
+        code.begin(),
+        code.end(),
+        bytes.begin() + 0x100);
+
+    const auto result =
+        astraea::execution::
+            run_guest_worker_process_session(
+                production_worker_config(
+                    std::move(bytes)));
+
+    REQUIRE(result.has_value());
+    REQUIRE(result->terminal_diagnostic.has_value());
+    REQUIRE_FALSE(result->terminal_fault.has_value());
+    REQUIRE(
+        result->terminal_diagnostic->kind ==
+        astraea::execution::
+            GuestWorkerDiagnosticKind::
+                unsupported_syscall);
+    REQUIRE(
+        result->terminal_diagnostic->guest_rip.value() ==
+        kEntry + 7U);
+    REQUIRE(
+        result->terminal_diagnostic->detail0 ==
+        0x1234U);
+    REQUIRE(
+        result->terminal_diagnostic->detail1 != 0U);
+    REQUIRE(result->syscall_request_count == 0U);
+    REQUIRE(
+        result->stop.reason ==
+        astraea::execution::
+            GuestWorkerStopReason::
+                diagnostic_boundary);
+    REQUIRE(result->child_exit_code == 0);
+}
+
+TEST_CASE(
+    "production worker preserves unregistered UD2 as terminal guest fault",
+    "[execution][c0][retail][production][fault]") {
+    auto bytes = make_sce_fixture();
+    bytes[0x100] = std::byte{0x0f};
+    bytes[0x101] = std::byte{0x0b};
+
+    const auto result =
+        astraea::execution::
+            run_guest_worker_process_session(
+                production_worker_config(
+                    std::move(bytes)));
+
+    REQUIRE(result.has_value());
+    REQUIRE_FALSE(
+        result->terminal_diagnostic.has_value());
+    REQUIRE(result->terminal_fault.has_value());
+    REQUIRE(
+        result->terminal_fault->kind ==
+        astraea::execution::
+            GuestWorkerFaultKind::
+                illegal_instruction);
+    REQUIRE(
+        result->terminal_fault->guest_rip.value() ==
+        kEntry);
+    REQUIRE(
+        result->stop.reason ==
+        astraea::execution::
+            GuestWorkerStopReason::guest_fault);
+    REQUIRE(result->child_exit_code == 0);
 }
 
 #endif
