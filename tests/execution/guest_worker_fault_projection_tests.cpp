@@ -11,14 +11,14 @@ astraea::execution::ExecutionStop fault_stop(
     bool has_fault_address,
     std::uint64_t fault_address = 0xfeed0000U) {
     constexpr std::uint64_t kRip = 0x400123U;
+    astraea::execution::GuestCpuContext context{};
+    context.rip = kRip;
+
     astraea::execution::ExecutionStop stop{
         .reason =
             astraea::execution::
                 ExecutionStopReason::guest_fault,
-        .context =
-            astraea::execution::GuestCpuContext{
-                .rip = kRip,
-            },
+        .context = context,
         .has_gate_slot = false,
         .gate_slot = 0U,
         .has_fault = true,
