@@ -2479,6 +2479,7 @@ run_guest_worker_process_session(
 
         std::optional<GuestWorkerStop> stop;
         std::optional<GuestWorkerFault> terminal_fault;
+        std::optional<GuestWorkerDiagnostic> terminal_diagnostic;
         std::size_t syscall_request_count = 0U;
 
         while (!stop.has_value()) {
@@ -2515,9 +2516,25 @@ run_guest_worker_process_session(
                                 GuestWorkerProcessSessionErrorCode::
                                     protocol_failure));
                     }
+                } else if (terminal_diagnostic.has_value()) {
+                    if (worker_stop->reason !=
+                            GuestWorkerStopReason::
+                                diagnostic_boundary ||
+                        worker_stop->thread_id !=
+                            terminal_diagnostic->thread_id ||
+                        worker_stop->guest_rip !=
+                            terminal_diagnostic->guest_rip) {
+                        return GuestWorkerProcessSessionRunResult::failure(
+                            error(
+                                GuestWorkerProcessSessionErrorCode::
+                                    protocol_failure));
+                    }
                 } else if (
                     worker_stop->reason ==
-                    GuestWorkerStopReason::guest_fault) {
+                        GuestWorkerStopReason::guest_fault ||
+                    worker_stop->reason ==
+                        GuestWorkerStopReason::
+                            diagnostic_boundary) {
                     return GuestWorkerProcessSessionRunResult::failure(
                         error(
                             GuestWorkerProcessSessionErrorCode::
@@ -2533,6 +2550,7 @@ run_guest_worker_process_session(
                         &worker_message.value());
                 worker_fault != nullptr) {
                 if (terminal_fault.has_value() ||
+                    terminal_diagnostic.has_value() ||
                     worker_fault->worker_id !=
                         ready->worker_id) {
                     return GuestWorkerProcessSessionRunResult::failure(
@@ -2553,7 +2571,31 @@ run_guest_worker_process_session(
                 continue;
             }
 
-            if (terminal_fault.has_value()) {
+            if (const auto* worker_diagnostic =
+                    std::get_if<GuestWorkerDiagnostic>(
+                        &worker_message.value());
+                worker_diagnostic != nullptr) {
+                if (terminal_fault.has_value() ||
+                    terminal_diagnostic.has_value() ||
+                    worker_diagnostic->worker_id !=
+                        ready->worker_id ||
+                    worker_diagnostic->thread_id.value == 0U) {
+                    return GuestWorkerProcessSessionRunResult::failure(
+                        error(
+                            worker_diagnostic->worker_id !=
+                                    ready->worker_id
+                                ? GuestWorkerProcessSessionErrorCode::
+                                      worker_identity_mismatch
+                                : GuestWorkerProcessSessionErrorCode::
+                                      protocol_failure));
+                }
+                terminal_diagnostic =
+                    *worker_diagnostic;
+                continue;
+            }
+
+            if (terminal_fault.has_value() ||
+                terminal_diagnostic.has_value()) {
                 return GuestWorkerProcessSessionRunResult::failure(
                     error(
                         GuestWorkerProcessSessionErrorCode::
@@ -2622,8 +2664,11 @@ run_guest_worker_process_session(
                 terminal_fault.has_value()
                     ? GuestWorkerTerminationReason::
                           fatal_guest_fault
-                    : GuestWorkerTerminationReason::
-                          user_request,
+                    : terminal_diagnostic.has_value()
+                        ? GuestWorkerTerminationReason::
+                              unsupported_guest_behavior
+                        : GuestWorkerTerminationReason::
+                              user_request,
         };
         const auto terminate_sent =
             send_message(
@@ -2661,6 +2706,8 @@ run_guest_worker_process_session(
                     syscall_request_count,
                 .terminal_fault =
                     terminal_fault,
+                .terminal_diagnostic =
+                    terminal_diagnostic,
             });
 #endif
     } catch (const std::bad_alloc&) {
