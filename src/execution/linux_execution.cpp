@@ -740,6 +740,264 @@ build_executable_ranges(
     return ranges;
 }
 
+[[nodiscard]] sock_filter bpf_statement(
+    std::uint16_t code,
+    std::uint32_t value) noexcept {
+    return sock_filter{
+        .code = code,
+        .jt = 0U,
+        .jf = 0U,
+        .k = value,
+    };
+}
+
+[[nodiscard]] sock_filter bpf_jump(
+    std::uint16_t code,
+    std::uint32_t value,
+    std::uint8_t jump_true,
+    std::uint8_t jump_false) noexcept {
+    return sock_filter{
+        .code = code,
+        .jt = jump_true,
+        .jf = jump_false,
+        .k = value,
+    };
+}
+
+using SeccompInstallResult =
+    astraea::core::Result<
+        bool,
+        NativeBackendError>;
+
+[[nodiscard]] SeccompInstallResult
+install_guest_executable_syscall_filter(
+    std::span<const SignalRange> executable_ranges) {
+    if (executable_ranges.empty()) {
+        return SeccompInstallResult::failure(
+            backend_error(
+                NativeBackendErrorCode::
+                    syscall_interception_setup_failure));
+    }
+
+    static_assert(
+        std::endian::native ==
+        std::endian::little);
+
+    constexpr std::size_t kInstructionsPerRange = 11U;
+    constexpr std::size_t kTrailingInstructions = 1U;
+    constexpr auto kMaxProgramLength =
+        static_cast<std::size_t>(
+            std::numeric_limits<
+                unsigned short>::max());
+
+    if (executable_ranges.size() >
+        (kMaxProgramLength -
+         kTrailingInstructions) /
+            kInstructionsPerRange) {
+        return SeccompInstallResult::failure(
+            backend_error(
+                NativeBackendErrorCode::
+                    syscall_interception_setup_failure,
+                false,
+                0,
+                true,
+                E2BIG));
+    }
+
+    try {
+        std::vector<sock_filter> program;
+        program.reserve(
+            executable_ranges.size() *
+                kInstructionsPerRange +
+            kTrailingInstructions);
+
+        constexpr auto kLoadAbsoluteWord =
+            static_cast<std::uint16_t>(
+                BPF_LD | BPF_W | BPF_ABS);
+        constexpr auto kJumpGreater =
+            static_cast<std::uint16_t>(
+                BPF_JMP | BPF_JGT | BPF_K);
+        constexpr auto kJumpEqual =
+            static_cast<std::uint16_t>(
+                BPF_JMP | BPF_JEQ | BPF_K);
+        constexpr auto kJumpGreaterEqual =
+            static_cast<std::uint16_t>(
+                BPF_JMP | BPF_JGE | BPF_K);
+        constexpr auto kReturnConstant =
+            static_cast<std::uint16_t>(
+                BPF_RET | BPF_K);
+
+        constexpr auto kIpLowOffset =
+            static_cast<std::uint32_t>(
+                offsetof(
+                    seccomp_data,
+                    instruction_pointer));
+        constexpr auto kIpHighOffset =
+            kIpLowOffset +
+            static_cast<std::uint32_t>(
+                sizeof(std::uint32_t));
+
+        for (const auto& range :
+             executable_ranges) {
+            if (range.size == 0U ||
+                range.base >
+                    std::numeric_limits<
+                        std::uint64_t>::max() -
+                        (range.size - 1U)) {
+                return SeccompInstallResult::failure(
+                    backend_error(
+                        NativeBackendErrorCode::
+                            syscall_interception_setup_failure,
+                        true,
+                        range.base));
+            }
+
+            const auto last =
+                range.base +
+                (range.size - 1U);
+
+            const auto base_high =
+                static_cast<std::uint32_t>(
+                    range.base >> 32U);
+            const auto base_low =
+                static_cast<std::uint32_t>(
+                    range.base & 0xffffffffULL);
+            const auto last_high =
+                static_cast<std::uint32_t>(
+                    last >> 32U);
+            const auto last_low =
+                static_cast<std::uint32_t>(
+                    last & 0xffffffffULL);
+
+            // 64-bit lexicographic check:
+            //
+            //   range.base <= instruction_pointer <= last
+            //
+            // A failed bound jumps to the next 11-instruction range block.
+            // A successful match returns TRAP immediately.
+            program.push_back(
+                bpf_statement(
+                    kLoadAbsoluteWord,
+                    kIpHighOffset));
+            program.push_back(
+                bpf_jump(
+                    kJumpGreater,
+                    base_high,
+                    3U,
+                    0U));
+            program.push_back(
+                bpf_jump(
+                    kJumpEqual,
+                    base_high,
+                    0U,
+                    8U));
+            program.push_back(
+                bpf_statement(
+                    kLoadAbsoluteWord,
+                    kIpLowOffset));
+            program.push_back(
+                bpf_jump(
+                    kJumpGreaterEqual,
+                    base_low,
+                    0U,
+                    6U));
+
+            program.push_back(
+                bpf_statement(
+                    kLoadAbsoluteWord,
+                    kIpHighOffset));
+            program.push_back(
+                bpf_jump(
+                    kJumpGreater,
+                    last_high,
+                    4U,
+                    0U));
+            program.push_back(
+                bpf_jump(
+                    kJumpEqual,
+                    last_high,
+                    0U,
+                    2U));
+            program.push_back(
+                bpf_statement(
+                    kLoadAbsoluteWord,
+                    kIpLowOffset));
+            program.push_back(
+                bpf_jump(
+                    kJumpGreater,
+                    last_low,
+                    1U,
+                    0U));
+            program.push_back(
+                bpf_statement(
+                    kReturnConstant,
+                    SECCOMP_RET_TRAP));
+        }
+
+        program.push_back(
+            bpf_statement(
+                kReturnConstant,
+                SECCOMP_RET_ALLOW));
+
+        if (::prctl(
+                PR_SET_NO_NEW_PRIVS,
+                1UL,
+                0UL,
+                0UL,
+                0UL) != 0) {
+            return SeccompInstallResult::failure(
+                backend_error(
+                    NativeBackendErrorCode::
+                        syscall_interception_setup_failure,
+                    false,
+                    0,
+                    true,
+                    static_cast<std::uint64_t>(
+                        errno)));
+        }
+
+        sock_fprog filter_program{
+            .len =
+                static_cast<unsigned short>(
+                    program.size()),
+            .filter = program.data(),
+        };
+
+        errno = 0;
+        if (::syscall(
+                SYS_seccomp,
+                SECCOMP_SET_MODE_FILTER,
+                0U,
+                &filter_program) != 0) {
+            return SeccompInstallResult::failure(
+                backend_error(
+                    NativeBackendErrorCode::
+                        syscall_interception_setup_failure,
+                    false,
+                    0,
+                    true,
+                    static_cast<std::uint64_t>(
+                        errno)));
+        }
+
+        return SeccompInstallResult::success(true);
+    } catch (const std::bad_alloc&) {
+        return SeccompInstallResult::failure(
+            backend_error(
+                NativeBackendErrorCode::
+                    syscall_interception_setup_failure));
+    } catch (const std::length_error&) {
+        return SeccompInstallResult::failure(
+            backend_error(
+                NativeBackendErrorCode::
+                    syscall_interception_setup_failure,
+                false,
+                0,
+                true,
+                E2BIG));
+    }
+}
+
 [[nodiscard]] NativeBackendError recovery_error(
     int host_error) noexcept {
     return backend_error(
