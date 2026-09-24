@@ -66,6 +66,7 @@ config(
                 timeout_milliseconds,
             .syscall_service = {},
             .max_syscall_requests = 0U,
+            .resource_policy = std::nullopt,
         };
 }
 
@@ -595,6 +596,95 @@ TEST_CASE(
             GuestWorkerProcessSessionErrorCode::
                 protocol_failure);
     REQUIRE_FALSE(service_called);
+}
+
+TEST_CASE(
+    "worker runs under explicit kernel resource ceilings",
+    "[execution][c0][process][resource-policy]") {
+    auto limited = config();
+
+    astraea::execution::GuestWorkerResourcePolicy policy{};
+#if !defined(__SANITIZE_ADDRESS__)
+    policy.process_memory_limit_bytes =
+        16ULL * 1024ULL * 1024ULL * 1024ULL;
+#endif
+    policy.process_cpu_time_seconds = 30U;
+#if defined(__linux__)
+    policy.linux_max_open_files = 32U;
+    policy.linux_disable_core_dumps = true;
+    policy.linux_disable_file_growth = true;
+#endif
+    limited.resource_policy = policy;
+
+    const auto result =
+        astraea::execution::
+            run_guest_worker_process_session(
+                limited);
+
+    REQUIRE(result.has_value());
+    REQUIRE(result->child_exit_code == 0);
+    REQUIRE(
+        result->stop.reason ==
+        astraea::execution::
+            GuestWorkerStopReason::
+                normal_guest_return);
+}
+
+TEST_CASE(
+    "kernel CPU ceiling terminates busy worker before controller deadline",
+    "[execution][c0][process][resource-policy][cpu]") {
+    auto limited =
+        config({"--burn-cpu"}, 5000U);
+
+    astraea::execution::GuestWorkerResourcePolicy policy{};
+    policy.process_cpu_time_seconds = 1U;
+    limited.resource_policy = policy;
+
+    const auto started =
+        std::chrono::steady_clock::now();
+    const auto result =
+        astraea::execution::
+            run_guest_worker_process_session(
+                limited);
+    const auto elapsed =
+        std::chrono::steady_clock::now() -
+        started;
+
+    REQUIRE_FALSE(result.has_value());
+    REQUIRE(
+        result.error().code ==
+        astraea::execution::
+            GuestWorkerProcessSessionErrorCode::
+                unexpected_eof);
+    REQUIRE(elapsed < std::chrono::seconds{5});
+
+    const auto subsequent =
+        astraea::execution::
+            run_guest_worker_process_session(
+                config());
+    REQUIRE(subsequent.has_value());
+    REQUIRE(subsequent->child_exit_code == 0);
+}
+
+TEST_CASE(
+    "resource policy rejects zero common ceilings",
+    "[execution][c0][process][resource-policy][negative]") {
+    auto invalid = config();
+    astraea::execution::GuestWorkerResourcePolicy policy{};
+    policy.process_cpu_time_seconds = 0U;
+    invalid.resource_policy = policy;
+
+    const auto result =
+        astraea::execution::
+            run_guest_worker_process_session(
+                invalid);
+
+    REQUIRE_FALSE(result.has_value());
+    REQUIRE(
+        result.error().code ==
+        astraea::execution::
+            GuestWorkerProcessSessionErrorCode::
+                invalid_config);
 }
 
 #if defined(_WIN32)
