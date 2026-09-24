@@ -405,43 +405,72 @@ diagnostic_from_preflight(
     std::vector<std::byte>>
 read_artifact_file(
     std::string_view artifact_path) {
-    std::error_code error;
     const std::filesystem::path path{
         std::string{artifact_path}};
-    const auto size =
-        std::filesystem::file_size(
-            path,
-            error);
-    if (error ||
-        size == 0U ||
-        size > kMaxRetailArtifactBytes ||
-        size >
-            static_cast<std::uintmax_t>(
-                std::numeric_limits<
-                    std::size_t>::max())) {
-        return std::nullopt;
-    }
 
+    // Size and read through the same opened file object. Do not stat a path
+    // and then reopen it: that creates a path-replacement race and can turn a
+    // growing file into a silently truncated diagnostic artifact.
     std::ifstream input(
         path,
-        std::ios::binary);
+        std::ios::binary |
+            std::ios::ate);
     if (!input) {
         return std::nullopt;
     }
 
+    const auto end = input.tellg();
+    if (end <= std::streampos{0}) {
+        return std::nullopt;
+    }
+
+    const auto byte_count =
+        static_cast<std::uintmax_t>(
+            static_cast<std::streamoff>(end));
+    if (byte_count >
+            static_cast<std::uintmax_t>(
+                kMaxRetailArtifactBytes) ||
+        byte_count >
+            static_cast<std::uintmax_t>(
+                std::numeric_limits<
+                    std::size_t>::max()) ||
+        byte_count >
+            static_cast<std::uintmax_t>(
+                std::numeric_limits<
+                    std::streamsize>::max())) {
+        return std::nullopt;
+    }
+
+    input.seekg(0, std::ios::beg);
+    if (!input) {
+        return std::nullopt;
+    }
+
+    const auto host_size =
+        static_cast<std::size_t>(
+            byte_count);
     std::vector<std::byte> bytes(
-        static_cast<std::size_t>(size));
+        host_size);
     input.read(
         reinterpret_cast<char*>(
             bytes.data()),
         static_cast<std::streamsize>(
-            bytes.size()));
+            host_size));
     if (!input ||
         static_cast<std::size_t>(
             input.gcount()) !=
-            bytes.size()) {
+            host_size) {
         return std::nullopt;
     }
+
+    // Refuse a file that grew after sizing instead of silently diagnosing a
+    // prefix of a moving target.
+    char trailing = '\0';
+    input.read(&trailing, 1);
+    if (input.gcount() != 0) {
+        return std::nullopt;
+    }
+
     return bytes;
 }
 
