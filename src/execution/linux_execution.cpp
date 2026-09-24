@@ -5,6 +5,8 @@
 #include <astraea/execution/linux_execution.hpp>
 
 #include <array>
+#include <bit>
+#include <climits>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
@@ -21,8 +23,13 @@
 #if defined(__linux__) && defined(__x86_64__)
 #include <cerrno>
 #include <csignal>
+#include <linux/audit.h>
+#include <linux/filter.h>
+#include <linux/seccomp.h>
 #include <setjmp.h>
 #include <sys/mman.h>
+#include <sys/prctl.h>
+#include <sys/syscall.h>
 #include <ucontext.h>
 #include <unistd.h>
 #endif
@@ -44,6 +51,17 @@ namespace {
         .host_code = host_code,
     };
 }
+
+struct LinuxThreadExecutionOutcome {
+    ExecutionStop stop;
+    bool has_seccomp_syscall_trap = false;
+    LinuxSeccompSyscallTrap seccomp_syscall_trap;
+};
+
+using LinuxThreadExecutionResult =
+    astraea::core::Result<
+        LinuxThreadExecutionOutcome,
+        NativeBackendError>;
 
 #if defined(__linux__) && defined(__x86_64__) && defined(MAP_FIXED_NOREPLACE)
 
@@ -69,11 +87,12 @@ static_assert(offsetof(GuestCpuContext, r15) == 120);
 static_assert(offsetof(GuestCpuContext, rip) == 128);
 static_assert(offsetof(GuestCpuContext, rflags) == 136);
 
-constexpr std::array<int, 4> kGuestSignals{
+constexpr std::array<int, 5> kGuestSignals{
     SIGSEGV,
     SIGBUS,
     SIGILL,
     SIGFPE,
+    SIGSYS,
 };
 
 constexpr std::size_t kMinimumAlternateSignalStackSize = 64U * 1024U;
@@ -81,20 +100,40 @@ constexpr std::size_t kMinimumAlternateSignalStackSize = 64U * 1024U;
 constexpr std::uint64_t kRflagsTrap = 1ULL << 8U;
 constexpr std::uint64_t kRflagsDirection = 1ULL << 10U;
 
+// Linux UAPI asm-generic/siginfo.h defines SYS_SECCOMP as 1. Some libc
+// header combinations used by CI do not expose that macro even with
+// SA_SIGINFO support, so keep the kernel ABI value local and verify it when
+// the libc does expose the symbolic constant.
+constexpr int kLinuxSysSeccompSignalCode = 1;
+#if defined(SYS_SECCOMP)
+static_assert(SYS_SECCOMP == kLinuxSysSeccompSignalCode);
+#endif
+
 struct SignalRange {
     std::uint64_t base = 0;
     std::uint64_t size = 0;
+};
+
+struct RawLinuxSeccompSyscallTrap {
+    GuestCpuContext context;
+    std::uint64_t kernel_instruction_pointer = 0;
+    std::int32_t syscall_number = 0;
+    std::uint32_t audit_arch = 0;
 };
 
 struct SignalFrame {
     sigjmp_buf jump_buffer;
     const SignalRange* executable_ranges = nullptr;
     std::size_t executable_range_count = 0;
+    const SignalRange* seccomp_instruction_ranges = nullptr;
+    std::size_t seccomp_ip_range_count = 0;
     std::uint64_t gate_base = 0;
     std::uint32_t gate_slot_count = 0;
     const RegisteredSyscallTrapSite*
         registered_syscall_traps = nullptr;
     std::size_t registered_syscall_trap_count = 0;
+    bool has_seccomp_syscall_trap = false;
+    RawLinuxSeccompSyscallTrap raw_seccomp_syscall_trap;
     ExecutionStop stop;
 };
 
@@ -119,6 +158,21 @@ std::array<struct sigaction, kGuestSignals.size()> g_previous_actions{};
         return false;
     }
     return address - range.base < range.size;
+}
+
+[[nodiscard]] bool frame_owns_guest_seccomp_ip(
+    const SignalFrame& frame,
+    std::uint64_t instruction_pointer) noexcept {
+    for (std::size_t i = 0;
+         i < frame.seccomp_ip_range_count;
+         ++i) {
+        if (range_contains(
+                frame.seccomp_instruction_ranges[i],
+                instruction_pointer)) {
+            return true;
+        }
+    }
+    return false;
 }
 
 [[nodiscard]] bool frame_owns_guest_rip(
@@ -286,6 +340,48 @@ void guest_signal_handler(
     const std::uint64_t rip =
         static_cast<std::uint64_t>(
             host_context->uc_mcontext.gregs[REG_RIP]);
+
+    if (signal_number == SIGSYS &&
+        info != nullptr &&
+        info->si_code == kLinuxSysSeccompSignalCode) {
+        const auto kernel_instruction_pointer =
+            static_cast<std::uint64_t>(
+                reinterpret_cast<std::uintptr_t>(
+                    info->si_call_addr));
+
+        // For SECCOMP_RET_TRAP, Linux reports si_call_addr as the exact
+        // system-call instruction address while the saved ucontext RIP is
+        // already post-instruction. The handler only establishes ownership
+        // and captures bounded metadata; ordinary code validates the opcode
+        // and the architecture-specific post-instruction relationship.
+        if (!frame_owns_guest_seccomp_ip(
+                *frame,
+                kernel_instruction_pointer)) {
+            chain_previous_signal(
+                signal_number,
+                info,
+                opaque_context);
+            return;
+        }
+
+        capture_guest_context(
+            *host_context,
+            frame->raw_seccomp_syscall_trap.context);
+        frame->raw_seccomp_syscall_trap.
+            kernel_instruction_pointer =
+                kernel_instruction_pointer;
+        frame->raw_seccomp_syscall_trap.syscall_number =
+            static_cast<std::int32_t>(
+                info->si_syscall);
+        frame->raw_seccomp_syscall_trap.audit_arch =
+            static_cast<std::uint32_t>(
+                info->si_arch);
+        frame->has_seccomp_syscall_trap = true;
+
+        siglongjmp(
+            frame->jump_buffer,
+            1);
+    }
 
     if (!frame_owns_guest_rip(*frame, rip)) {
         chain_previous_signal(
@@ -716,6 +812,433 @@ build_executable_ranges(
     return ranges;
 }
 
+using SeccompIpRangeBuildResult =
+    astraea::core::Result<
+        std::vector<SignalRange>,
+        NativeBackendError>;
+
+[[nodiscard]] SeccompIpRangeBuildResult
+build_seccomp_instruction_pointer_ranges(
+    std::span<const SignalRange> executable_ranges) {
+    try {
+        std::vector<SignalRange> ranges;
+        ranges.reserve(executable_ranges.size());
+
+        for (const auto& executable :
+             executable_ranges) {
+            // On x86 the saved user RIP after SYSCALL/INT 0x80 is two bytes
+            // past the call site. Some kernel paths expose that post-call
+            // value to seccomp's instruction-pointer check. Extend the
+            // half-open ownership envelope by exactly one byte so a valid
+            // two-byte call ending at the final executable byte still traps.
+            //
+            // Ordinary-code normalization later requires the actual two-byte
+            // syscall opcode to lie completely inside the exact executable
+            // mapping, so this one-byte filter envelope cannot admit a
+            // non-guest call site as a valid guest syscall event.
+            if (executable.size ==
+                    std::numeric_limits<
+                        std::uint64_t>::max() ||
+                executable.base >
+                    std::numeric_limits<
+                        std::uint64_t>::max() -
+                        executable.size) {
+                return SeccompIpRangeBuildResult::failure(
+                    backend_error(
+                        NativeBackendErrorCode::
+                            syscall_interception_setup_failure,
+                        true,
+                        executable.base));
+            }
+
+            ranges.push_back(
+                SignalRange{
+                    .base = executable.base,
+                    .size = executable.size + 1U,
+                });
+        }
+
+        return SeccompIpRangeBuildResult::success(
+            std::move(ranges));
+    } catch (const std::bad_alloc&) {
+        return SeccompIpRangeBuildResult::failure(
+            backend_error(
+                NativeBackendErrorCode::
+                    syscall_interception_setup_failure));
+    } catch (const std::length_error&) {
+        return SeccompIpRangeBuildResult::failure(
+            backend_error(
+                NativeBackendErrorCode::
+                    syscall_interception_setup_failure,
+                false,
+                0,
+                true,
+                E2BIG));
+    }
+}
+
+using SeccompTrapNormalizeResult =
+    astraea::core::Result<
+        LinuxSeccompSyscallTrap,
+        NativeBackendError>;
+
+[[nodiscard]] SeccompTrapNormalizeResult
+normalize_seccomp_syscall_trap(
+    const astraea::loader::GuestImage& image,
+    const RawLinuxSeccompSyscallTrap& raw) noexcept {
+    constexpr std::uint64_t kX86SyscallInstructionLength = 2U;
+    constexpr std::array<std::byte, 2> kX86Int80Bytes{
+        std::byte{0xcd},
+        std::byte{0x80},
+    };
+
+    // Linux documents si_call_addr/seccomp_data.instruction_pointer as the
+    // system-call instruction address, while the saved processor RIP is
+    // post-instruction. In practice, supported x86 kernels/environments may
+    // expose the post-instruction value through the seccomp metadata path.
+    //
+    // Do not trust either spelling on its own. Reconstruct the only admitted
+    // call site from the captured post-instruction RIP, verify the literal
+    // guest opcode there, and require the kernel-reported IP to agree with
+    // either the verified call site or that post-instruction RIP.
+    if (raw.context.rip <
+        kX86SyscallInstructionLength) {
+        return SeccompTrapNormalizeResult::failure(
+            backend_error(
+                NativeBackendErrorCode::
+                    syscall_interception_metadata_failure,
+                true,
+                raw.context.rip));
+    }
+
+    const auto guest_rip =
+        raw.context.rip -
+        kX86SyscallInstructionLength;
+
+    if (!exact_executable_contains(
+            image,
+            guest_rip) ||
+        !exact_executable_contains(
+            image,
+            guest_rip + 1U) ||
+        guest_rip >
+            static_cast<std::uint64_t>(
+                std::numeric_limits<std::uintptr_t>::max()) ||
+        (raw.kernel_instruction_pointer != guest_rip &&
+         raw.kernel_instruction_pointer !=
+             raw.context.rip)) {
+        return SeccompTrapNormalizeResult::failure(
+            backend_error(
+                NativeBackendErrorCode::
+                    syscall_interception_metadata_failure,
+                true,
+                guest_rip));
+    }
+
+    std::array<std::byte, 2> mapped_bytes{};
+    std::memcpy(
+        mapped_bytes.data(),
+        reinterpret_cast<const void*>(
+            static_cast<std::uintptr_t>(
+                guest_rip)),
+        mapped_bytes.size());
+
+    bool recognized = false;
+    switch (raw.audit_arch) {
+    case AUDIT_ARCH_X86_64:
+        recognized =
+            mapped_bytes ==
+            kX86SyscallBytes;
+        break;
+    case AUDIT_ARCH_I386:
+        recognized =
+            mapped_bytes ==
+            kX86Int80Bytes;
+        break;
+    default:
+        break;
+    }
+
+    if (!recognized) {
+        return SeccompTrapNormalizeResult::failure(
+            backend_error(
+                NativeBackendErrorCode::
+                    syscall_interception_metadata_failure,
+                true,
+                guest_rip));
+    }
+
+    return SeccompTrapNormalizeResult::success(
+        LinuxSeccompSyscallTrap{
+            .context = raw.context,
+            .guest_rip =
+                astraea::memory::GuestAddress{
+                    guest_rip},
+            .syscall_number =
+                raw.syscall_number,
+            .audit_arch =
+                raw.audit_arch,
+        });
+}
+
+[[nodiscard]] sock_filter bpf_statement(
+    std::uint16_t code,
+    std::uint32_t value) noexcept {
+    return sock_filter{
+        .code = code,
+        .jt = 0U,
+        .jf = 0U,
+        .k = value,
+    };
+}
+
+[[nodiscard]] sock_filter bpf_jump(
+    std::uint16_t code,
+    std::uint32_t value,
+    std::uint8_t jump_true,
+    std::uint8_t jump_false) noexcept {
+    return sock_filter{
+        .code = code,
+        .jt = jump_true,
+        .jf = jump_false,
+        .k = value,
+    };
+}
+
+using SeccompInstallResult =
+    astraea::core::Result<
+        bool,
+        NativeBackendError>;
+
+[[nodiscard]] SeccompInstallResult
+install_guest_executable_syscall_filter(
+    std::span<const SignalRange> seccomp_instruction_ranges) {
+    if (seccomp_instruction_ranges.empty()) {
+        return SeccompInstallResult::failure(
+            backend_error(
+                NativeBackendErrorCode::
+                    syscall_interception_setup_failure));
+    }
+
+    static_assert(
+        std::endian::native ==
+        std::endian::little);
+
+    constexpr std::size_t kInstructionsPerRange = 11U;
+    constexpr std::size_t kTrailingInstructions = 1U;
+    constexpr auto kMaxProgramLength =
+        static_cast<std::size_t>(
+            std::numeric_limits<
+                unsigned short>::max());
+
+    if (seccomp_instruction_ranges.size() >
+        (kMaxProgramLength -
+         kTrailingInstructions) /
+            kInstructionsPerRange) {
+        return SeccompInstallResult::failure(
+            backend_error(
+                NativeBackendErrorCode::
+                    syscall_interception_setup_failure,
+                false,
+                0,
+                true,
+                E2BIG));
+    }
+
+    try {
+        std::vector<sock_filter> program;
+        program.reserve(
+            seccomp_instruction_ranges.size() *
+                kInstructionsPerRange +
+            kTrailingInstructions);
+
+        constexpr auto kLoadAbsoluteWord =
+            static_cast<std::uint16_t>(
+                BPF_LD | BPF_W | BPF_ABS);
+        constexpr auto kJumpGreater =
+            static_cast<std::uint16_t>(
+                BPF_JMP | BPF_JGT | BPF_K);
+        constexpr auto kJumpEqual =
+            static_cast<std::uint16_t>(
+                BPF_JMP | BPF_JEQ | BPF_K);
+        constexpr auto kJumpGreaterEqual =
+            static_cast<std::uint16_t>(
+                BPF_JMP | BPF_JGE | BPF_K);
+        constexpr auto kReturnConstant =
+            static_cast<std::uint16_t>(
+                BPF_RET | BPF_K);
+
+        constexpr auto kIpLowOffset =
+            static_cast<std::uint32_t>(
+                offsetof(
+                    seccomp_data,
+                    instruction_pointer));
+        constexpr auto kIpHighOffset =
+            kIpLowOffset +
+            static_cast<std::uint32_t>(
+                sizeof(std::uint32_t));
+
+        for (const auto& range :
+             seccomp_instruction_ranges) {
+            if (range.size == 0U ||
+                range.base >
+                    std::numeric_limits<
+                        std::uint64_t>::max() -
+                        (range.size - 1U)) {
+                return SeccompInstallResult::failure(
+                    backend_error(
+                        NativeBackendErrorCode::
+                            syscall_interception_setup_failure,
+                        true,
+                        range.base));
+            }
+
+            const auto last =
+                range.base +
+                (range.size - 1U);
+
+            const auto base_high =
+                static_cast<std::uint32_t>(
+                    range.base >> 32U);
+            const auto base_low =
+                static_cast<std::uint32_t>(
+                    range.base & 0xffffffffULL);
+            const auto last_high =
+                static_cast<std::uint32_t>(
+                    last >> 32U);
+            const auto last_low =
+                static_cast<std::uint32_t>(
+                    last & 0xffffffffULL);
+
+            // 64-bit lexicographic check:
+            //
+            //   exact guest executable range contains instruction_pointer
+            //
+            // A failed bound jumps to the next 11-instruction range block.
+            // A successful match returns TRAP immediately.
+            program.push_back(
+                bpf_statement(
+                    kLoadAbsoluteWord,
+                    kIpHighOffset));
+            program.push_back(
+                bpf_jump(
+                    kJumpGreater,
+                    base_high,
+                    3U,
+                    0U));
+            program.push_back(
+                bpf_jump(
+                    kJumpEqual,
+                    base_high,
+                    0U,
+                    8U));
+            program.push_back(
+                bpf_statement(
+                    kLoadAbsoluteWord,
+                    kIpLowOffset));
+            program.push_back(
+                bpf_jump(
+                    kJumpGreaterEqual,
+                    base_low,
+                    0U,
+                    6U));
+
+            program.push_back(
+                bpf_statement(
+                    kLoadAbsoluteWord,
+                    kIpHighOffset));
+            program.push_back(
+                bpf_jump(
+                    kJumpGreater,
+                    last_high,
+                    4U,
+                    0U));
+            program.push_back(
+                bpf_jump(
+                    kJumpEqual,
+                    last_high,
+                    0U,
+                    2U));
+            program.push_back(
+                bpf_statement(
+                    kLoadAbsoluteWord,
+                    kIpLowOffset));
+            program.push_back(
+                bpf_jump(
+                    kJumpGreater,
+                    last_low,
+                    1U,
+                    0U));
+            program.push_back(
+                bpf_statement(
+                    kReturnConstant,
+                    SECCOMP_RET_TRAP));
+        }
+
+        program.push_back(
+            bpf_statement(
+                kReturnConstant,
+                SECCOMP_RET_ALLOW));
+
+        if (::prctl(
+                PR_SET_NO_NEW_PRIVS,
+                1UL,
+                0UL,
+                0UL,
+                0UL) != 0) {
+            return SeccompInstallResult::failure(
+                backend_error(
+                    NativeBackendErrorCode::
+                        syscall_interception_setup_failure,
+                    false,
+                    0,
+                    true,
+                    static_cast<std::uint64_t>(
+                        errno)));
+        }
+
+        sock_fprog filter_program{
+            .len =
+                static_cast<unsigned short>(
+                    program.size()),
+            .filter = program.data(),
+        };
+
+        errno = 0;
+        if (::syscall(
+                SYS_seccomp,
+                SECCOMP_SET_MODE_FILTER,
+                0U,
+                &filter_program) != 0) {
+            return SeccompInstallResult::failure(
+                backend_error(
+                    NativeBackendErrorCode::
+                        syscall_interception_setup_failure,
+                    false,
+                    0,
+                    true,
+                    static_cast<std::uint64_t>(
+                        errno)));
+        }
+
+        return SeccompInstallResult::success(true);
+    } catch (const std::bad_alloc&) {
+        return SeccompInstallResult::failure(
+            backend_error(
+                NativeBackendErrorCode::
+                    syscall_interception_setup_failure));
+    } catch (const std::length_error&) {
+        return SeccompInstallResult::failure(
+            backend_error(
+                NativeBackendErrorCode::
+                    syscall_interception_setup_failure,
+                false,
+                0,
+                true,
+                E2BIG));
+    }
+}
+
 [[nodiscard]] NativeBackendError recovery_error(
     int host_error) noexcept {
     return backend_error(
@@ -755,18 +1278,32 @@ restore_signal_environment(
     return std::nullopt;
 }
 
-[[nodiscard]] LinuxExecutionResult
+[[nodiscard]] LinuxThreadExecutionResult
 run_linux_guest_thread(
     const astraea::loader::GuestImage& image,
     const SyntheticGateRegion& gate_region,
     GuestCpuContext context,
     std::span<const RegisteredSyscallTrapSite>
-        registered_syscall_traps) {
+        registered_syscall_traps,
+    bool enable_seccomp_syscall_trap) {
     std::vector<SignalRange> executable_ranges;
+    std::vector<SignalRange> seccomp_instruction_ranges;
     std::vector<std::byte> alternate_stack;
     try {
         executable_ranges =
             build_executable_ranges(image);
+        if (enable_seccomp_syscall_trap) {
+            auto built_seccomp_ranges =
+                build_seccomp_instruction_pointer_ranges(
+                    executable_ranges);
+            if (!built_seccomp_ranges.has_value()) {
+                return LinuxThreadExecutionResult::failure(
+                    built_seccomp_ranges.error());
+            }
+            seccomp_instruction_ranges =
+                std::move(
+                    built_seccomp_ranges.value());
+        }
         const std::size_t alternate_size =
             static_cast<std::size_t>(SIGSTKSZ) >
                     kMinimumAlternateSignalStackSize
@@ -774,12 +1311,12 @@ run_linux_guest_thread(
                 : kMinimumAlternateSignalStackSize;
         alternate_stack.resize(alternate_size);
     } catch (const std::bad_alloc&) {
-        return LinuxExecutionResult::failure(
+        return LinuxThreadExecutionResult::failure(
             backend_error(
                 NativeBackendErrorCode::
                     recovery_setup_failure));
     } catch (const std::length_error&) {
-        return LinuxExecutionResult::failure(
+        return LinuxThreadExecutionResult::failure(
             backend_error(
                 NativeBackendErrorCode::
                     recovery_setup_failure));
@@ -795,7 +1332,7 @@ run_linux_guest_thread(
     if (::sigaltstack(
             &requested_stack,
             &previous_stack) != 0) {
-        return LinuxExecutionResult::failure(
+        return LinuxThreadExecutionResult::failure(
             recovery_error(errno));
     }
 
@@ -810,7 +1347,7 @@ run_linux_guest_thread(
                 ::sigaltstack(
                     &previous_stack,
                     nullptr));
-            return LinuxExecutionResult::failure(
+            return LinuxThreadExecutionResult::failure(
                 recovery_error(host_error));
         }
     }
@@ -839,7 +1376,7 @@ run_linux_guest_thread(
                     previous_stack,
                     installed_count);
             static_cast<void>(cleanup_error);
-            return LinuxExecutionResult::failure(
+            return LinuxThreadExecutionResult::failure(
                 recovery_error(host_error));
         }
         ++installed_count;
@@ -851,6 +1388,10 @@ run_linux_guest_thread(
         executable_ranges.data();
     frame.executable_range_count =
         executable_ranges.size();
+    frame.seccomp_instruction_ranges =
+        seccomp_instruction_ranges.data();
+    frame.seccomp_ip_range_count =
+        seccomp_instruction_ranges.size();
     frame.gate_base =
         gate_region.range().base().value();
     frame.gate_slot_count =
@@ -862,7 +1403,22 @@ run_linux_guest_thread(
 
     const int jump_result =
         sigsetjmp(frame.jump_buffer, 1);
-    if (jump_result == 0) {
+
+    std::optional<NativeBackendError>
+        interception_setup_error;
+    if (jump_result == 0 &&
+        enable_seccomp_syscall_trap) {
+        const auto installed =
+            install_guest_executable_syscall_filter(
+                seccomp_instruction_ranges);
+        if (!installed.has_value()) {
+            interception_setup_error =
+                installed.error();
+        }
+    }
+
+    if (jump_result == 0 &&
+        !interception_setup_error.has_value()) {
         g_active_frame = &frame;
         astraea_linux_enter_guest_context(
             &context);
@@ -874,12 +1430,37 @@ run_linux_guest_thread(
             previous_stack,
             installed_count);
     if (cleanup_error.has_value()) {
-        return LinuxExecutionResult::failure(
+        return LinuxThreadExecutionResult::failure(
             cleanup_error.value());
     }
 
-    return LinuxExecutionResult::success(
-        frame.stop);
+    if (interception_setup_error.has_value()) {
+        return LinuxThreadExecutionResult::failure(
+            interception_setup_error.value());
+    }
+
+    LinuxSeccompSyscallTrap normalized_seccomp_trap{};
+    if (frame.has_seccomp_syscall_trap) {
+        const auto normalized =
+            normalize_seccomp_syscall_trap(
+                image,
+                frame.raw_seccomp_syscall_trap);
+        if (!normalized.has_value()) {
+            return LinuxThreadExecutionResult::failure(
+                normalized.error());
+        }
+        normalized_seccomp_trap =
+            normalized.value();
+    }
+
+    return LinuxThreadExecutionResult::success(
+        LinuxThreadExecutionOutcome{
+            .stop = frame.stop,
+            .has_seccomp_syscall_trap =
+                frame.has_seccomp_syscall_trap,
+            .seccomp_syscall_trap =
+                normalized_seccomp_trap,
+        });
 }
 
 #endif
@@ -894,20 +1475,32 @@ bool linux_native_execution_backend_available() noexcept {
 #endif
 }
 
-LinuxExecutionResult enter_linux_guest(
+bool
+linux_guest_syscall_seccomp_available() noexcept {
+#if defined(__linux__) && defined(__x86_64__) && defined(MAP_FIXED_NOREPLACE) && defined(SYS_seccomp)
+    return true;
+#else
+    return false;
+#endif
+}
+
+[[nodiscard]] static LinuxThreadExecutionResult
+enter_linux_guest_internal(
     const astraea::loader::GuestImage& image,
     const LinuxPreparedMemory& prepared_memory,
     const SyntheticGateRegion& gate_region,
     GuestCpuContext context,
     std::span<const RegisteredSyscallTrapSite>
-        registered_syscall_traps) {
+        registered_syscall_traps,
+    bool enable_seccomp_syscall_trap) {
 #if !(defined(__linux__) && defined(__x86_64__) && defined(MAP_FIXED_NOREPLACE))
     static_cast<void>(image);
     static_cast<void>(prepared_memory);
     static_cast<void>(gate_region);
     static_cast<void>(context);
     static_cast<void>(registered_syscall_traps);
-    return LinuxExecutionResult::failure(
+    static_cast<void>(enable_seccomp_syscall_trap);
+    return LinuxThreadExecutionResult::failure(
         backend_error(
             NativeBackendErrorCode::backend_unavailable));
 #else
@@ -917,14 +1510,14 @@ LinuxExecutionResult enter_linux_guest(
             prepared_memory,
             context);
     if (!valid.has_value()) {
-        return LinuxExecutionResult::failure(
+        return LinuxThreadExecutionResult::failure(
             valid.error());
     }
 
     if (!registered_traps_are_valid(
             image,
             registered_syscall_traps)) {
-        return LinuxExecutionResult::failure(
+        return LinuxThreadExecutionResult::failure(
             backend_error(
                 NativeBackendErrorCode::
                     invalid_registered_syscall_trap));
@@ -934,7 +1527,7 @@ LinuxExecutionResult enter_linux_guest(
         g_signal_mutex,
         std::try_to_lock);
     if (!execution_lock.owns_lock()) {
-        return LinuxExecutionResult::failure(
+        return LinuxThreadExecutionResult::failure(
             backend_error(
                 NativeBackendErrorCode::
                     nested_execution_unsupported));
@@ -945,12 +1538,12 @@ LinuxExecutionResult enter_linux_guest(
             prepared_memory,
             gate_region);
     if (!gate_mapping.has_value()) {
-        return LinuxExecutionResult::failure(
+        return LinuxThreadExecutionResult::failure(
             gate_mapping.error());
     }
 
     try {
-        std::optional<LinuxExecutionResult>
+        std::optional<LinuxThreadExecutionResult>
             thread_result;
         std::thread worker(
             [&]() {
@@ -960,16 +1553,17 @@ LinuxExecutionResult enter_linux_guest(
                             image,
                             gate_region,
                             context,
-                            registered_syscall_traps));
+                            registered_syscall_traps,
+                            enable_seccomp_syscall_trap));
                 } catch (const std::bad_alloc&) {
                     thread_result.emplace(
-                        LinuxExecutionResult::failure(
+                        LinuxThreadExecutionResult::failure(
                             backend_error(
                                 NativeBackendErrorCode::
                                     recovery_setup_failure)));
                 } catch (...) {
                     thread_result.emplace(
-                        LinuxExecutionResult::failure(
+                        LinuxThreadExecutionResult::failure(
                             backend_error(
                                 NativeBackendErrorCode::
                                     internal_transition_failure)));
@@ -978,7 +1572,7 @@ LinuxExecutionResult enter_linux_guest(
         worker.join();
 
         if (!thread_result.has_value()) {
-            return LinuxExecutionResult::failure(
+            return LinuxThreadExecutionResult::failure(
                 backend_error(
                     NativeBackendErrorCode::
                         internal_transition_failure));
@@ -987,7 +1581,7 @@ LinuxExecutionResult enter_linux_guest(
         return std::move(
             thread_result.value());
     } catch (const std::system_error& error) {
-        return LinuxExecutionResult::failure(
+        return LinuxThreadExecutionResult::failure(
             backend_error(
                 NativeBackendErrorCode::
                     recovery_setup_failure,
@@ -997,12 +1591,73 @@ LinuxExecutionResult enter_linux_guest(
                 static_cast<std::uint64_t>(
                     error.code().value())));
     } catch (const std::bad_alloc&) {
-        return LinuxExecutionResult::failure(
+        return LinuxThreadExecutionResult::failure(
             backend_error(
                 NativeBackendErrorCode::
                     recovery_setup_failure));
     }
 #endif
+}
+
+LinuxExecutionResult enter_linux_guest(
+    const astraea::loader::GuestImage& image,
+    const LinuxPreparedMemory& prepared_memory,
+    const SyntheticGateRegion& gate_region,
+    GuestCpuContext context,
+    std::span<const RegisteredSyscallTrapSite>
+        registered_syscall_traps) {
+    auto result =
+        enter_linux_guest_internal(
+            image,
+            prepared_memory,
+            gate_region,
+            context,
+            registered_syscall_traps,
+            false);
+    if (!result.has_value()) {
+        return LinuxExecutionResult::failure(
+            result.error());
+    }
+
+    if (result->has_seccomp_syscall_trap) {
+        return LinuxExecutionResult::failure(
+            backend_error(
+                NativeBackendErrorCode::
+                    internal_transition_failure));
+    }
+
+    return LinuxExecutionResult::success(
+        result->stop);
+}
+
+LinuxSeccompExecutionResult
+enter_linux_guest_with_seccomp_syscall_trap(
+    const astraea::loader::GuestImage& image,
+    const LinuxPreparedMemory& prepared_memory,
+    const SyntheticGateRegion& gate_region,
+    GuestCpuContext context) {
+    auto result =
+        enter_linux_guest_internal(
+            image,
+            prepared_memory,
+            gate_region,
+            context,
+            {},
+            true);
+    if (!result.has_value()) {
+        return LinuxSeccompExecutionResult::failure(
+            result.error());
+    }
+
+    if (result->has_seccomp_syscall_trap) {
+        return LinuxSeccompExecutionResult::success(
+            LinuxSeccompExecutionEvent{
+                result->seccomp_syscall_trap});
+    }
+
+    return LinuxSeccompExecutionResult::success(
+        LinuxSeccompExecutionEvent{
+            result->stop});
 }
 
 }  // namespace astraea::execution

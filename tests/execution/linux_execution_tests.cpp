@@ -7,12 +7,15 @@
 #include <limits>
 #include <optional>
 #include <utility>
+#include <variant>
 #include <vector>
 
 #include <catch2/catch_test_macros.hpp>
 
 #if defined(__linux__) && defined(__x86_64__)
+#include <linux/audit.h>
 #include <sys/mman.h>
+#include <sys/syscall.h>
 #include <unistd.h>
 #endif
 
@@ -317,6 +320,224 @@ TEST_CASE(
 }
 
 #if defined(__linux__) && defined(__x86_64__) && defined(MAP_FIXED_NOREPLACE)
+
+TEST_CASE(
+    "Linux seccomp guest syscall interception availability matches native host",
+    "[execution][linux-transition][c0][seccomp]") {
+    REQUIRE(
+        astraea::execution::
+            linux_guest_syscall_seccomp_available());
+}
+
+TEST_CASE(
+    "Linux seccomp traps unmodified guest SYSCALL before host execution",
+    "[execution][linux-transition][c0][seccomp][syscall]") {
+    const auto page = page_size();
+    const auto base =
+        find_free_block(
+            static_cast<std::size_t>(
+                page * 3U));
+    const auto stack_base = base + page;
+    const auto gate_base = base + 2U * page;
+
+    std::vector<std::byte> code;
+    append_mov_imm64(
+        code,
+        0U,
+        static_cast<std::uint64_t>(
+            SYS_getpid));
+    const auto syscall_offset = code.size();
+    code.push_back(std::byte{0x0f});
+    code.push_back(std::byte{0x05});
+
+    // If the syscall executes instead of trapping, the next instruction
+    // deliberately produces the existing illegal-instruction guest fault.
+    code.push_back(std::byte{0x0f});
+    code.push_back(std::byte{0x0b});
+
+    auto image =
+        make_guest_image(
+            base,
+            stack_base,
+            page,
+            std::move(code));
+    auto prepared =
+        astraea::execution::
+            prepare_linux_guest_memory(image);
+    REQUIRE(prepared.has_value());
+    auto gate =
+        make_gate_region(
+            image,
+            gate_base);
+
+    const auto result =
+        astraea::execution::
+            enter_linux_guest_with_seccomp_syscall_trap(
+                image,
+                prepared.value(),
+                gate,
+                astraea::execution::
+                    make_synthetic_initial_context(
+                        image));
+
+    REQUIRE(result.has_value());
+    const auto* trapped =
+        std::get_if<
+            astraea::execution::
+                LinuxSeccompSyscallTrap>(
+                    &result.value());
+    REQUIRE(trapped != nullptr);
+
+    const auto expected_rip =
+        base +
+        static_cast<std::uint64_t>(
+            syscall_offset);
+    REQUIRE(trapped->guest_rip.value() == expected_rip);
+    REQUIRE(
+        trapped->syscall_number ==
+        static_cast<std::int32_t>(
+            SYS_getpid));
+    REQUIRE(
+        trapped->audit_arch ==
+        static_cast<std::uint32_t>(
+            AUDIT_ARCH_X86_64));
+
+    // Linux exposes post-SYSCALL PC to seccomp/SIGSYS on x86. Astraea
+    // normalizes that event back to the verified literal guest call site while
+    // preserving the captured post-SYSCALL processor context.
+    REQUIRE(trapped->context.rip == expected_rip + 2U);
+}
+
+TEST_CASE(
+    "Linux seccomp range filter traps guest int 0x80 alternate ABI entry",
+    "[execution][linux-transition][c0][seccomp][int80]") {
+    const auto page = page_size();
+    const auto base =
+        find_free_block(
+            static_cast<std::size_t>(
+                page * 3U));
+    const auto stack_base = base + page;
+    const auto gate_base = base + 2U * page;
+
+    // i386 getpid is syscall 20. Using INT 0x80 from long mode deliberately
+    // exercises an alternate ABI entry path from the same guest mapping.
+    std::vector<std::byte> code{
+        std::byte{0xb8},
+        std::byte{0x14},
+        std::byte{0x00},
+        std::byte{0x00},
+        std::byte{0x00},
+        std::byte{0xcd},
+        std::byte{0x80},
+        std::byte{0x0f},
+        std::byte{0x0b},
+    };
+
+    auto image =
+        make_guest_image(
+            base,
+            stack_base,
+            page,
+            std::move(code));
+    auto prepared =
+        astraea::execution::
+            prepare_linux_guest_memory(image);
+    REQUIRE(prepared.has_value());
+    auto gate =
+        make_gate_region(
+            image,
+            gate_base);
+
+    const auto result =
+        astraea::execution::
+            enter_linux_guest_with_seccomp_syscall_trap(
+                image,
+                prepared.value(),
+                gate,
+                astraea::execution::
+                    make_synthetic_initial_context(
+                        image));
+
+    REQUIRE(result.has_value());
+    const auto* trapped =
+        std::get_if<
+            astraea::execution::
+                LinuxSeccompSyscallTrap>(
+                    &result.value());
+    REQUIRE(trapped != nullptr);
+    REQUIRE(trapped->guest_rip.value() == base + 5U);
+    REQUIRE(trapped->syscall_number == 20);
+    REQUIRE(
+        trapped->audit_arch ==
+        static_cast<std::uint32_t>(
+            AUDIT_ARCH_I386));
+    REQUIRE(trapped->context.rip == base + 7U);
+}
+
+TEST_CASE(
+    "Linux seccomp traps a syscall ending exactly at executable mapping boundary",
+    "[execution][linux-transition][c0][seccomp][boundary]") {
+    const auto page = page_size();
+    const auto base =
+        find_free_block(
+            static_cast<std::size_t>(
+                page * 3U));
+    const auto stack_base = base + page;
+    const auto gate_base = base + 2U * page;
+
+    std::vector<std::byte> code;
+    append_mov_imm64(
+        code,
+        0U,
+        0x1234U);
+    while (code.size() < 14U) {
+        code.push_back(std::byte{0x90});
+    }
+    REQUIRE(code.size() == 14U);
+    code.push_back(std::byte{0x0f});
+    code.push_back(std::byte{0x05});
+    REQUIRE(code.size() == 16U);
+
+    auto image =
+        make_guest_image(
+            base,
+            stack_base,
+            page,
+            std::move(code));
+    auto prepared =
+        astraea::execution::
+            prepare_linux_guest_memory(image);
+    REQUIRE(prepared.has_value());
+    auto gate =
+        make_gate_region(
+            image,
+            gate_base);
+
+    const auto result =
+        astraea::execution::
+            enter_linux_guest_with_seccomp_syscall_trap(
+                image,
+                prepared.value(),
+                gate,
+                astraea::execution::
+                    make_synthetic_initial_context(
+                        image));
+
+    REQUIRE(result.has_value());
+    const auto* trapped =
+        std::get_if<
+            astraea::execution::
+                LinuxSeccompSyscallTrap>(
+                    &result.value());
+    REQUIRE(trapped != nullptr);
+    REQUIRE(trapped->guest_rip.value() == base + 14U);
+    REQUIRE(trapped->context.rip == base + 16U);
+    REQUIRE(trapped->syscall_number == 0x1234);
+    REQUIRE(
+        trapped->audit_arch ==
+        static_cast<std::uint32_t>(
+            AUDIT_ARCH_X86_64));
+}
 
 TEST_CASE(
     "Linux guest call stops at registered synthetic gate",
