@@ -14,6 +14,7 @@
 #include <atomic>
 #include <bit>
 #include <charconv>
+#include <cerrno>
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
@@ -31,7 +32,9 @@
 
 #if defined(__linux__)
 #include <csignal>
+#include <fcntl.h>
 #include <sys/mman.h>
+#include <sys/stat.h>
 #include <sys/prctl.h>
 #include <sys/types.h>
 #include <unistd.h>
@@ -62,6 +65,8 @@ enum class ProbeMode {
     native_illegal_instruction_fault,
     fault_then_syscall,
     burn_cpu,
+    artifact_probe,
+    no_artifact_fd_probe,
 };
 
 [[nodiscard]] bool configure_binary_stdio() noexcept {
@@ -236,9 +241,127 @@ using ReadResult =
             "--burn-cpu") {
             return ProbeMode::burn_cpu;
         }
+        if (argument ==
+            "--artifact-probe") {
+            return ProbeMode::artifact_probe;
+        }
+        if (argument ==
+            "--no-artifact-fd") {
+            return ProbeMode::no_artifact_fd_probe;
+        }
     }
     return ProbeMode::normal;
 }
+
+#if defined(__linux__)
+
+constexpr std::array<std::byte, 12> kExpectedArtifactBytes{
+    std::byte{0x00},
+    std::byte{0x41},
+    std::byte{0xff},
+    std::byte{0x7f},
+    std::byte{0x10},
+    std::byte{0x20},
+    std::byte{0x30},
+    std::byte{0x40},
+    std::byte{0xaa},
+    std::byte{0x55},
+    std::byte{0x00},
+    std::byte{0xee},
+};
+
+[[nodiscard]] bool artifact_fd_is_closed() noexcept {
+    errno = 0;
+    const auto flags =
+        ::fcntl(3, F_GETFD);
+    return flags == -1 && errno == EBADF;
+}
+
+[[nodiscard]] bool validate_and_close_artifact_fd() {
+    constexpr int kRequiredSeals =
+        F_SEAL_WRITE |
+        F_SEAL_GROW |
+        F_SEAL_SHRINK |
+        F_SEAL_SEAL;
+
+    const auto seals =
+        ::fcntl(3, F_GET_SEALS);
+    if (seals < 0 ||
+        (seals & kRequiredSeals) !=
+            kRequiredSeals) {
+        return false;
+    }
+
+    struct stat metadata {};
+    if (::fstat(3, &metadata) != 0 ||
+        metadata.st_size !=
+            static_cast<off_t>(
+                kExpectedArtifactBytes.size())) {
+        return false;
+    }
+
+    std::array<std::byte, kExpectedArtifactBytes.size()>
+        bytes{};
+    std::size_t offset = 0U;
+    while (offset < bytes.size()) {
+        const auto count =
+            ::pread(
+                3,
+                bytes.data() + offset,
+                bytes.size() - offset,
+                static_cast<off_t>(offset));
+        if (count < 0) {
+            if (errno == EINTR) {
+                continue;
+            }
+            return false;
+        }
+        if (count == 0) {
+            return false;
+        }
+        offset +=
+            static_cast<std::size_t>(count);
+    }
+
+    if (bytes != kExpectedArtifactBytes) {
+        return false;
+    }
+
+    const std::byte replacement{0x99};
+    errno = 0;
+    if (::pwrite(
+            3,
+            &replacement,
+            1U,
+            0) != -1 ||
+        errno != EPERM) {
+        return false;
+    }
+
+    errno = 0;
+    if (::ftruncate(
+            3,
+            metadata.st_size + 1) != -1 ||
+        errno != EPERM) {
+        return false;
+    }
+
+    errno = 0;
+    if (::ftruncate(
+            3,
+            metadata.st_size - 1) != -1 ||
+        errno != EPERM) {
+        return false;
+    }
+
+    if (::close(3) != 0) {
+        return false;
+    }
+
+    return artifact_fd_is_closed();
+}
+
+#endif
 
 #if defined(_WIN32)
 [[nodiscard]] std::optional<std::uintptr_t>
@@ -1121,6 +1244,26 @@ int main(int argc, char** argv) {
     const auto mode =
         mode_from_args(argc, argv);
 
+#if defined(__linux__)
+    if (mode == ProbeMode::artifact_probe) {
+        if (!validate_and_close_artifact_fd()) {
+            return 38;
+        }
+    } else if (
+        mode ==
+        ProbeMode::no_artifact_fd_probe) {
+        if (!artifact_fd_is_closed()) {
+            return 39;
+        }
+    }
+#else
+    if (mode == ProbeMode::artifact_probe ||
+        mode ==
+            ProbeMode::no_artifact_fd_probe) {
+        return 40;
+    }
+#endif
+
     const auto hello_message =
         read_message();
     if (!hello_message.has_value()) {
@@ -1184,6 +1327,15 @@ int main(int argc, char** argv) {
              .has_value()) {
         return 16;
     }
+
+#if defined(__linux__)
+    if ((mode == ProbeMode::artifact_probe ||
+         mode ==
+             ProbeMode::no_artifact_fd_probe) &&
+        !artifact_fd_is_closed()) {
+        return 41;
+    }
+#endif
 
     if (mode == ProbeMode::hang_after_run) {
         std::this_thread::sleep_for(
