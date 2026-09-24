@@ -5,6 +5,8 @@
 #include <astraea/execution/linux_execution.hpp>
 
 #include <array>
+#include <bit>
+#include <climits>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
@@ -21,8 +23,12 @@
 #if defined(__linux__) && defined(__x86_64__)
 #include <cerrno>
 #include <csignal>
+#include <linux/filter.h>
+#include <linux/seccomp.h>
 #include <setjmp.h>
 #include <sys/mman.h>
+#include <sys/prctl.h>
+#include <sys/syscall.h>
 #include <ucontext.h>
 #include <unistd.h>
 #endif
@@ -69,11 +75,12 @@ static_assert(offsetof(GuestCpuContext, r15) == 120);
 static_assert(offsetof(GuestCpuContext, rip) == 128);
 static_assert(offsetof(GuestCpuContext, rflags) == 136);
 
-constexpr std::array<int, 4> kGuestSignals{
+constexpr std::array<int, 5> kGuestSignals{
     SIGSEGV,
     SIGBUS,
     SIGILL,
     SIGFPE,
+    SIGSYS,
 };
 
 constexpr std::size_t kMinimumAlternateSignalStackSize = 64U * 1024U;
@@ -95,6 +102,8 @@ struct SignalFrame {
     const RegisteredSyscallTrapSite*
         registered_syscall_traps = nullptr;
     std::size_t registered_syscall_trap_count = 0;
+    bool has_seccomp_syscall_trap = false;
+    LinuxSeccompSyscallTrap seccomp_syscall_trap;
     ExecutionStop stop;
 };
 
@@ -119,6 +128,21 @@ std::array<struct sigaction, kGuestSignals.size()> g_previous_actions{};
         return false;
     }
     return address - range.base < range.size;
+}
+
+[[nodiscard]] bool frame_owns_guest_executable_rip(
+    const SignalFrame& frame,
+    std::uint64_t rip) noexcept {
+    for (std::size_t i = 0;
+         i < frame.executable_range_count;
+         ++i) {
+        if (range_contains(
+                frame.executable_ranges[i],
+                rip)) {
+            return true;
+        }
+    }
+    return false;
 }
 
 [[nodiscard]] bool frame_owns_guest_rip(
