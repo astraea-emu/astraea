@@ -92,6 +92,9 @@ struct SignalFrame {
     std::size_t executable_range_count = 0;
     std::uint64_t gate_base = 0;
     std::uint32_t gate_slot_count = 0;
+    const RegisteredSyscallTrapSite*
+        registered_syscall_traps = nullptr;
+    std::size_t registered_syscall_trap_count = 0;
     ExecutionStop stop;
 };
 
@@ -159,6 +162,22 @@ std::array<struct sigaction, kGuestSignals.size()> g_previous_actions{};
 
     slot = static_cast<std::uint32_t>(candidate);
     return true;
+}
+
+[[nodiscard]] bool
+recognize_registered_syscall_trap(
+    const SignalFrame& frame,
+    std::uint64_t rip) noexcept {
+    for (std::size_t i = 0;
+         i < frame.registered_syscall_trap_count;
+         ++i) {
+        if (registered_syscall_trap_matches_rip(
+                frame.registered_syscall_traps[i],
+                astraea::memory::GuestAddress{rip})) {
+            return true;
+        }
+    }
+    return false;
 }
 
 [[nodiscard]] GuestFaultKind fault_kind_for_signal(
@@ -290,6 +309,19 @@ void guest_signal_handler(
         siglongjmp(frame->jump_buffer, 1);
     }
 
+    if (signal_number == SIGILL &&
+        recognize_registered_syscall_trap(
+            *frame,
+            rip)) {
+        frame->stop.reason =
+            ExecutionStopReason::
+                registered_syscall_trap;
+        frame->stop.has_gate_slot = false;
+        frame->stop.gate_slot = 0;
+        frame->stop.has_fault = false;
+        siglongjmp(frame->jump_buffer, 1);
+    }
+
     frame->stop.reason = ExecutionStopReason::guest_fault;
     frame->stop.has_gate_slot = false;
     frame->stop.gate_slot = 0;
@@ -330,6 +362,68 @@ void guest_signal_handler(
         }
     }
     return false;
+}
+
+[[nodiscard]] bool registered_traps_are_valid(
+    const astraea::loader::GuestImage& image,
+    std::span<const RegisteredSyscallTrapSite>
+        registered_syscall_traps) noexcept {
+    for (std::size_t i = 0;
+         i < registered_syscall_traps.size();
+         ++i) {
+        const auto& site =
+            registered_syscall_traps[i];
+        if (site.original_bytes !=
+                kX86SyscallBytes ||
+            site.trap_bytes !=
+                kX86Ud2Bytes) {
+            return false;
+        }
+
+        const auto rip = site.guest_rip.value();
+        if (rip ==
+                std::numeric_limits<
+                    std::uint64_t>::max() ||
+            !exact_executable_contains(
+                image,
+                rip) ||
+            !exact_executable_contains(
+                image,
+                rip + 1U)) {
+            return false;
+        }
+
+        if (rip >
+            static_cast<std::uint64_t>(
+                std::numeric_limits<
+                    std::uintptr_t>::max())) {
+            return false;
+        }
+
+        std::array<std::byte, 2> mapped_bytes{};
+        std::memcpy(
+            mapped_bytes.data(),
+            reinterpret_cast<const void*>(
+                static_cast<std::uintptr_t>(
+                    rip)),
+            mapped_bytes.size());
+        if (mapped_bytes !=
+            kX86Ud2Bytes) {
+            return false;
+        }
+
+        for (std::size_t j = i + 1U;
+             j < registered_syscall_traps.size();
+             ++j) {
+            if (registered_syscall_traps[j].
+                    guest_rip ==
+                site.guest_rip) {
+                return false;
+            }
+        }
+    }
+
+    return true;
 }
 
 [[nodiscard]] LinuxExecutionResult validate_context(
@@ -665,7 +759,9 @@ restore_signal_environment(
 run_linux_guest_thread(
     const astraea::loader::GuestImage& image,
     const SyntheticGateRegion& gate_region,
-    GuestCpuContext context) {
+    GuestCpuContext context,
+    std::span<const RegisteredSyscallTrapSite>
+        registered_syscall_traps) {
     std::vector<SignalRange> executable_ranges;
     std::vector<std::byte> alternate_stack;
     try {
@@ -759,6 +855,10 @@ run_linux_guest_thread(
         gate_region.range().base().value();
     frame.gate_slot_count =
         gate_region.slot_count();
+    frame.registered_syscall_traps =
+        registered_syscall_traps.data();
+    frame.registered_syscall_trap_count =
+        registered_syscall_traps.size();
 
     const int jump_result =
         sigsetjmp(frame.jump_buffer, 1);
@@ -798,12 +898,15 @@ LinuxExecutionResult enter_linux_guest(
     const astraea::loader::GuestImage& image,
     const LinuxPreparedMemory& prepared_memory,
     const SyntheticGateRegion& gate_region,
-    GuestCpuContext context) {
+    GuestCpuContext context,
+    std::span<const RegisteredSyscallTrapSite>
+        registered_syscall_traps) {
 #if !(defined(__linux__) && defined(__x86_64__) && defined(MAP_FIXED_NOREPLACE))
     static_cast<void>(image);
     static_cast<void>(prepared_memory);
     static_cast<void>(gate_region);
     static_cast<void>(context);
+    static_cast<void>(registered_syscall_traps);
     return LinuxExecutionResult::failure(
         backend_error(
             NativeBackendErrorCode::backend_unavailable));
@@ -816,6 +919,15 @@ LinuxExecutionResult enter_linux_guest(
     if (!valid.has_value()) {
         return LinuxExecutionResult::failure(
             valid.error());
+    }
+
+    if (!registered_traps_are_valid(
+            image,
+            registered_syscall_traps)) {
+        return LinuxExecutionResult::failure(
+            backend_error(
+                NativeBackendErrorCode::
+                    invalid_registered_syscall_trap));
     }
 
     std::unique_lock<std::mutex> execution_lock(
@@ -847,7 +959,8 @@ LinuxExecutionResult enter_linux_guest(
                         run_linux_guest_thread(
                             image,
                             gate_region,
-                            context));
+                            context,
+                            registered_syscall_traps));
                 } catch (const std::bad_alloc&) {
                     thread_result.emplace(
                         LinuxExecutionResult::failure(
