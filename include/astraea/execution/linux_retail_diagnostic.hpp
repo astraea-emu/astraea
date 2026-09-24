@@ -3,15 +3,83 @@
 #include <cstddef>
 #include <cstdint>
 #include <optional>
+#include <span>
 #include <string>
 #include <vector>
 
+#include <astraea/core/result.hpp>
+#include <astraea/execution/backend.hpp>
+#include <astraea/execution/context.hpp>
 #include <astraea/loader/dynamic_metadata.hpp>
 #include <astraea/loader/guest_image.hpp>
 #include <astraea/loader/initial_stack.hpp>
 #include <astraea/memory/guest_address.hpp>
 
 namespace astraea::execution {
+
+enum class LinuxRetailDiagnosticStackErrorCode {
+    elf_parse_failure,
+    load_range_overflow,
+    address_space_exhausted,
+};
+
+struct LinuxRetailDiagnosticStackError {
+    LinuxRetailDiagnosticStackErrorCode code =
+        LinuxRetailDiagnosticStackErrorCode::
+            elf_parse_failure;
+    std::optional<astraea::loader::ElfError> elf_error;
+    std::uint64_t detail = 0;
+
+    auto operator<=>(const LinuxRetailDiagnosticStackError&) const =
+        default;
+};
+
+using LinuxRetailDiagnosticStackResult =
+    astraea::core::Result<
+        astraea::memory::GuestRange,
+        LinuxRetailDiagnosticStackError>;
+
+inline constexpr std::uint64_t
+    kLinuxRetailDiagnosticStackSize = 2U * 1024U * 1024U;
+inline constexpr std::uint64_t
+    kLinuxRetailDiagnosticStackGuard = 64U * 1024U;
+inline constexpr std::uint64_t
+    kLinuxRetailDiagnosticStackAlignment = 64U * 1024U;
+
+// Deterministic first-diagnostic stack policy. The stack is placed after the
+// highest PT_LOAD range, with a fixed guard and alignment, and must remain in
+// the conservative lower canonical x86-64 user half.
+[[nodiscard]] LinuxRetailDiagnosticStackResult
+choose_linux_retail_diagnostic_stack(
+    std::span<const std::byte> artifact_bytes);
+
+enum class LinuxRetailDiagnosticRuntimeBoundaryKind {
+    unsupported_syscall,
+    guest_fault,
+    native_backend_error,
+};
+
+struct LinuxRetailDiagnosticRuntimeBoundary {
+    LinuxRetailDiagnosticRuntimeBoundaryKind kind =
+        LinuxRetailDiagnosticRuntimeBoundaryKind::
+            native_backend_error;
+    astraea::memory::GuestAddress guest_rip{0U};
+    std::int32_t syscall_number = 0;
+    std::uint32_t audit_arch = 0;
+    std::optional<GuestFault> guest_fault;
+    std::optional<NativeBackendError> backend_error;
+
+    auto operator<=>(const LinuxRetailDiagnosticRuntimeBoundary&) const =
+        default;
+};
+
+// Executes exactly one diagnostic native-entry interval under the verified
+// Linux seccomp syscall boundary, with no synthetic HLE gate. The caller must
+// have admitted the image through preflight first. This function never brokers
+// a guest syscall or resumes after a syscall/fault boundary.
+[[nodiscard]] LinuxRetailDiagnosticRuntimeBoundary
+run_linux_retail_diagnostic_native_once(
+    const astraea::loader::GuestImage& image);
 
 enum class LinuxRetailDiagnosticPreflightBoundaryKind {
     loader_rejected,
