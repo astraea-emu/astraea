@@ -56,7 +56,7 @@ void append_u64(
 }
 
 [[nodiscard]] std::uint16_t read_u16(
-    const std::vector<std::byte>& bytes,
+    std::span<const std::byte> bytes,
     std::size_t offset) noexcept {
     std::uint16_t value = 0U;
     for (unsigned index = 0U; index < 2U; ++index) {
@@ -362,7 +362,7 @@ encode_guest_worker_wire_message(
 
 GuestWorkerWireDecodeResult
 decode_guest_worker_wire_message(
-    const std::vector<std::byte>& frame) {
+    std::span<const std::byte> frame) {
     if (frame.size() < kGuestWorkerWireHeaderSize) {
         return GuestWorkerWireDecodeResult::failure(
             error(
