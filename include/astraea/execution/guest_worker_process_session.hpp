@@ -37,6 +37,7 @@ struct GuestWorkerProcessSessionResult {
     GuestWorkerStop stop;
     std::int32_t child_exit_code = 0;
     std::size_t syscall_request_count = 0;
+    std::optional<GuestWorkerFault> terminal_fault;
 
     auto operator<=>(const GuestWorkerProcessSessionResult&) const =
         default;
@@ -88,6 +89,7 @@ guest_worker_process_session_available() noexcept;
 //
 //   HELLO -> READY -> RUN_REQUEST
 //       -> zero or more bounded SYSCALL_REQUEST / SYSCALL_RESULT exchanges
+//       -> optionally one terminal FAULT
 //       -> STOP -> TERMINATE
 //
 // and returns only after the child exits and is reaped. The run budget and
