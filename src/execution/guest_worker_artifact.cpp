@@ -4,6 +4,7 @@
 #include <limits>
 #include <new>
 #include <stdexcept>
+#include <utility>
 
 #if defined(__linux__)
 #include <fcntl.h>
