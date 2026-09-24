@@ -49,6 +49,12 @@ struct GuestWorkerProcessSessionConfig {
 
     // Optional kernel-enforced worker ceilings installed before guest RUN.
     std::optional<GuestWorkerResourcePolicy> resource_policy;
+
+    // Linux-only immutable artifact handoff. The controller supplies bytes,
+    // never a host pathname. When present, launch seals the bytes into an
+    // anonymous memfd and exposes only that object as child fd 3. The worker
+    // is expected to copy/validate and close fd 3 before guest RUN.
+    std::optional<std::vector<std::byte>> linux_artifact_bytes;
 };
 
 struct GuestWorkerProcessSessionResult {
@@ -78,6 +84,7 @@ enum class GuestWorkerProcessSessionErrorCode {
     syscall_service_rejected,
     syscall_request_limit_exceeded,
     resource_policy_failure,
+    artifact_preparation_failure,
     child_exit_failure,
     host_allocation_failure,
 };
