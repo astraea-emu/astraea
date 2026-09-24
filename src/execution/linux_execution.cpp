@@ -51,6 +51,17 @@ namespace {
     };
 }
 
+struct LinuxThreadExecutionOutcome {
+    ExecutionStop stop;
+    bool has_seccomp_syscall_trap = false;
+    LinuxSeccompSyscallTrap seccomp_syscall_trap;
+};
+
+using LinuxThreadExecutionResult =
+    astraea::core::Result<
+        LinuxThreadExecutionOutcome,
+        NativeBackendError>;
+
 #if defined(__linux__) && defined(__x86_64__) && defined(MAP_FIXED_NOREPLACE)
 
 extern "C" [[noreturn]] void astraea_linux_enter_guest_context(
@@ -1074,13 +1085,14 @@ restore_signal_environment(
     return std::nullopt;
 }
 
-[[nodiscard]] LinuxExecutionResult
+[[nodiscard]] LinuxThreadExecutionResult
 run_linux_guest_thread(
     const astraea::loader::GuestImage& image,
     const SyntheticGateRegion& gate_region,
     GuestCpuContext context,
     std::span<const RegisteredSyscallTrapSite>
-        registered_syscall_traps) {
+        registered_syscall_traps,
+    bool enable_seccomp_syscall_trap) {
     std::vector<SignalRange> executable_ranges;
     std::vector<std::byte> alternate_stack;
     try {
@@ -1093,12 +1105,12 @@ run_linux_guest_thread(
                 : kMinimumAlternateSignalStackSize;
         alternate_stack.resize(alternate_size);
     } catch (const std::bad_alloc&) {
-        return LinuxExecutionResult::failure(
+        return LinuxThreadExecutionResult::failure(
             backend_error(
                 NativeBackendErrorCode::
                     recovery_setup_failure));
     } catch (const std::length_error&) {
-        return LinuxExecutionResult::failure(
+        return LinuxThreadExecutionResult::failure(
             backend_error(
                 NativeBackendErrorCode::
                     recovery_setup_failure));
@@ -1114,7 +1126,7 @@ run_linux_guest_thread(
     if (::sigaltstack(
             &requested_stack,
             &previous_stack) != 0) {
-        return LinuxExecutionResult::failure(
+        return LinuxThreadExecutionResult::failure(
             recovery_error(errno));
     }
 
@@ -1129,7 +1141,7 @@ run_linux_guest_thread(
                 ::sigaltstack(
                     &previous_stack,
                     nullptr));
-            return LinuxExecutionResult::failure(
+            return LinuxThreadExecutionResult::failure(
                 recovery_error(host_error));
         }
     }
@@ -1158,7 +1170,7 @@ run_linux_guest_thread(
                     previous_stack,
                     installed_count);
             static_cast<void>(cleanup_error);
-            return LinuxExecutionResult::failure(
+            return LinuxThreadExecutionResult::failure(
                 recovery_error(host_error));
         }
         ++installed_count;
@@ -1181,7 +1193,22 @@ run_linux_guest_thread(
 
     const int jump_result =
         sigsetjmp(frame.jump_buffer, 1);
-    if (jump_result == 0) {
+
+    std::optional<NativeBackendError>
+        interception_setup_error;
+    if (jump_result == 0 &&
+        enable_seccomp_syscall_trap) {
+        const auto installed =
+            install_guest_executable_syscall_filter(
+                executable_ranges);
+        if (!installed.has_value()) {
+            interception_setup_error =
+                installed.error();
+        }
+    }
+
+    if (jump_result == 0 &&
+        !interception_setup_error.has_value()) {
         g_active_frame = &frame;
         astraea_linux_enter_guest_context(
             &context);
@@ -1193,12 +1220,23 @@ run_linux_guest_thread(
             previous_stack,
             installed_count);
     if (cleanup_error.has_value()) {
-        return LinuxExecutionResult::failure(
+        return LinuxThreadExecutionResult::failure(
             cleanup_error.value());
     }
 
-    return LinuxExecutionResult::success(
-        frame.stop);
+    if (interception_setup_error.has_value()) {
+        return LinuxThreadExecutionResult::failure(
+            interception_setup_error.value());
+    }
+
+    return LinuxThreadExecutionResult::success(
+        LinuxThreadExecutionOutcome{
+            .stop = frame.stop,
+            .has_seccomp_syscall_trap =
+                frame.has_seccomp_syscall_trap,
+            .seccomp_syscall_trap =
+                frame.seccomp_syscall_trap,
+        });
 }
 
 #endif
