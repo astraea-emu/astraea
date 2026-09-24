@@ -16,6 +16,7 @@ enum class Rdna2InstructionFormat {
     sop1,
     vop1,
     vop2,
+    exp,
     unsupported,
 };
 
@@ -35,6 +36,7 @@ enum class Rdna2InstructionKind {
     s_mov_b64,
     v_mov_b32,
     v_add_f32,
+    exp,
     unknown_sopp_opcode,
     unknown_sop1_opcode,
     unknown_vop1_opcode,
@@ -91,6 +93,17 @@ struct Rdna2Vop2Fields {
     auto operator<=>(const Rdna2Vop2Fields&) const = default;
 };
 
+struct Rdna2ExpFields {
+    std::uint8_t enable_mask = 0;
+    std::uint8_t target = 0;
+    bool compressed = false;
+    bool done = false;
+    bool valid_mask = false;
+    std::array<std::uint8_t, 4> source_vgprs{};
+
+    auto operator<=>(const Rdna2ExpFields&) const = default;
+};
+
 struct Rdna2Instruction {
     std::size_t word_index = 0;
     std::size_t word_count = 1;
@@ -105,6 +118,7 @@ struct Rdna2Instruction {
     std::optional<Rdna2Sop1Fields> sop1;
     std::optional<Rdna2Vop1Fields> vop1;
     std::optional<Rdna2Vop2Fields> vop2;
+    std::optional<Rdna2ExpFields> exp;
 
     auto operator<=>(const Rdna2Instruction&) const = default;
 };
@@ -113,7 +127,8 @@ using Rdna2DecodeResult =
     astraea::core::Result<Rdna2Instruction, Rdna2DecodeError>;
 
 // Decodes the currently supported generic RDNA2 instruction encodings
-// documented by AMD (SOPP, SOP1, VOP1, and the first VOP2 slice). S_MOV_B32
+// documented by AMD (SOPP, SOP1, VOP1, the first VOP2 slice, and EXP).
+// EXP is a fixed two-dword export encoding. S_MOV_B32
 // selector 255 and AMD-documented VOP1/VOP2 extension selectors consume the
 // following dword.
 // The caller owns
