@@ -59,15 +59,16 @@ void append_u64(
 [[nodiscard]] std::uint16_t read_u16(
     std::span<const std::byte> bytes,
     std::size_t offset) noexcept {
-    std::uint16_t value = 0U;
-    for (unsigned index = 0U; index < 2U; ++index) {
-        value |=
-            static_cast<std::uint16_t>(
-                std::to_integer<std::uint8_t>(
-                    bytes[offset + index]))
-            << (index * 8U);
-    }
-    return value;
+    const auto low =
+        static_cast<std::uint32_t>(
+            std::to_integer<std::uint8_t>(
+                bytes[offset]));
+    const auto high =
+        static_cast<std::uint32_t>(
+            std::to_integer<std::uint8_t>(
+                bytes[offset + 1U]));
+    return static_cast<std::uint16_t>(
+        low | (high << 8U));
 }
 
 [[nodiscard]] std::uint32_t read_u32(
