@@ -111,6 +111,11 @@ target_link_libraries(astraea_core_tests PRIVATE
 astraea_set_project_warnings(astraea_core_tests)
 astraea_enable_sanitizers(astraea_core_tests)
 
+astraea_verify_explicit_cpp_sources(
+    ROOT .
+    TARGETS astraea_core_tests
+)
+
 list(APPEND CMAKE_MODULE_PATH "${catch2_SOURCE_DIR}/extras")
 include(Catch)
 catch_discover_tests(astraea_core_tests)
