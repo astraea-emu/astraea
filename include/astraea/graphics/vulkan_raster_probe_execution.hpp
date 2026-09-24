@@ -4,6 +4,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <optional>
+#include <span>
 #include <vector>
 
 #include <astraea/core/result.hpp>
@@ -70,13 +71,18 @@ using VulkanRasterProbeExecutionResult =
         VulkanRasterProbeExecution,
         VulkanRasterProbeError>;
 
-// Materializes one typed RGBA8 guest image as a host Vulkan image, executes
-// Astraea's owned fullscreen-triangle SPIR-V probe with exactly one
-// vkCmdDraw(3, 1, 0, 0), copies logical pixels to host-visible staging memory,
-// and returns deterministic readback.
-//
-// This is a host-backend oracle. It does not execute guest/AGC shaders, infer
-// PS5 stage I/O, mutate guest physical surface backing, or present to a window.
+// Materializes one typed RGBA8 guest image as a host Vulkan image and executes
+// caller-supplied Vulkan shader modules with exactly one vkCmdDraw(3, 1, 0, 0).
+// The caller owns shader semantics; this function remains only the bounded
+// host-raster backend and deterministic readback path.
+[[nodiscard]] VulkanRasterProbeExecutionResult
+execute_vulkan_fullscreen_triangle_spirv(
+    const GuestGpuImageView& image,
+    std::span<const std::uint32_t> vertex_words,
+    std::span<const std::uint32_t> fragment_words);
+
+// Backend-oracle compatibility wrapper using Astraea's original owned
+// hard-coded fullscreen-triangle/magenta SPIR-V pair from #219.
 [[nodiscard]] VulkanRasterProbeExecutionResult
 execute_vulkan_fullscreen_triangle_probe(
     const GuestGpuImageView& image);
