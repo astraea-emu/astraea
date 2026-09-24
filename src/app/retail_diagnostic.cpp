@@ -8,6 +8,7 @@
 #include <astraea/execution/guest_worker_wire.hpp>
 #include <astraea/execution/linux_retail_diagnostic.hpp>
 
+#include <algorithm>
 #include <array>
 #include <bit>
 #include <charconv>
@@ -25,6 +26,7 @@
 #include <string_view>
 #include <system_error>
 #include <utility>
+#include <variant>
 #include <vector>
 
 #if defined(__linux__)
@@ -690,8 +692,14 @@ read_artifact_file(const std::filesystem::path& path) {
     if (end <= std::streampos{0}) {
         return std::nullopt;
     }
+    const auto end_offset =
+        static_cast<std::streamoff>(end);
+    if (end_offset <= 0) {
+        return std::nullopt;
+    }
     const auto size =
-        static_cast<std::uint64_t>(end);
+        static_cast<std::uint64_t>(
+            end_offset);
     if (size >
         static_cast<std::uint64_t>(
             kMaxDiagnosticArtifactBytes)) {
