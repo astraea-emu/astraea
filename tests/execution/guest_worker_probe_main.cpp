@@ -11,6 +11,7 @@
 
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <bit>
 #include <charconv>
 #include <chrono>
@@ -60,6 +61,7 @@ enum class ProbeMode {
     native_access_fault,
     native_illegal_instruction_fault,
     fault_then_syscall,
+    burn_cpu,
 };
 
 [[nodiscard]] bool configure_binary_stdio() noexcept {
@@ -229,6 +231,10 @@ using ReadResult =
         if (argument ==
             "--fault-then-syscall") {
             return ProbeMode::fault_then_syscall;
+        }
+        if (argument ==
+            "--burn-cpu") {
+            return ProbeMode::burn_cpu;
         }
     }
     return ProbeMode::normal;
@@ -1183,6 +1189,15 @@ int main(int argc, char** argv) {
         std::this_thread::sleep_for(
             std::chrono::hours{1});
         return 25;
+    }
+
+    if (mode == ProbeMode::burn_cpu) {
+        std::atomic<std::uint64_t> counter{0U};
+        for (;;) {
+            (void)counter.fetch_add(
+                1U,
+                std::memory_order_relaxed);
+        }
     }
 
     if (mode == ProbeMode::native_access_fault ||

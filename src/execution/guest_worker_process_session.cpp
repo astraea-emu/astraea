@@ -32,6 +32,7 @@
 #include <fcntl.h>
 #include <poll.h>
 #include <spawn.h>
+#include <sys/resource.h>
 #include <sys/socket.h>
 #include <sys/types.h>
 #include <sys/wait.h>
@@ -98,6 +99,28 @@ namespace {
     if (has_syscall_service !=
         accepts_syscalls) {
         return false;
+    }
+
+    if (config.resource_policy.has_value()) {
+        const auto& policy =
+            config.resource_policy.value();
+
+        if ((policy.process_memory_limit_bytes.has_value() &&
+             policy.process_memory_limit_bytes.value() == 0U) ||
+            (policy.process_cpu_time_seconds.has_value() &&
+             policy.process_cpu_time_seconds.value() == 0U) ||
+            (policy.linux_max_open_files.has_value() &&
+             policy.linux_max_open_files.value() < 3U)) {
+            return false;
+        }
+
+#if !defined(__linux__)
+        if (policy.linux_max_open_files.has_value() ||
+            policy.linux_disable_core_dumps ||
+            policy.linux_disable_file_growth) {
+            return false;
+        }
+#endif
     }
 
     for (const auto& argument :
@@ -613,6 +636,166 @@ wait_for_child(
     }
 }
 
+using ResourcePolicyApplyResult =
+    astraea::core::Result<
+        bool,
+        GuestWorkerProcessSessionError>;
+
+[[nodiscard]] ResourcePolicyApplyResult
+apply_linux_resource_limit(
+    pid_t pid,
+    decltype(RLIMIT_AS) resource,
+    std::uint64_t requested) noexcept {
+    if constexpr (
+        sizeof(rlim_t) <
+        sizeof(std::uint64_t)) {
+        if (requested >
+            static_cast<std::uint64_t>(
+                std::numeric_limits<rlim_t>::max())) {
+            return ResourcePolicyApplyResult::failure(
+                error(
+                    GuestWorkerProcessSessionErrorCode::
+                        resource_policy_failure,
+                    EOVERFLOW));
+        }
+    }
+
+    rlimit current{};
+    if (::prlimit(
+            pid,
+            resource,
+            nullptr,
+            &current) != 0) {
+        return ResourcePolicyApplyResult::failure(
+            error(
+                GuestWorkerProcessSessionErrorCode::
+                    resource_policy_failure,
+                errno));
+    }
+
+    const auto requested_limit =
+        static_cast<rlim_t>(requested);
+
+    rlimit target{
+        .rlim_cur =
+            std::min(
+                current.rlim_cur,
+                requested_limit),
+        .rlim_max =
+            std::min(
+                current.rlim_max,
+                requested_limit),
+    };
+    if (target.rlim_cur > target.rlim_max) {
+        target.rlim_cur = target.rlim_max;
+    }
+
+    if (::prlimit(
+            pid,
+            resource,
+            &target,
+            nullptr) != 0) {
+        return ResourcePolicyApplyResult::failure(
+            error(
+                GuestWorkerProcessSessionErrorCode::
+                    resource_policy_failure,
+                errno));
+    }
+
+    rlimit actual{};
+    if (::prlimit(
+            pid,
+            resource,
+            nullptr,
+            &actual) != 0) {
+        return ResourcePolicyApplyResult::failure(
+            error(
+                GuestWorkerProcessSessionErrorCode::
+                    resource_policy_failure,
+                errno));
+    }
+
+    if (actual.rlim_cur != target.rlim_cur ||
+        actual.rlim_max != target.rlim_max) {
+        return ResourcePolicyApplyResult::failure(
+            error(
+                GuestWorkerProcessSessionErrorCode::
+                    resource_policy_failure,
+                EIO));
+    }
+
+    return ResourcePolicyApplyResult::success(true);
+}
+
+[[nodiscard]] ResourcePolicyApplyResult
+apply_linux_resource_policy(
+    pid_t pid,
+    const std::optional<GuestWorkerResourcePolicy>&
+        policy) noexcept {
+    if (!policy.has_value()) {
+        return ResourcePolicyApplyResult::success(true);
+    }
+
+    const auto& value = policy.value();
+
+    if (value.process_memory_limit_bytes.has_value()) {
+        const auto applied =
+            apply_linux_resource_limit(
+                pid,
+                RLIMIT_AS,
+                value.process_memory_limit_bytes.value());
+        if (!applied.has_value()) {
+            return applied;
+        }
+    }
+
+    if (value.process_cpu_time_seconds.has_value()) {
+        const auto applied =
+            apply_linux_resource_limit(
+                pid,
+                RLIMIT_CPU,
+                value.process_cpu_time_seconds.value());
+        if (!applied.has_value()) {
+            return applied;
+        }
+    }
+
+    if (value.linux_max_open_files.has_value()) {
+        const auto applied =
+            apply_linux_resource_limit(
+                pid,
+                RLIMIT_NOFILE,
+                value.linux_max_open_files.value());
+        if (!applied.has_value()) {
+            return applied;
+        }
+    }
+
+    if (value.linux_disable_core_dumps) {
+        const auto applied =
+            apply_linux_resource_limit(
+                pid,
+                RLIMIT_CORE,
+                0U);
+        if (!applied.has_value()) {
+            return applied;
+        }
+    }
+
+    if (value.linux_disable_file_growth) {
+        const auto applied =
+            apply_linux_resource_limit(
+                pid,
+                RLIMIT_FSIZE,
+                0U);
+        if (!applied.has_value()) {
+            return applied;
+        }
+    }
+
+    return ResourcePolicyApplyResult::success(true);
+}
+
 [[nodiscard]] astraea::core::Result<
     std::pair<UniqueFd, ChildGuard>,
     GuestWorkerProcessSessionError>
@@ -749,13 +932,26 @@ spawn_worker(
 
     worker_fd.reset();
 
+    ChildGuard child{child_pid};
+    const auto policy_applied =
+        apply_linux_resource_policy(
+            child_pid,
+            config.resource_policy);
+    if (!policy_applied.has_value()) {
+        return astraea::core::Result<
+            std::pair<UniqueFd, ChildGuard>,
+            GuestWorkerProcessSessionError>::
+            failure(
+                policy_applied.error());
+    }
+
     return astraea::core::Result<
         std::pair<UniqueFd, ChildGuard>,
         GuestWorkerProcessSessionError>::
         success(
             std::pair<UniqueFd, ChildGuard>{
                 std::move(controller_fd),
-                ChildGuard{child_pid}});
+                std::move(child)});
 }
 
 #elif defined(_WIN32)
@@ -1793,6 +1989,67 @@ spawn_worker(
         JOB_OBJECT_LIMIT_ACTIVE_PROCESS;
     limits.BasicLimitInformation.ActiveProcessLimit =
         1U;
+
+    if (config.resource_policy.has_value()) {
+        const auto& policy =
+            config.resource_policy.value();
+
+        if (policy.process_memory_limit_bytes.has_value()) {
+            const auto memory_limit =
+                policy.process_memory_limit_bytes.value();
+            if constexpr (
+                sizeof(SIZE_T) <
+                sizeof(std::uint64_t)) {
+                if (memory_limit >
+                    static_cast<std::uint64_t>(
+                        std::numeric_limits<SIZE_T>::max())) {
+                    return astraea::core::Result<
+                        std::pair<UniqueHandle, ChildGuard>,
+                        GuestWorkerProcessSessionError>::
+                        failure(
+                            error(
+                                GuestWorkerProcessSessionErrorCode::
+                                    resource_policy_failure,
+                                ERROR_ARITHMETIC_OVERFLOW));
+                }
+            }
+
+            limits.BasicLimitInformation.LimitFlags |=
+                JOB_OBJECT_LIMIT_PROCESS_MEMORY;
+            limits.ProcessMemoryLimit =
+                static_cast<SIZE_T>(
+                    memory_limit);
+        }
+
+        if (policy.process_cpu_time_seconds.has_value()) {
+            constexpr std::uint64_t kTicksPerSecond =
+                10'000'000ULL;
+            const auto seconds =
+                policy.process_cpu_time_seconds.value();
+            if (seconds >
+                static_cast<std::uint64_t>(
+                    std::numeric_limits<LONGLONG>::max()) /
+                    kTicksPerSecond) {
+                return astraea::core::Result<
+                    std::pair<UniqueHandle, ChildGuard>,
+                    GuestWorkerProcessSessionError>::
+                    failure(
+                        error(
+                            GuestWorkerProcessSessionErrorCode::
+                                resource_policy_failure,
+                            ERROR_ARITHMETIC_OVERFLOW));
+            }
+
+            limits.BasicLimitInformation.LimitFlags |=
+                JOB_OBJECT_LIMIT_PROCESS_TIME;
+            limits.BasicLimitInformation.
+                PerProcessUserTimeLimit.QuadPart =
+                    static_cast<LONGLONG>(
+                        seconds *
+                        kTicksPerSecond);
+        }
+    }
+
     if (!::SetInformationJobObject(
             job.get(),
             JobObjectExtendedLimitInformation,
@@ -1803,9 +2060,57 @@ spawn_worker(
             GuestWorkerProcessSessionError>::
             failure(
                 error(
-                    GuestWorkerProcessSessionErrorCode::
-                        spawn_failed,
+                    config.resource_policy.has_value()
+                        ? GuestWorkerProcessSessionErrorCode::
+                              resource_policy_failure
+                        : GuestWorkerProcessSessionErrorCode::
+                              spawn_failed,
                     ::GetLastError()));
+    }
+
+    if (config.resource_policy.has_value()) {
+        JOBOBJECT_EXTENDED_LIMIT_INFORMATION actual{};
+        if (!::QueryInformationJobObject(
+                job.get(),
+                JobObjectExtendedLimitInformation,
+                &actual,
+                sizeof(actual),
+                nullptr)) {
+            return astraea::core::Result<
+                std::pair<UniqueHandle, ChildGuard>,
+                GuestWorkerProcessSessionError>::
+                failure(
+                    error(
+                        GuestWorkerProcessSessionErrorCode::
+                            resource_policy_failure,
+                        ::GetLastError()));
+        }
+
+        const auto required_flags =
+            limits.BasicLimitInformation.LimitFlags;
+        if ((actual.BasicLimitInformation.LimitFlags &
+             required_flags) != required_flags ||
+            actual.BasicLimitInformation.ActiveProcessLimit !=
+                1U ||
+            ((required_flags &
+              JOB_OBJECT_LIMIT_PROCESS_MEMORY) != 0U &&
+             actual.ProcessMemoryLimit !=
+                 limits.ProcessMemoryLimit) ||
+            ((required_flags &
+              JOB_OBJECT_LIMIT_PROCESS_TIME) != 0U &&
+             actual.BasicLimitInformation.
+                     PerProcessUserTimeLimit.QuadPart !=
+                 limits.BasicLimitInformation.
+                     PerProcessUserTimeLimit.QuadPart)) {
+            return astraea::core::Result<
+                std::pair<UniqueHandle, ChildGuard>,
+                GuestWorkerProcessSessionError>::
+                failure(
+                    error(
+                        GuestWorkerProcessSessionErrorCode::
+                            resource_policy_failure,
+                        ERROR_INVALID_DATA));
+        }
     }
 
     PROCESS_INFORMATION process_info{};
