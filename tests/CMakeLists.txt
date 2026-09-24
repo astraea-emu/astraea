@@ -158,3 +158,77 @@ astraea_verify_explicit_cpp_sources(
 list(APPEND CMAKE_MODULE_PATH "${catch2_SOURCE_DIR}/extras")
 include(Catch)
 catch_discover_tests(astraea_core_tests)
+
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND
+   CMAKE_SYSTEM_PROCESSOR MATCHES "^(x86_64|AMD64)$" AND
+   NOT ASTRAEA_ENABLE_SANITIZERS)
+    set(ASTRAEA_RETAIL_CLI_MALFORMED_FIXTURE
+        "${CMAKE_CURRENT_BINARY_DIR}/astraea-retail-malformed.bin"
+    )
+    file(WRITE
+        "${ASTRAEA_RETAIL_CLI_MALFORMED_FIXTURE}"
+        "not-an-elf"
+    )
+    add_test(
+        NAME astraea_retail_cli_malformed
+        COMMAND
+            $<TARGET_FILE:astraea>
+            diagnose
+            "${ASTRAEA_RETAIL_CLI_MALFORMED_FIXTURE}"
+    )
+    set_tests_properties(
+        astraea_retail_cli_malformed
+        PROPERTIES
+            PASS_REGULAR_EXPRESSION
+                "boundary=loader_rejected"
+    )
+
+    set(ASTRAEA_RETAIL_CLI_EMPTY_FIXTURE
+        "${CMAKE_CURRENT_BINARY_DIR}/astraea-retail-empty.bin"
+    )
+    file(WRITE
+        "${ASTRAEA_RETAIL_CLI_EMPTY_FIXTURE}"
+        ""
+    )
+    add_test(
+        NAME astraea_retail_cli_empty
+        COMMAND
+            ${CMAKE_COMMAND}
+            "-DASTRAEA_COMMAND=$<TARGET_FILE:astraea>"
+            "-DASTRAEA_COMMAND_ARGS=diagnose;${ASTRAEA_RETAIL_CLI_EMPTY_FIXTURE}"
+            "-DASTRAEA_EXPECT_REGEX=artifact_error=empty_artifact"
+            -P
+            "${CMAKE_CURRENT_SOURCE_DIR}/cmake/expect_command_failure.cmake"
+    )
+
+    set(ASTRAEA_RETAIL_CLI_MISSING_FIXTURE
+        "${CMAKE_CURRENT_BINARY_DIR}/astraea-retail-does-not-exist.bin"
+    )
+    file(REMOVE
+        "${ASTRAEA_RETAIL_CLI_MISSING_FIXTURE}"
+    )
+    add_test(
+        NAME astraea_retail_cli_missing
+        COMMAND
+            ${CMAKE_COMMAND}
+            "-DASTRAEA_COMMAND=$<TARGET_FILE:astraea>"
+            "-DASTRAEA_COMMAND_ARGS=diagnose;${ASTRAEA_RETAIL_CLI_MISSING_FIXTURE}"
+            "-DASTRAEA_EXPECT_REGEX=artifact_error=open_failed"
+            -P
+            "${CMAKE_CURRENT_SOURCE_DIR}/cmake/expect_command_failure.cmake"
+    )
+endif()
+
+if(NOT (CMAKE_SYSTEM_NAME STREQUAL "Linux" AND
+        CMAKE_SYSTEM_PROCESSOR MATCHES "^(x86_64|AMD64)$"))
+    add_test(
+        NAME astraea_retail_cli_unsupported_platform
+        COMMAND
+            ${CMAKE_COMMAND}
+            "-DASTRAEA_COMMAND=$<TARGET_FILE:astraea>"
+            "-DASTRAEA_COMMAND_ARGS=diagnose;ignored-retail-artifact"
+            "-DASTRAEA_EXPECT_REGEX=Retail diagnostics are currently admitted only on Linux x86-64"
+            -P
+            "${CMAKE_CURRENT_SOURCE_DIR}/cmake/expect_command_failure.cmake"
+    )
+endif()
