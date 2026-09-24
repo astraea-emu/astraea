@@ -490,6 +490,113 @@ TEST_CASE(
                 syscall_service_rejected);
 }
 
+TEST_CASE(
+    "supervisor propagates native access violation as terminal typed fault",
+    "[execution][c0][process][fault][native][access]") {
+    const auto result =
+        astraea::execution::
+            run_guest_worker_process_session(
+                config({"--native-access-fault"}));
+
+    REQUIRE(result.has_value());
+    REQUIRE(result->terminal_fault.has_value());
+    REQUIRE(
+        result->terminal_fault->kind ==
+        astraea::execution::
+            GuestWorkerFaultKind::
+                access_violation);
+    REQUIRE(result->terminal_fault->worker_id.value == 1U);
+    REQUIRE(result->terminal_fault->thread_id.value == 1U);
+    REQUIRE(result->terminal_fault->guest_rip.value() != 0U);
+    REQUIRE(
+        result->terminal_fault->fault_address.value() ==
+        0U);
+    REQUIRE(
+        result->stop.reason ==
+        astraea::execution::
+            GuestWorkerStopReason::guest_fault);
+    REQUIRE(
+        result->stop.guest_rip ==
+        result->terminal_fault->guest_rip);
+    REQUIRE(
+        result->stop.thread_id ==
+        result->terminal_fault->thread_id);
+    REQUIRE(result->syscall_request_count == 0U);
+    REQUIRE(result->child_exit_code == 0);
+
+    // Terminal guest faults must not poison process-session reuse.
+    const auto subsequent =
+        astraea::execution::
+            run_guest_worker_process_session(
+                config());
+    REQUIRE(subsequent.has_value());
+    REQUIRE_FALSE(
+        subsequent->terminal_fault.has_value());
+}
+
+TEST_CASE(
+    "supervisor propagates unregistered UD2 as illegal-instruction fault",
+    "[execution][c0][process][fault][native][illegal]") {
+    const auto result =
+        astraea::execution::
+            run_guest_worker_process_session(
+                config({
+                    "--native-illegal-instruction-fault"}));
+
+    REQUIRE(result.has_value());
+    REQUIRE(result->terminal_fault.has_value());
+    REQUIRE(
+        result->terminal_fault->kind ==
+        astraea::execution::
+            GuestWorkerFaultKind::
+                illegal_instruction);
+    REQUIRE(result->terminal_fault->guest_rip.value() != 0U);
+    REQUIRE(
+        result->terminal_fault->fault_address.value() ==
+        0U);
+    REQUIRE(
+        result->stop.reason ==
+        astraea::execution::
+            GuestWorkerStopReason::guest_fault);
+    REQUIRE(
+        result->stop.guest_rip ==
+        result->terminal_fault->guest_rip);
+    REQUIRE(result->syscall_request_count == 0U);
+    REQUIRE(result->child_exit_code == 0);
+}
+
+TEST_CASE(
+    "terminal guest fault cannot be followed by resumable syscall event",
+    "[execution][c0][process][fault][negative][ordering]") {
+    bool service_called = false;
+    auto invalid =
+        config({"--fault-then-syscall"});
+    invalid.max_syscall_requests = 1U;
+    invalid.syscall_service =
+        [&service_called](
+            const astraea::execution::
+                GuestWorkerSyscallRequest&)
+            -> std::optional<
+                astraea::execution::
+                    GuestWorkerSyscallResult> {
+            service_called = true;
+            return std::nullopt;
+        };
+
+    const auto result =
+        astraea::execution::
+            run_guest_worker_process_session(
+                invalid);
+
+    REQUIRE_FALSE(result.has_value());
+    REQUIRE(
+        result.error().code ==
+        astraea::execution::
+            GuestWorkerProcessSessionErrorCode::
+                protocol_failure);
+    REQUIRE_FALSE(service_called);
+}
+
 #if defined(_WIN32)
 
 TEST_CASE(
