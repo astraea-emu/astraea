@@ -233,7 +233,7 @@ TEST_CASE(
 
     SECTION("endian") {
         auto target = decoded_target();
-        target.raw_info |= 1U;
+        target.endian = 1U;
         const auto result =
             astraea::graphics::
                 plan_gfx10_linear_rgba8_unorm_color_target_image(
@@ -285,7 +285,7 @@ TEST_CASE(
 
     SECTION("linear general") {
         auto target = decoded_target();
-        target.raw_info |= 1U << 7U;
+        target.linear_general = true;
         const auto result =
             astraea::graphics::
                 plan_gfx10_linear_rgba8_unorm_color_target_image(
@@ -298,7 +298,7 @@ TEST_CASE(
 
     SECTION("fast clear") {
         auto target = decoded_target();
-        target.raw_info |= 1U << 13U;
+        target.fast_clear = true;
         const auto result =
             astraea::graphics::
                 plan_gfx10_linear_rgba8_unorm_color_target_image(
@@ -311,7 +311,7 @@ TEST_CASE(
 
     SECTION("compression") {
         auto target = decoded_target();
-        target.raw_info |= 1U << 14U;
+        target.compression = true;
         const auto result =
             astraea::graphics::
                 plan_gfx10_linear_rgba8_unorm_color_target_image(
@@ -324,7 +324,7 @@ TEST_CASE(
 
     SECTION("FMASK state") {
         auto target = decoded_target();
-        target.raw_info |= 1U << 27U;
+        target.fmask_compress_one_fragment = true;
         const auto result =
             astraea::graphics::
                 plan_gfx10_linear_rgba8_unorm_color_target_image(
@@ -338,7 +338,6 @@ TEST_CASE(
     SECTION("DCC") {
         auto target = decoded_target();
         target.dcc_enabled = true;
-        target.raw_info |= 1U << 28U;
         const auto result =
             astraea::graphics::
                 plan_gfx10_linear_rgba8_unorm_color_target_image(
@@ -351,7 +350,7 @@ TEST_CASE(
 
     SECTION("CMASK") {
         auto target = decoded_target();
-        target.raw_info |= 1U << 19U;
+        target.cmask_is_linear = true;
         const auto result =
             astraea::graphics::
                 plan_gfx10_linear_rgba8_unorm_color_target_image(
@@ -364,7 +363,7 @@ TEST_CASE(
 
     SECTION("NBC tiling") {
         auto target = decoded_target();
-        target.raw_info |= 1U << 31U;
+        target.nbc_tiling = true;
         const auto result =
             astraea::graphics::
                 plan_gfx10_linear_rgba8_unorm_color_target_image(
