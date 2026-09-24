@@ -51,6 +51,17 @@ Before incorporating third-party source code, dependencies, generated tables, or
 
 Hardware experimentation must use devices/software the researcher is authorized to use. Astraea's core must not require circumvention tooling. Probe support is an optional research input, not a prerequisite for compiling or using the clean-room core.
 
+A targeted hardware observation may be used at any integration gate when it is
+the smallest lawful way to answer a bounded interoperability question. Keep
+console transport, exploit/circumvention tooling, firmware material, keys, and
+device-specific deployment machinery outside Astraea core.
+
+Hardware-derived evidence committed to Astraea should contain only the minimal
+redistributable observation needed to establish behavior (for example typed
+register/output bytes, hashes, normalized traces, or deterministic result
+records) with provenance. It must not include proprietary binaries or
+materials merely because they were present on the measurement system.
+
 ## Contribution attestation
 
 By contributing, a contributor represents that the submitted material is their own work or is incorporated under a compatible license with provenance documented.
