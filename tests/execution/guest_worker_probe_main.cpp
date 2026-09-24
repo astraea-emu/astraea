@@ -44,6 +44,7 @@ enum class ProbeMode {
     crash_before_ready,
     hang_after_run,
     bad_frame_after_hello,
+    syscall_roundtrip,
 };
 
 [[nodiscard]] bool configure_binary_stdio() noexcept {
@@ -194,6 +195,10 @@ using ReadResult =
             "--bad-frame-after-hello") {
             return ProbeMode::bad_frame_after_hello;
         }
+        if (argument ==
+            "--syscall-roundtrip") {
+            return ProbeMode::syscall_roundtrip;
+        }
     }
     return ProbeMode::normal;
 }
@@ -330,17 +335,66 @@ int main(int argc, char** argv) {
         return 25;
     }
 
+    GuestWorkerStopReason stop_reason =
+        GuestWorkerStopReason::normal_guest_return;
+    astraea::memory::GuestAddress stop_rip{0U};
+
+    if (mode == ProbeMode::syscall_roundtrip) {
+        const GuestWorkerSyscallRequest syscall_request{
+            .request_id =
+                GuestRequestId{.value = 41U},
+            .worker_id = kWorkerId,
+            .thread_id = kThreadId,
+            .guest_syscall_number =
+                0x5152535455565758ULL,
+            .arguments = {
+                0x1111111111111111ULL,
+                0x2222222222222222ULL,
+                0x3333333333333333ULL,
+                0x4444444444444444ULL,
+                0x5555555555555555ULL,
+                0x6666666666666666ULL,
+            },
+            .guest_rip =
+                astraea::memory::GuestAddress{
+                    0x400100U},
+        };
+
+        if (!write_message(
+                GuestWorkerWireMessage{
+                    syscall_request})) {
+            return 26;
+        }
+
+        const auto result_message =
+            read_message();
+        if (!result_message.has_value()) {
+            return 27;
+        }
+
+        const auto* syscall_result =
+            std::get_if<GuestWorkerSyscallResult>(
+                &result_message.value());
+        if (syscall_result == nullptr ||
+            !validate_guest_worker_syscall_result(
+                 syscall_request,
+                 *syscall_result)
+                 .has_value()) {
+            stop_reason =
+                GuestWorkerStopReason::
+                    protocol_failure;
+        }
+
+        stop_rip = syscall_request.guest_rip;
+    }
+
     if (!write_message(
             GuestWorkerWireMessage{
                 GuestWorkerStop{
                     .worker_id = kWorkerId,
                     .thread_id = kThreadId,
-                    .reason =
-                        GuestWorkerStopReason::
-                            normal_guest_return,
-                    .guest_rip =
-                        astraea::memory::GuestAddress{
-                            0U},
+                    .reason = stop_reason,
+                    .guest_rip = stop_rip,
                 }})) {
         return 17;
     }
