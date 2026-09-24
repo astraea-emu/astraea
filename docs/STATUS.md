@@ -1,7 +1,7 @@
 # Project Status
 
 **Integration gate:** V3 — submitted guest GPU state/resources -> Vulkan -> deterministic result  
-**State:** V0/V1/V2 complete; V3 active; stage-aware shader creation, bounded LinkShaders request validation, measured-partial output, and the reference-hardware tail validator are complete; #191 is evidence-blocked on four native tail records  
+**State:** V0/V1/V2 complete; V3 active; verified LinkShaders behavior remains capped at #189 while #191 is evidence-blocked on four native tail records; bounded provisional V3 research may continue under ADR 0008 without creating guest-visible success  
 **Repository:** astraea-emu/astraea  
 **In-flight work:** inspect live open GitHub PRs/issues; this file describes the expected merged frontier on `main`.
 
@@ -122,7 +122,11 @@
 21. #188 validates the bounded six-argument LinkShaders request for the owned null-hull Geometry + Pixel triangle-list profile without mutating guest memory.
 22. #189 materializes only the native LinkShaders bytes supported by measurement: CX[0..31] and CX[33]; CX[32] and UC[0..2] remain preserved/unknown and guest-visible LinkShaders success remains deliberately unwired.
 23. #193/#194 make the remaining evidence gap reproducibly measurable: two valid runs must reproduce the known CX records and have byte-identical complete CX/UC outputs before the four tail records can be promoted.
-24. #191 is now the V3 raster critical path and is evidence-blocked, not implementation-blocked. No submitted Geometry binding, draw, stage-I/O, graphics SPIR-V, or Vulkan raster work should bypass this gate.
+24. #191 remains the verified guest-visible LinkShaders critical path and is evidence-blocked, not implementation-blocked.
+25. ADR 0008 permits bounded provisional downstream research and independently evidenced generic work while #191 is blocked, provided no candidate tail values are promoted into guest-visible LinkShaders success.
+26. The provisional #196-#203 stack explores UCONFIG/draw/submission/Color Target dependencies; every current immutable PR head passed the five-gate CI matrix, but the stack is not merged project behavior.
+27. ADR 0009 corrects the first raster-target resource model: 4x4 RGBA8 is 64 logical pixel bytes, while ordinary GFX10 aligned-linear backing has independent pitch/alignment/physical extent. #203 must be corrected before further image-resource work is stacked on it.
+28. ADR 0010 adds C0: arbitrary retail game execution remains disabled until a supervised worker + guest syscall/HLE interception boundary exists.
 
 ## SCE metadata boundary
 
@@ -163,6 +167,10 @@ The completed #9 evidence map supports separating:
 
 Guest semantics come first. Raw guest packets are not Vulkan objects, Sony shader-container bytes are not generic RDNA2 instruction semantics, and PS5 must not be assumed to equal desktop `gfx1030`. "Generic RDNA2" means AMD-defined guest ISA semantics shared by the hardware family; it is not placeholder behavior.
 
+Guest GPU storage follows ADR 0009: allocation identity, buffer/image views,
+surface layout, and Vulkan materialization are distinct. Logical image byte
+count must not be substituted for physical guest surface extent.
+
 Unknown packet/register, shader-ABI, descriptor, surface-layout, synchronization, queue, presentation, and ray-tracing behavior remains explicitly unsupported until stronger evidence or controlled observations justify it.
 
 ## Execution boundary
@@ -170,7 +178,9 @@ Unknown packet/register, shader-ABI, descriptor, surface-layout, synchronization
 Native execution remains limited to trusted Astraea-owned synthetic probes.
 
 Astraea does **not** currently claim PlayStation 5 software compatibility, and
-arbitrary retail guest execution is not enabled.
+arbitrary retail guest execution is not enabled. ADR 0010 requires a
+supervised retail worker and guest syscall/HLE interception boundary before
+commercial-title execution becomes an admitted diagnostic workload.
 
 ## Clean-room boundary
 
@@ -182,40 +192,49 @@ PS5-specific assumptions require documented evidence.
 
 ## Next action
 
+Two coordinated paths are active.
+
+### Verified evidence path
+
 Use **#193**'s `astraea.ps5.agc.link-shaders-tail/v0` observation validator to
 obtain the controlled reference-hardware evidence required by **#191**.
 
-#189 remains the implementation ceiling until that evidence exists. It
-materializes every currently measured LinkShaders byte while explicitly
-preserving the four unknown native records.
+#189 remains the authoritative guest-visible LinkShaders implementation
+ceiling until that evidence exists:
 
-#193 makes the evidence gap reproducible rather than speculative:
+- complete `0x110` CX and `0x18` UC raw blocks are the source of truth;
+- measured CX[0..31] and CX[33] must reproduce;
+- CX[32] and UC[0..2] remain unknown;
+- two consecutive same-case observations must have byte-identical complete raw
+  outputs before promotion.
 
-- the complete `0x110` CX and `0x18` UC raw blocks are the source of truth;
-- the already-measured 32 interpolant records and `{0x29b,2}` routing record
-  must reproduce before a tail observation is accepted;
-- `CX[32]` and `UC[0..2]` are extracted without assigning candidate
-  register identities or values;
-- sentinel equality is reported rather than normalized away;
-- two consecutive validated runs of the same probe case must have identical
-  complete raw CX and UC outputs before promotion into #191.
+Do not infer those records from generic AMD defaults, compiler candidate
+values, shader-header specials, or the provisional research stack.
 
-The reference-hardware adapter remains outside Astraea core. Do not add console
-transport, firmware/keys, proprietary SDK material, retail assets, or
-proprietary shader binaries to the repository.
+### Independent V3 architecture path
 
-Only after #191 receives reproducible evidence for all four unknown records
-should Astraea:
+Under ADR 0008, continue only work whose correctness does not require claiming
+the unknown LinkShaders records are known.
 
-1. extend LinkShaders from `measured_partial` to the complete 34+3 output;
-2. wire internal HLE ID 5 into guest-visible runtime dispatch;
-3. exercise `MqAdbRMdNz4#A#B` through the owned SCE fixture.
+Immediate order:
 
-Do not infer the missing records from generic AMD defaults, public allocation
-shape, compiler candidate values, or shader-header “specials”.
+1. correct provisional **#203** so 64 logical pixel bytes are separated from
+   the ordinary GFX10 aligned-linear guest surface pitch/backing extent;
+2. introduce the smallest guest GPU allocation + typed image/surface-layout
+   model required by the owned 4x4 target (ADR 0009);
+3. re-cut independently evidenced generic layers from the #196-#203 stack onto
+   the verified frontier when they can stand without the LinkShaders
+   hypothesis;
+4. continue vertically toward stage I/O, pixel export, SPIR-V graphics stages,
+   Vulkan graphics pipeline execution, and deterministic 4x4 readback, keeping
+   any hypothesis mechanically provisional.
 
-Do not move to submitted ES/Geometry binding, DCB emission, draw execution,
-stage I/O, graphics SPIR-V, or Vulkan rasterization before the LinkShaders
-evidence gate is complete.
+The reference-hardware adapter remains outside Astraea core. Targeted hardware
+probes may resolve a bounded evidence blocker before V4; whole-workload
+hardware differential remains V4.
 
-The #172 raster target remains the owned offscreen 4x4 uniform-color proof.
+Do not add console transport, firmware/keys, proprietary SDK material, retail
+assets, proprietary shader binaries, or exploit/circumvention tooling to the
+repository.
+
+Before commercial-title execution, satisfy C0 / ADR 0010.

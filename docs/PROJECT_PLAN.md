@@ -12,7 +12,9 @@ end-to-end emulator behavior with the fewest unsupported assumptions—not
 maximizing raw commit count, opcode count, or HLE surface area.
 
 ADR 0006 defines the current planning model: **dependency-driven vertical
-integration**.
+integration**. ADR 0008 defines verified vs provisional research integration,
+ADR 0009 defines guest GPU image/surface identity, and ADR 0010 defines the
+pre-retail supervised execution boundary.
 
 ## 2. Source of truth
 
@@ -59,6 +61,14 @@ Chats are working sessions, not project memory.
    Binary parsers and loaders are fuzz targets from the beginning.
 10. **Unknown means unknown.** Undocumented Sony-specific behavior is a named
     evidence blocker, not an invitation to invent a plausible constant.
+11. **Verified and provisional work are distinct.** Only verified behavior
+    becomes authoritative guest-visible behavior on `main`; bounded research
+    may cross an evidence blocker only under ADR 0008.
+12. **Guest storage is not host storage.** Guest GPU allocations, image views,
+    surface layouts, and Vulkan resources remain distinct identities under
+    ADR 0009.
+13. **Retail code is untrusted.** Arbitrary retail execution requires the
+    supervised syscall/isolation boundary in ADR 0010.
 
 ## 4. Host strategy
 
@@ -137,13 +147,17 @@ comparison.
 
 Owned synthetic programs and reproducible experiments that isolate one
 platform behavior at a time. Hardware-side observation is used when legally
-and technically appropriate.
+and technically appropriate. Targeted hardware evidence probes may occur at
+any vertical gate when they answer one bounded blocker; they are distinct from
+V4 whole-workload differential testing.
 
 ### G. PS5 GPU frontend
 
 AGC shader containers/objects, command buffers, register/state decoding,
-submission semantics, resource descriptors, guest GPU memory, surfaces,
-synchronization, and presentation state.
+submission semantics, resource descriptors, guest GPU allocations, typed
+buffer/image views, explicit surface layouts, synchronization, and
+presentation state. Guest allocation/view/layout identity remains above and
+independent from Vulkan.
 
 ### H. RDNA2 shader semantics
 
@@ -269,14 +283,22 @@ interpreter.
 That proof is intentionally narrower than the full V3 gate. The remaining V3
 path is pulled in slices:
 
-1. **Submission-side shader binding** — captured DCB -> Type-3 framing ->
-   SET_SH_REG IR -> persistent shader state -> pixel program GPU address ->
-   unique created-shader lookup.
-2. **First guest resource-backed workload** — add only the command,
-   descriptor/resource, memory/export, synchronization, and backend behavior
-   demanded by one owned deterministic workload.
-3. Continue expanding by first missing dependency, never by raw opcode/API
+1. **Submission-side shader/linkage state** — consume only verified
+   guest-visible LinkShaders behavior; #191 remains blocked until its four
+   native tail records are measured.
+2. **Guest image/resource model** — represent guest GPU allocation identity,
+   typed image interpretation, and surface layout separately from host
+   resources (ADR 0009).
+3. **First guest resource-backed raster workload** — add only the draw,
+   stage-I/O/export, guest image, synchronization, compiler, and Vulkan
+   behavior demanded by the owned deterministic 4x4 workload.
+4. Continue expanding by first missing dependency, never by raw opcode/API
    coverage.
+
+ADR 0008 permits provisional downstream research when it does not turn an
+unverified LinkShaders candidate into guest-visible success. Independently
+evidenced generic work discovered in that research should be re-cut onto the
+verified frontier rather than left trapped in a long-lived shadow stack.
 
 Guest GPU virtual addresses are guest-domain identifiers. They must resolve
 through Astraea's guest GPU memory/resource model and must not be cast to CPU
@@ -295,6 +317,11 @@ stable traces/state/output rather than relying on visual intuition.
 
 Hardware access is a **validation accelerator**. It is not a prerequisite for
 V0-V3 work that is already supported by public evidence.
+
+A targeted reference-hardware probe may occur earlier than V4 when it is the
+smallest way to resolve a specific V1-V3 evidence blocker. Such a probe answers
+one bounded semantic question; V4 remains the broader same-workload
+trace/state/output differential gate.
 
 If a V1-V3 behavior cannot be established from public evidence, record a
 specific hardware-evidence blocker rather than guessing.
@@ -315,8 +342,23 @@ independently of the window/presentation layer.
 
 ## 8. Compatibility phase
 
+### C0 — Supervised retail execution
+
+Before arbitrary retail game code is admitted as a diagnostic workload,
+Astraea must satisfy ADR 0010:
+
+```text
+retail guest image
+    -> supervised native worker
+    -> intercepted guest syscall/HLE boundary
+    -> controlled fault/stop/reporting
+```
+
+The current in-process native backend remains appropriate for trusted
+Astraea-owned probes; it is not the retail sandbox.
+
 Commercial-title experiments become increasingly useful only after the
-relevant execution paths exist.
+relevant execution paths exist and C0 is active.
 
 Compatibility categories must distinguish at least:
 
@@ -343,7 +385,11 @@ After every meaningful merge:
 4. Ask whether its behavior is already supported by public evidence.
 5. If yes, create the smallest implementation issue that removes it.
 6. If no, create a bounded research/probe issue and record the evidence blocker.
-7. Reject work that does not remove a dependency, strengthen a required
+7. Decide whether the work belongs on the verified track or a bounded
+   provisional research track under ADR 0008.
+8. Re-cut independently evidenced generic work onto the verified frontier when
+   a provisional stack would otherwise trap it behind an unrelated hypothesis.
+9. Reject work that does not remove a dependency, strengthen a required
    invariant, or materially reduce future integration risk.
 
 ### Examples
@@ -382,10 +428,13 @@ Bad:
 - two agents inventing different meanings for the same undocumented AGC field;
 - Vulkan resource code before the guest resource contract is known;
 - broad opcode expansion with no target workload;
-- title hacks while foundational semantics are unresolved.
+- title hacks while foundational semantics are unresolved;
+- allowing a provisional stack to grow indefinitely instead of re-cutting
+  independently evidenced generic layers.
 
 When two tasks touch the same uncertain interface, resolve the evidence and
-contract first.
+contract first. CI success on a provisional branch proves implementation
+consistency, not correctness of the hypothesis that motivated the branch.
 
 ## 11. Definition of ready for implementation
 
@@ -449,6 +498,11 @@ critical path.
 - Update `docs/STATUS.md` after every meaningful merge.
 - Keep one active critical-path issue per agent unless independent work can
   merge without competing assumptions.
+- Keep provisional research stacks bounded; re-cut generic layers when they
+  can merge without the unresolved hypothesis.
+- Keep logical image content, guest physical surface extent, and host-resource
+  layout separate.
+- Do not begin arbitrary retail execution until C0/ADR 0010 is satisfied.
 
 ## 15. Current critical path
 
@@ -468,8 +522,11 @@ V2  supported semantic Shader IR -> validated SPIR-V         COMPLETE
     |
     v
 V3  submitted guest state/resources -> Vulkan -> result      ACTIVE
-    |   host-GPU semantic proof complete (#153)
-    |   next slice: submission-side created-shader binding
+    |   verified LinkShaders ceiling: #189; #191 needs native evidence
+    |   parallel generic path: guest image/surface layout -> raster proof
+    v
+C0  supervised retail execution/syscall boundary              REQUIRED BEFORE GAMES
+    |
     v
 V4  controlled PS5 differential when evidence requires it
     |
