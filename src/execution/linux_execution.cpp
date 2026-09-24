@@ -175,6 +175,21 @@ std::array<struct sigaction, kGuestSignals.size()> g_previous_actions{};
     return false;
 }
 
+[[nodiscard]] bool frame_owns_guest_seccomp_ip(
+    const SignalFrame& frame,
+    std::uint64_t instruction_pointer) noexcept {
+    for (std::size_t i = 0;
+         i < frame.seccomp_ip_range_count;
+         ++i) {
+        if (range_contains(
+                frame.seccomp_ip_ranges[i],
+                instruction_pointer)) {
+            return true;
+        }
+    }
+    return false;
+}
+
 [[nodiscard]] bool frame_owns_guest_rip(
     const SignalFrame& frame,
     std::uint64_t rip) noexcept {
@@ -344,14 +359,18 @@ void guest_signal_handler(
     if (signal_number == SIGSYS &&
         info != nullptr &&
         info->si_code == kLinuxSysSeccompSignalCode) {
-        const auto call_address =
+        const auto kernel_instruction_pointer =
             static_cast<std::uint64_t>(
                 reinterpret_cast<std::uintptr_t>(
                     info->si_call_addr));
 
-        if (!frame_owns_guest_executable_rip(
+        // Linux x86 reports the saved post-instruction IP to seccomp/SIGSYS.
+        // The signal handler only establishes ownership and captures bounded
+        // metadata. Ordinary code validates the exact guest opcode and
+        // normalizes this back to the original call site after unwinding.
+        if (!frame_owns_guest_seccomp_ip(
                 *frame,
-                call_address)) {
+                kernel_instruction_pointer)) {
             chain_previous_signal(
                 signal_number,
                 info,
@@ -361,14 +380,14 @@ void guest_signal_handler(
 
         capture_guest_context(
             *host_context,
-            frame->seccomp_syscall_trap.context);
-        frame->seccomp_syscall_trap.guest_rip =
-            astraea::memory::GuestAddress{
-                call_address};
-        frame->seccomp_syscall_trap.syscall_number =
+            frame->raw_seccomp_syscall_trap.context);
+        frame->raw_seccomp_syscall_trap.
+            kernel_instruction_pointer =
+                kernel_instruction_pointer;
+        frame->raw_seccomp_syscall_trap.syscall_number =
             static_cast<std::int32_t>(
                 info->si_syscall);
-        frame->seccomp_syscall_trap.audit_arch =
+        frame->raw_seccomp_syscall_trap.audit_arch =
             static_cast<std::uint32_t>(
                 info->si_arch);
         frame->has_seccomp_syscall_trap = true;
