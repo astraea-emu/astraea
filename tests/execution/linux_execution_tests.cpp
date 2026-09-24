@@ -392,9 +392,6 @@ TEST_CASE(
         base +
         static_cast<std::uint64_t>(
             syscall_offset);
-    CAPTURE(trapped->guest_rip.value());
-    CAPTURE(expected_rip);
-    CAPTURE(trapped->context.rip);
     REQUIRE(trapped->guest_rip.value() == expected_rip);
     REQUIRE(
         trapped->syscall_number ==
@@ -405,8 +402,9 @@ TEST_CASE(
         static_cast<std::uint32_t>(
             AUDIT_ARCH_X86_64));
 
-    // SECCOMP_RET_TRAP reports the original call site separately while the
-    // interrupted processor context already reflects post-SYSCALL PC.
+    // Linux exposes post-SYSCALL PC to seccomp/SIGSYS on x86. Astraea
+    // normalizes that event back to the verified literal guest call site while
+    // preserving the captured post-SYSCALL processor context.
     REQUIRE(trapped->context.rip == expected_rip + 2U);
 }
 
@@ -467,9 +465,6 @@ TEST_CASE(
                 LinuxSeccompSyscallTrap>(
                     &result.value());
     REQUIRE(trapped != nullptr);
-    CAPTURE(trapped->guest_rip.value());
-    CAPTURE(base);
-    CAPTURE(trapped->context.rip);
     REQUIRE(trapped->guest_rip.value() == base + 5U);
     REQUIRE(trapped->syscall_number == 20);
     REQUIRE(
@@ -477,6 +472,71 @@ TEST_CASE(
         static_cast<std::uint32_t>(
             AUDIT_ARCH_I386));
     REQUIRE(trapped->context.rip == base + 7U);
+}
+
+TEST_CASE(
+    "Linux seccomp traps a syscall ending exactly at executable mapping boundary",
+    "[execution][linux-transition][c0][seccomp][boundary]") {
+    const auto page = page_size();
+    const auto base =
+        find_free_block(
+            static_cast<std::size_t>(
+                page * 3U));
+    const auto stack_base = base + page;
+    const auto gate_base = base + 2U * page;
+
+    std::vector<std::byte> code;
+    append_mov_imm64(
+        code,
+        0U,
+        0x1234U);
+    while (code.size() < 14U) {
+        code.push_back(std::byte{0x90});
+    }
+    REQUIRE(code.size() == 14U);
+    code.push_back(std::byte{0x0f});
+    code.push_back(std::byte{0x05});
+    REQUIRE(code.size() == 16U);
+
+    auto image =
+        make_guest_image(
+            base,
+            stack_base,
+            page,
+            std::move(code));
+    auto prepared =
+        astraea::execution::
+            prepare_linux_guest_memory(image);
+    REQUIRE(prepared.has_value());
+    auto gate =
+        make_gate_region(
+            image,
+            gate_base);
+
+    const auto result =
+        astraea::execution::
+            enter_linux_guest_with_seccomp_syscall_trap(
+                image,
+                prepared.value(),
+                gate,
+                astraea::execution::
+                    make_synthetic_initial_context(
+                        image));
+
+    REQUIRE(result.has_value());
+    const auto* trapped =
+        std::get_if<
+            astraea::execution::
+                LinuxSeccompSyscallTrap>(
+                    &result.value());
+    REQUIRE(trapped != nullptr);
+    REQUIRE(trapped->guest_rip.value() == base + 14U);
+    REQUIRE(trapped->context.rip == base + 16U);
+    REQUIRE(trapped->syscall_number == 0x1234);
+    REQUIRE(
+        trapped->audit_arch ==
+        static_cast<std::uint32_t>(
+            AUDIT_ARCH_X86_64));
 }
 
 TEST_CASE(
