@@ -612,21 +612,6 @@ plan_sce_agc_first_raster_submission(
                     missing_program_register_provenance));
     }
 
-    if (!snapshot.primitive_type_source.has_value()) {
-        return SceAgcFirstRasterSubmissionResult::failure(
-            make_error(
-                SceAgcFirstRasterSubmissionErrorCode::
-                    missing_primitive_provenance));
-    }
-
-    if (!complete_color_target_sources(
-            snapshot.color_target_sources)) {
-        return SceAgcFirstRasterSubmissionResult::failure(
-            make_error(
-                SceAgcFirstRasterSubmissionErrorCode::
-                    missing_color_target_provenance));
-    }
-
     auto draw_plan =
         astraea::graphics::
             plan_first_raster_draw(
@@ -672,6 +657,21 @@ plan_sce_agc_first_raster_submission(
             color_target_image.error();
         return SceAgcFirstRasterSubmissionResult::failure(
             std::move(error));
+    }
+
+    if (!snapshot.primitive_type_source.has_value()) {
+        return SceAgcFirstRasterSubmissionResult::failure(
+            make_error(
+                SceAgcFirstRasterSubmissionErrorCode::
+                    missing_primitive_provenance));
+    }
+
+    if (!complete_color_target_sources(
+            snapshot.color_target_sources)) {
+        return SceAgcFirstRasterSubmissionResult::failure(
+            make_error(
+                SceAgcFirstRasterSubmissionErrorCode::
+                    missing_color_target_provenance));
     }
 
     return SceAgcFirstRasterSubmissionResult::success(
