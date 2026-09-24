@@ -212,6 +212,7 @@ preflight_linux_retail_diagnostic(
             LinuxRetailDiagnosticPreflightBoundaryKind::
                 ready_for_native_entry,
         .loader_error = std::nullopt,
+        .sce_dynamic_metadata_error = std::nullopt,
         .dynamic_dependency_count = 0,
         .relocation_count = 0,
         .image =
