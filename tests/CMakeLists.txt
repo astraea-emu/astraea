@@ -98,6 +98,7 @@ add_executable(astraea_core_tests
     graphics/vulkan_gpu_buffer_write_execution_tests.cpp
     graphics/vulkan_offscreen_image_execution_tests.cpp
     graphics/vulkan_raster_probe_execution_tests.cpp
+    graphics/rdna2_export_vulkan_raster_tests.cpp
     trace/v0_tests.cpp
     trace/diff_v0_tests.cpp
     trace/graphics_v0_tests.cpp
