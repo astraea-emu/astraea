@@ -193,16 +193,12 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND
     add_test(
         NAME astraea_retail_cli_empty
         COMMAND
-            $<TARGET_FILE:astraea>
-            diagnose
-            "${ASTRAEA_RETAIL_CLI_EMPTY_FIXTURE}"
-    )
-    set_tests_properties(
-        astraea_retail_cli_empty
-        PROPERTIES
-            WILL_FAIL TRUE
-            PASS_REGULAR_EXPRESSION
-                "artifact_error=empty_artifact"
+            ${CMAKE_COMMAND}
+            "-DASTRAEA_COMMAND=$<TARGET_FILE:astraea>"
+            "-DASTRAEA_COMMAND_ARGS=diagnose;${ASTRAEA_RETAIL_CLI_EMPTY_FIXTURE}"
+            "-DASTRAEA_EXPECT_REGEX=artifact_error=empty_artifact"
+            -P
+            "${CMAKE_CURRENT_SOURCE_DIR}/cmake/expect_command_failure.cmake"
     )
 
     set(ASTRAEA_RETAIL_CLI_MISSING_FIXTURE
@@ -214,16 +210,12 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND
     add_test(
         NAME astraea_retail_cli_missing
         COMMAND
-            $<TARGET_FILE:astraea>
-            diagnose
-            "${ASTRAEA_RETAIL_CLI_MISSING_FIXTURE}"
-    )
-    set_tests_properties(
-        astraea_retail_cli_missing
-        PROPERTIES
-            WILL_FAIL TRUE
-            PASS_REGULAR_EXPRESSION
-                "artifact_error=open_failed"
+            ${CMAKE_COMMAND}
+            "-DASTRAEA_COMMAND=$<TARGET_FILE:astraea>"
+            "-DASTRAEA_COMMAND_ARGS=diagnose;${ASTRAEA_RETAIL_CLI_MISSING_FIXTURE}"
+            "-DASTRAEA_EXPECT_REGEX=artifact_error=open_failed"
+            -P
+            "${CMAKE_CURRENT_SOURCE_DIR}/cmake/expect_command_failure.cmake"
     )
 endif()
 
@@ -232,15 +224,11 @@ if(NOT (CMAKE_SYSTEM_NAME STREQUAL "Linux" AND
     add_test(
         NAME astraea_retail_cli_unsupported_platform
         COMMAND
-            $<TARGET_FILE:astraea>
-            diagnose
-            ignored-retail-artifact
-    )
-    set_tests_properties(
-        astraea_retail_cli_unsupported_platform
-        PROPERTIES
-            WILL_FAIL TRUE
-            PASS_REGULAR_EXPRESSION
-                "Retail diagnostics are currently admitted only on Linux x86-64"
+            ${CMAKE_COMMAND}
+            "-DASTRAEA_COMMAND=$<TARGET_FILE:astraea>"
+            "-DASTRAEA_COMMAND_ARGS=diagnose;ignored-retail-artifact"
+            "-DASTRAEA_EXPECT_REGEX=Retail diagnostics are currently admitted only on Linux x86-64"
+            -P
+            "${CMAKE_CURRENT_SOURCE_DIR}/cmake/expect_command_failure.cmake"
     )
 endif()
