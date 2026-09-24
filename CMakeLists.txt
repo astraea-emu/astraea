@@ -119,7 +119,9 @@ add_library(astraea_core STATIC
     src/execution/hle_runtime.cpp
     src/execution/guest_memory.cpp
     src/execution/guest_worker_protocol.cpp
+    src/execution/guest_worker_process.cpp
     src/execution/guest_worker_service.cpp
+    src/execution/guest_worker_stdio.cpp
     src/execution/guest_worker_wire.cpp
     src/execution/registered_syscall_trap.cpp
     src/execution/sce_agc_create_shader.cpp
@@ -208,9 +210,16 @@ target_link_libraries(astraea PRIVATE Astraea::core)
 astraea_set_project_warnings(astraea)
 astraea_enable_sanitizers(astraea)
 
+add_executable(astraea_guest_worker
+    src/worker/main.cpp
+)
+target_link_libraries(astraea_guest_worker PRIVATE Astraea::core)
+astraea_set_project_warnings(astraea_guest_worker)
+astraea_enable_sanitizers(astraea_guest_worker)
+
 astraea_verify_explicit_cpp_sources(
     ROOT src
-    TARGETS astraea_core astraea
+    TARGETS astraea_core astraea astraea_guest_worker
 )
 
 if(BUILD_TESTING)
