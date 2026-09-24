@@ -38,6 +38,8 @@
 namespace astraea::app {
 namespace {
 
+#if defined(__linux__) && defined(__x86_64__)
+
 constexpr std::size_t kMaxRetailArtifactBytes =
     1024ULL * 1024ULL * 1024ULL;
 constexpr std::uint64_t kPlanningStackSize =
@@ -476,7 +478,6 @@ read_artifact_file(
 
 [[nodiscard]] std::optional<std::string>
 current_executable_path() {
-#if defined(__linux__)
     std::error_code error;
     const auto path =
         std::filesystem::read_symlink(
@@ -486,10 +487,9 @@ current_executable_path() {
         return std::nullopt;
     }
     return path.string();
-#else
-    return std::nullopt;
-#endif
 }
+
+#endif
 
 }  // namespace
 
