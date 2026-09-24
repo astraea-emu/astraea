@@ -160,21 +160,6 @@ std::array<struct sigaction, kGuestSignals.size()> g_previous_actions{};
     return address - range.base < range.size;
 }
 
-[[nodiscard]] bool frame_owns_guest_executable_rip(
-    const SignalFrame& frame,
-    std::uint64_t rip) noexcept {
-    for (std::size_t i = 0;
-         i < frame.executable_range_count;
-         ++i) {
-        if (range_contains(
-                frame.executable_ranges[i],
-                rip)) {
-            return true;
-        }
-    }
-    return false;
-}
-
 [[nodiscard]] bool frame_owns_guest_seccomp_ip(
     const SignalFrame& frame,
     std::uint64_t instruction_pointer) noexcept {
@@ -364,10 +349,11 @@ void guest_signal_handler(
                 reinterpret_cast<std::uintptr_t>(
                     info->si_call_addr));
 
-        // Linux x86 reports the saved post-instruction IP to seccomp/SIGSYS.
-        // The signal handler only establishes ownership and captures bounded
-        // metadata. Ordinary code validates the exact guest opcode and
-        // normalizes this back to the original call site after unwinding.
+        // For SECCOMP_RET_TRAP, Linux reports si_call_addr as the exact
+        // system-call instruction address while the saved ucontext RIP is
+        // already post-instruction. The handler only establishes ownership
+        // and captures bounded metadata; ordinary code validates the opcode
+        // and the architecture-specific post-instruction relationship.
         if (!frame_owns_guest_seccomp_ip(
                 *frame,
                 kernel_instruction_pointer)) {
@@ -916,24 +902,15 @@ normalize_seccomp_syscall_trap(
         std::byte{0x80},
     };
 
-    if (raw.kernel_instruction_pointer !=
-            raw.context.rip ||
-        raw.kernel_instruction_pointer <
-            kX86SyscallInstructionLength) {
-        return SeccompTrapNormalizeResult::failure(
-            backend_error(
-                NativeBackendErrorCode::
-                    syscall_interception_metadata_failure,
-                true,
-                raw.kernel_instruction_pointer));
-    }
-
     const auto guest_rip =
-        raw.kernel_instruction_pointer -
-        kX86SyscallInstructionLength;
+        raw.kernel_instruction_pointer;
 
-    if (guest_rip ==
-            std::numeric_limits<std::uint64_t>::max() ||
+    if (guest_rip >
+            std::numeric_limits<std::uint64_t>::max() -
+                kX86SyscallInstructionLength ||
+        raw.context.rip !=
+            guest_rip +
+                kX86SyscallInstructionLength ||
         !exact_executable_contains(
             image,
             guest_rip) ||
@@ -1128,7 +1105,7 @@ install_guest_executable_syscall_filter(
 
             // 64-bit lexicographic check:
             //
-            //   range.base <= post_instruction_pointer <= last
+            //   range.base <= instruction_pointer <= last
             //
             // A failed bound jumps to the next 11-instruction range block.
             // A successful match returns TRAP immediately.
