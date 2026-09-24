@@ -9,6 +9,8 @@
 #include <cstdint>
 #include <cstdlib>
 #include <iostream>
+#include <optional>
+#include <string>
 #include <span>
 #include <string_view>
 #include <system_error>
@@ -24,6 +26,13 @@
 #endif
 
 #if defined(_WIN32)
+#ifndef NOMINMAX
+#define NOMINMAX 1
+#endif
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN 1
+#endif
+#include <windows.h>
 #include <fcntl.h>
 #include <io.h>
 #endif
@@ -189,6 +198,43 @@ using ReadResult =
     return ProbeMode::normal;
 }
 
+#if defined(_WIN32)
+[[nodiscard]] std::optional<std::uintptr_t>
+signal_handle_from_args(
+    int argc,
+    char** argv) noexcept {
+    constexpr std::string_view kPrefix =
+        "--signal-handle=";
+
+    for (int index = 1; index < argc; ++index) {
+        const auto argument =
+            std::string_view{argv[index]};
+        if (!argument.starts_with(kPrefix)) {
+            continue;
+        }
+
+        const auto value_text =
+            argument.substr(kPrefix.size());
+        std::uintptr_t value = 0U;
+        const auto parsed =
+            std::from_chars(
+                value_text.data(),
+                value_text.data() +
+                    value_text.size(),
+                value);
+        if (parsed.ec != std::errc{} ||
+            parsed.ptr !=
+                value_text.data() +
+                    value_text.size()) {
+            return std::nullopt;
+        }
+        return value;
+    }
+
+    return std::nullopt;
+}
+#endif
+
 }  // namespace
 
 int main(int argc, char** argv) {
@@ -200,6 +246,16 @@ int main(int argc, char** argv) {
     if (!bind_lifetime_to_controller()) {
         return 11;
     }
+
+#if defined(_WIN32)
+    const auto inherited_handle_probe =
+        signal_handle_from_args(argc, argv);
+    if (inherited_handle_probe.has_value()) {
+        (void)::SetEvent(
+            reinterpret_cast<HANDLE>(
+                inherited_handle_probe.value()));
+    }
+#endif
 
     const auto mode =
         mode_from_args(argc, argv);
