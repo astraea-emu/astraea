@@ -16,30 +16,6 @@ namespace {
     };
 }
 
-[[nodiscard]] GuestWorkerSyscallContextError
-validate_registered_stop(
-    const ExecutionStop& stop) noexcept {
-    if (stop.reason !=
-        ExecutionStopReason::registered_syscall_trap) {
-        return make_error(
-            GuestWorkerSyscallContextErrorCode::
-                invalid_stop_reason);
-    }
-    if (stop.has_gate_slot) {
-        return make_error(
-            GuestWorkerSyscallContextErrorCode::
-                stop_has_gate);
-    }
-    if (stop.has_fault) {
-        return make_error(
-            GuestWorkerSyscallContextErrorCode::
-                stop_has_fault);
-    }
-    return make_error(
-        GuestWorkerSyscallContextErrorCode::
-            invalid_stop_reason);
-}
-
 [[nodiscard]] bool valid_registered_stop(
     const ExecutionStop& stop,
     GuestWorkerSyscallContextError& error) noexcept {
