@@ -101,6 +101,23 @@ void append_u64(
     return value;
 }
 
+[[nodiscard]] bool valid_diagnostic_kind(
+    GuestWorkerDiagnosticKind kind) noexcept {
+    switch (kind) {
+    case GuestWorkerDiagnosticKind::loader_rejected:
+    case GuestWorkerDiagnosticKind::entry_not_executable:
+    case GuestWorkerDiagnosticKind::sce_dynamic_metadata_rejected:
+    case GuestWorkerDiagnosticKind::unsupported_dynamic_dependencies:
+    case GuestWorkerDiagnosticKind::unsupported_relocations:
+    case GuestWorkerDiagnosticKind::unsupported_tls:
+    case GuestWorkerDiagnosticKind::native_backend_error:
+    case GuestWorkerDiagnosticKind::unsupported_initial_process_abi:
+    case GuestWorkerDiagnosticKind::unsupported_syscall:
+        return true;
+    }
+    return false;
+}
+
 [[nodiscard]] bool valid_fault_kind(
     GuestWorkerFaultKind kind) noexcept {
     switch (kind) {
@@ -123,6 +140,7 @@ void append_u64(
     case GuestWorkerStopReason::execution_budget_exhausted:
     case GuestWorkerStopReason::controller_termination:
     case GuestWorkerStopReason::protocol_failure:
+    case GuestWorkerStopReason::diagnostic_boundary:
         return true;
     }
     return false;
@@ -160,6 +178,8 @@ void append_u64(
         return 36U;
     case GuestWorkerWireMessageKind::terminate:
         return 4U;
+    case GuestWorkerWireMessageKind::diagnostic:
+        return 44U;
     }
     return 0U;
 }
@@ -185,6 +205,9 @@ kind_of(const GuestWorkerWireMessage& message) noexcept {
                 return GuestWorkerWireMessageKind::stop;
             } else if constexpr (std::is_same_v<T, GuestWorkerFault>) {
                 return GuestWorkerWireMessageKind::fault;
+            } else if constexpr (
+                std::is_same_v<T, GuestWorkerDiagnostic>) {
+                return GuestWorkerWireMessageKind::diagnostic;
             } else {
                 return GuestWorkerWireMessageKind::terminate;
             }
@@ -203,6 +226,9 @@ kind_of(const GuestWorkerWireMessage& message) noexcept {
             } else if constexpr (
                 std::is_same_v<T, GuestWorkerFault>) {
                 return valid_fault_kind(value.kind);
+            } else if constexpr (
+                std::is_same_v<T, GuestWorkerDiagnostic>) {
+                return valid_diagnostic_kind(value.kind);
             } else if constexpr (
                 std::is_same_v<T, GuestWorkerStop>) {
                 return valid_stop_reason(value.reason);
@@ -270,6 +296,17 @@ void append_payload(
                         value.kind));
                 append_u64(bytes, value.guest_rip.value());
                 append_u64(bytes, value.fault_address.value());
+            } else if constexpr (
+                std::is_same_v<T, GuestWorkerDiagnostic>) {
+                append_u64(bytes, value.worker_id.value);
+                append_u64(bytes, value.thread_id.value);
+                append_u32(
+                    bytes,
+                    static_cast<std::uint32_t>(
+                        value.kind));
+                append_u64(bytes, value.guest_rip.value());
+                append_u64(bytes, value.detail0);
+                append_u64(bytes, value.detail1);
             } else {
                 append_u32(
                     bytes,
@@ -307,6 +344,9 @@ void append_payload(
         return true;
     case 8U:
         kind = GuestWorkerWireMessageKind::terminate;
+        return true;
+    case 9U:
+        kind = GuestWorkerWireMessageKind::diagnostic;
         return true;
     default:
         return false;
@@ -640,6 +680,43 @@ decode_guest_worker_wire_message(
             };
         break;
     }
+
+    case GuestWorkerWireMessageKind::diagnostic: {
+        const auto raw_kind_value =
+            read_u32(frame, p + 16U);
+        const auto diagnostic_kind =
+            static_cast<GuestWorkerDiagnosticKind>(
+                raw_kind_value);
+        if (!valid_diagnostic_kind(diagnostic_kind)) {
+            return GuestWorkerWireDecodeResult::failure(
+                error(
+                    GuestWorkerWireErrorCode::
+                        invalid_message_value,
+                    p + 16U,
+                    raw_kind_value));
+        }
+        message =
+            GuestWorkerDiagnostic{
+                .worker_id =
+                    GuestWorkerId{
+                        .value = read_u64(frame, p),
+                    },
+                .thread_id =
+                    GuestThreadId{
+                        .value = read_u64(frame, p + 8U),
+                    },
+                .kind = diagnostic_kind,
+                .guest_rip =
+                    astraea::memory::GuestAddress{
+                        read_u64(frame, p + 20U)},
+                .detail0 =
+                    read_u64(frame, p + 28U),
+                .detail1 =
+                    read_u64(frame, p + 36U),
+            };
+        break;
+    }
+
     }
 
     if (!valid_message(message)) {
