@@ -2,6 +2,7 @@
 
 #include <chrono>
 #include <cstdint>
+#include <optional>
 #include <string>
 #include <utility>
 #include <vector>
@@ -63,6 +64,8 @@ config(
                 100000U,
             .timeout_milliseconds =
                 timeout_milliseconds,
+            .syscall_service = {},
+            .max_syscall_requests = 0U,
         };
 }
 
@@ -205,6 +208,170 @@ TEST_CASE(
                 config());
     REQUIRE(subsequent.has_value());
     REQUIRE(subsequent->child_exit_code == 0);
+}
+
+TEST_CASE(
+    "supervised session brokers one typed syscall request",
+    "[execution][c0][process][syscall]") {
+    std::optional<
+        astraea::execution::GuestWorkerSyscallRequest>
+        observed;
+
+    auto syscall_config =
+        config({"--syscall-roundtrip"});
+    syscall_config.max_syscall_requests = 1U;
+    syscall_config.syscall_service =
+        [&observed](
+            const astraea::execution::
+                GuestWorkerSyscallRequest& request)
+            -> std::optional<
+                astraea::execution::
+                    GuestWorkerSyscallResult> {
+            observed = request;
+            return astraea::execution::
+                GuestWorkerSyscallResult{
+                    .request_id =
+                        request.request_id,
+                    .worker_id =
+                        request.worker_id,
+                    .thread_id =
+                        request.thread_id,
+                    .return_value = -77,
+                    .guest_errno = 0,
+                };
+        };
+
+    const auto result =
+        astraea::execution::
+            run_guest_worker_process_session(
+                syscall_config);
+
+    REQUIRE(result.has_value());
+    REQUIRE(result->syscall_request_count == 1U);
+    REQUIRE(
+        result->stop.reason ==
+        astraea::execution::
+            GuestWorkerStopReason::
+                normal_guest_return);
+    REQUIRE(observed.has_value());
+    REQUIRE(observed->request_id.value == 41U);
+    REQUIRE(observed->worker_id.value == 1U);
+    REQUIRE(observed->thread_id.value == 1U);
+    REQUIRE(
+        observed->guest_syscall_number ==
+        0x5152535455565758ULL);
+    REQUIRE(
+        observed->arguments[0] ==
+        0x1111111111111111ULL);
+    REQUIRE(
+        observed->arguments[1] ==
+        0x2222222222222222ULL);
+    REQUIRE(
+        observed->arguments[2] ==
+        0x3333333333333333ULL);
+    REQUIRE(
+        observed->arguments[3] ==
+        0x4444444444444444ULL);
+    REQUIRE(
+        observed->arguments[4] ==
+        0x5555555555555555ULL);
+    REQUIRE(
+        observed->arguments[5] ==
+        0x6666666666666666ULL);
+    REQUIRE(
+        observed->guest_rip ==
+        astraea::memory::GuestAddress{
+            0x400100U});
+}
+
+TEST_CASE(
+    "worker rejects mismatched syscall result identity before continuing",
+    "[execution][c0][process][syscall][negative][identity]") {
+    auto syscall_config =
+        config({"--syscall-roundtrip"});
+    syscall_config.max_syscall_requests = 1U;
+    syscall_config.syscall_service =
+        [](
+            const astraea::execution::
+                GuestWorkerSyscallRequest& request)
+            -> std::optional<
+                astraea::execution::
+                    GuestWorkerSyscallResult> {
+            return astraea::execution::
+                GuestWorkerSyscallResult{
+                    .request_id =
+                        astraea::execution::
+                            GuestRequestId{
+                                .value =
+                                    request.request_id.value +
+                                    1U,
+                            },
+                    .worker_id =
+                        request.worker_id,
+                    .thread_id =
+                        request.thread_id,
+                    .return_value = 99,
+                    .guest_errno = 0,
+                };
+        };
+
+    const auto result =
+        astraea::execution::
+            run_guest_worker_process_session(
+                syscall_config);
+
+    REQUIRE(result.has_value());
+    REQUIRE(result->syscall_request_count == 1U);
+    REQUIRE(
+        result->stop.reason ==
+        astraea::execution::
+            GuestWorkerStopReason::
+                protocol_failure);
+}
+
+TEST_CASE(
+    "syscall request without configured service tears worker down",
+    "[execution][c0][process][syscall][negative][service]") {
+    const auto result =
+        astraea::execution::
+            run_guest_worker_process_session(
+                config({"--syscall-roundtrip"}));
+
+    REQUIRE_FALSE(result.has_value());
+    REQUIRE(
+        result.error().code ==
+        astraea::execution::
+            GuestWorkerProcessSessionErrorCode::
+                syscall_service_unavailable);
+}
+
+TEST_CASE(
+    "controller syscall service may reject a request without resuming worker",
+    "[execution][c0][process][syscall][negative][service]") {
+    auto syscall_config =
+        config({"--syscall-roundtrip"});
+    syscall_config.max_syscall_requests = 1U;
+    syscall_config.syscall_service =
+        [](
+            const astraea::execution::
+                GuestWorkerSyscallRequest&)
+            -> std::optional<
+                astraea::execution::
+                    GuestWorkerSyscallResult> {
+            return std::nullopt;
+        };
+
+    const auto result =
+        astraea::execution::
+            run_guest_worker_process_session(
+                syscall_config);
+
+    REQUIRE_FALSE(result.has_value());
+    REQUIRE(
+        result.error().code ==
+        astraea::execution::
+            GuestWorkerProcessSessionErrorCode::
+                syscall_service_rejected);
 }
 
 #if defined(_WIN32)

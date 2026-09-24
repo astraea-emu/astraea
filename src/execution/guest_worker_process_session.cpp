@@ -90,6 +90,16 @@ namespace {
         return false;
     }
 
+    const bool has_syscall_service =
+        static_cast<bool>(
+            config.syscall_service);
+    const bool accepts_syscalls =
+        config.max_syscall_requests != 0U;
+    if (has_syscall_service !=
+        accepts_syscalls) {
+        return false;
+    }
+
     for (const auto& argument :
          config.worker_arguments) {
         if (contains_nul(argument)) {
@@ -1997,28 +2007,89 @@ run_guest_worker_process_session(
                 run_sent.error());
         }
 
-        auto stop_message =
-            receive_message(
-                channel.get(),
-                deadline);
-        if (!stop_message.has_value()) {
-            return GuestWorkerProcessSessionRunResult::failure(
-                stop_message.error());
-        }
-        const auto* stop =
-            std::get_if<GuestWorkerStop>(
-                &stop_message.value());
-        if (stop == nullptr) {
-            return GuestWorkerProcessSessionRunResult::failure(
-                error(
-                    GuestWorkerProcessSessionErrorCode::
-                        unexpected_message));
-        }
-        if (stop->worker_id != ready->worker_id) {
-            return GuestWorkerProcessSessionRunResult::failure(
-                error(
-                    GuestWorkerProcessSessionErrorCode::
-                        worker_identity_mismatch));
+        std::optional<GuestWorkerStop> stop;
+        std::size_t syscall_request_count = 0U;
+
+        while (!stop.has_value()) {
+            auto worker_message =
+                receive_message(
+                    channel.get(),
+                    deadline);
+            if (!worker_message.has_value()) {
+                return GuestWorkerProcessSessionRunResult::failure(
+                    worker_message.error());
+            }
+
+            if (const auto* worker_stop =
+                    std::get_if<GuestWorkerStop>(
+                        &worker_message.value());
+                worker_stop != nullptr) {
+                if (worker_stop->worker_id !=
+                    ready->worker_id) {
+                    return GuestWorkerProcessSessionRunResult::failure(
+                        error(
+                            GuestWorkerProcessSessionErrorCode::
+                                worker_identity_mismatch));
+                }
+                stop = *worker_stop;
+                continue;
+            }
+
+            const auto* syscall_request =
+                std::get_if<GuestWorkerSyscallRequest>(
+                    &worker_message.value());
+            if (syscall_request == nullptr) {
+                return GuestWorkerProcessSessionRunResult::failure(
+                    error(
+                        GuestWorkerProcessSessionErrorCode::
+                            unexpected_message));
+            }
+
+            if (syscall_request->worker_id !=
+                ready->worker_id) {
+                return GuestWorkerProcessSessionRunResult::failure(
+                    error(
+                        GuestWorkerProcessSessionErrorCode::
+                            worker_identity_mismatch));
+            }
+
+            if (!config.syscall_service) {
+                return GuestWorkerProcessSessionRunResult::failure(
+                    error(
+                        GuestWorkerProcessSessionErrorCode::
+                            syscall_service_unavailable));
+            }
+
+            if (syscall_request_count >=
+                config.max_syscall_requests) {
+                return GuestWorkerProcessSessionRunResult::failure(
+                    error(
+                        GuestWorkerProcessSessionErrorCode::
+                            syscall_request_limit_exceeded));
+            }
+
+            const auto syscall_result =
+                config.syscall_service(
+                    *syscall_request);
+            if (!syscall_result.has_value()) {
+                return GuestWorkerProcessSessionRunResult::failure(
+                    error(
+                        GuestWorkerProcessSessionErrorCode::
+                            syscall_service_rejected));
+            }
+
+            const auto result_sent =
+                send_message(
+                    channel.get(),
+                    GuestWorkerWireMessage{
+                        syscall_result.value()},
+                    deadline);
+            if (!result_sent.has_value()) {
+                return GuestWorkerProcessSessionRunResult::failure(
+                    result_sent.error());
+            }
+
+            ++syscall_request_count;
         }
 
         const GuestWorkerTerminate terminate{
@@ -2055,9 +2126,11 @@ run_guest_worker_process_session(
         return GuestWorkerProcessSessionRunResult::success(
             GuestWorkerProcessSessionResult{
                 .ready = *ready,
-                .stop = *stop,
+                .stop = stop.value(),
                 .child_exit_code =
                     child_exit.value(),
+                .syscall_request_count =
+                    syscall_request_count,
             });
 #endif
     } catch (const std::bad_alloc&) {
