@@ -63,6 +63,7 @@ struct GuestFault {
 
 enum class ExecutionStopReason {
     host_gate,
+    registered_syscall_trap,
     guest_fault,
     backend_error,
 };
