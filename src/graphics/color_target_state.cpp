@@ -116,17 +116,37 @@ resolve_color_target0_context_state(
                 static_cast<std::uint8_t>(
                     raw_target_mask & 0x0fU),
             .raw_info = raw_info,
+            .endian =
+                static_cast<std::uint8_t>(
+                    raw_info & 0x03U),
             .format =
                 static_cast<std::uint8_t>(
                     (raw_info >> 2U) & 0x1fU),
+            .linear_general =
+                ((raw_info >> 7U) & 0x01U) != 0U,
             .number_type =
                 static_cast<std::uint8_t>(
                     (raw_info >> 8U) & 0x07U),
             .component_swap =
                 static_cast<std::uint8_t>(
                     (raw_info >> 11U) & 0x03U),
+            .fast_clear =
+                ((raw_info >> 13U) & 0x01U) != 0U,
+            .compression =
+                ((raw_info >> 14U) & 0x01U) != 0U,
+            .cmask_is_linear =
+                ((raw_info >> 19U) & 0x01U) != 0U,
+            .fmask_compression_disable =
+                ((raw_info >> 26U) & 0x01U) != 0U,
+            .fmask_compress_one_fragment =
+                ((raw_info >> 27U) & 0x01U) != 0U,
             .dcc_enabled =
                 ((raw_info >> 28U) & 0x01U) != 0U,
+            .cmask_address_type =
+                static_cast<std::uint8_t>(
+                    (raw_info >> 29U) & 0x03U),
+            .nbc_tiling =
+                ((raw_info >> 31U) & 0x01U) != 0U,
             .raw_attrib2 = raw_attrib2,
             .width =
                 ((raw_attrib2 >> 14U) & 0x3fffU) + 1U,
