@@ -182,4 +182,47 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND
             PASS_REGULAR_EXPRESSION
                 "boundary=loader_rejected"
     )
+
+    set(ASTRAEA_RETAIL_CLI_EMPTY_FIXTURE
+        "${CMAKE_CURRENT_BINARY_DIR}/astraea-retail-empty.bin"
+    )
+    file(WRITE
+        "${ASTRAEA_RETAIL_CLI_EMPTY_FIXTURE}"
+        ""
+    )
+    add_test(
+        NAME astraea_retail_cli_empty
+        COMMAND
+            $<TARGET_FILE:astraea>
+            diagnose
+            "${ASTRAEA_RETAIL_CLI_EMPTY_FIXTURE}"
+    )
+    set_tests_properties(
+        astraea_retail_cli_empty
+        PROPERTIES
+            WILL_FAIL TRUE
+            PASS_REGULAR_EXPRESSION
+                "artifact_error=empty_artifact"
+    )
+
+    set(ASTRAEA_RETAIL_CLI_MISSING_FIXTURE
+        "${CMAKE_CURRENT_BINARY_DIR}/astraea-retail-does-not-exist.bin"
+    )
+    file(REMOVE
+        "${ASTRAEA_RETAIL_CLI_MISSING_FIXTURE}"
+    )
+    add_test(
+        NAME astraea_retail_cli_missing
+        COMMAND
+            $<TARGET_FILE:astraea>
+            diagnose
+            "${ASTRAEA_RETAIL_CLI_MISSING_FIXTURE}"
+    )
+    set_tests_properties(
+        astraea_retail_cli_missing
+        PROPERTIES
+            WILL_FAIL TRUE
+            PASS_REGULAR_EXPRESSION
+                "artifact_error=open_failed"
+    )
 endif()
