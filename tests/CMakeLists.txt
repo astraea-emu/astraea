@@ -226,3 +226,21 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND
                 "artifact_error=open_failed"
     )
 endif()
+
+if(NOT (CMAKE_SYSTEM_NAME STREQUAL "Linux" AND
+        CMAKE_SYSTEM_PROCESSOR MATCHES "^(x86_64|AMD64)$"))
+    add_test(
+        NAME astraea_retail_cli_unsupported_platform
+        COMMAND
+            $<TARGET_FILE:astraea>
+            diagnose
+            ignored-retail-artifact
+    )
+    set_tests_properties(
+        astraea_retail_cli_unsupported_platform
+        PROPERTIES
+            WILL_FAIL TRUE
+            PASS_REGULAR_EXPRESSION
+                "Retail diagnostics are currently admitted only on Linux x86-64"
+    )
+endif()
