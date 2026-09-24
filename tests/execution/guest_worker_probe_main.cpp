@@ -256,6 +256,9 @@ signal_handle_from_args(
 #endif
 
 
+#if (defined(__linux__) && defined(__x86_64__)) || \
+    (defined(_WIN32) && defined(_M_X64))
+
 std::optional<astraea::memory::GuestRange>
 make_range(
     std::uint64_t base,
@@ -418,11 +421,21 @@ bool append_call_gate(
         return false;
     }
 
-    const auto next_rip =
-        code_base +
+    const auto code_size =
         static_cast<std::uint64_t>(
-            code.size()) +
-        5U;
+            code.size());
+    if (code_size >
+            std::numeric_limits<std::uint64_t>::max() -
+                5U ||
+        code_base >
+            std::numeric_limits<std::uint64_t>::max() -
+                code_size -
+                5U) {
+        return false;
+    }
+
+    const auto next_rip =
+        code_base + code_size + 5U;
     if (next_rip >
         static_cast<std::uint64_t>(
             std::numeric_limits<std::int64_t>::max())) {
@@ -594,6 +607,8 @@ make_native_gate_region(
     return std::move(gate).value();
 }
 
+#endif
+
 std::optional<astraea::execution::GuestWorkerStop>
 run_owned_native_syscall_roundtrip(
     astraea::execution::GuestWorkerId worker_id,
@@ -624,6 +639,15 @@ run_owned_native_syscall_roundtrip(
     }
 
     const auto code_base = block.value();
+    if (unit.value() >
+            std::numeric_limits<std::uint64_t>::max() /
+                2U ||
+        code_base >
+            std::numeric_limits<std::uint64_t>::max() -
+                unit.value() * 2U) {
+        return std::nullopt;
+    }
+
     const auto stack_base =
         code_base + unit.value();
     const auto gate_base =
