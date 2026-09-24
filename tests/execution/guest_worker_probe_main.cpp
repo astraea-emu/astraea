@@ -1,14 +1,23 @@
 #include <astraea/execution/guest_worker_protocol.hpp>
+#include <astraea/execution/guest_worker_syscall_context.hpp>
 #include <astraea/execution/guest_worker_wire.hpp>
+#include <astraea/execution/hle.hpp>
+#include <astraea/execution/linux_execution.hpp>
+#include <astraea/execution/linux_memory.hpp>
+#include <astraea/execution/windows_execution.hpp>
+#include <astraea/execution/windows_memory.hpp>
+#include <astraea/loader/guest_image.hpp>
 
 #include <algorithm>
 #include <array>
+#include <bit>
 #include <charconv>
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <cstdlib>
 #include <iostream>
+#include <limits>
 #include <optional>
 #include <string>
 #include <span>
@@ -20,6 +29,7 @@
 
 #if defined(__linux__)
 #include <csignal>
+#include <sys/mman.h>
 #include <sys/prctl.h>
 #include <sys/types.h>
 #include <unistd.h>
@@ -45,6 +55,7 @@ enum class ProbeMode {
     hang_after_run,
     bad_frame_after_hello,
     syscall_roundtrip,
+    native_syscall_roundtrip,
 };
 
 [[nodiscard]] bool configure_binary_stdio() noexcept {
@@ -199,6 +210,10 @@ using ReadResult =
             "--syscall-roundtrip") {
             return ProbeMode::syscall_roundtrip;
         }
+        if (argument ==
+            "--native-syscall-roundtrip") {
+            return ProbeMode::native_syscall_roundtrip;
+        }
     }
     return ProbeMode::normal;
 }
@@ -239,6 +254,639 @@ signal_handle_from_args(
     return std::nullopt;
 }
 #endif
+
+
+#if (defined(__linux__) && defined(__x86_64__)) || \
+    (defined(_WIN32) && defined(_M_X64))
+
+std::optional<astraea::memory::GuestRange>
+make_range(
+    std::uint64_t base,
+    std::uint64_t size) {
+    auto range =
+        astraea::memory::GuestRange::create(
+            astraea::memory::GuestAddress{base},
+            astraea::memory::GuestSize{size});
+    if (!range.has_value()) {
+        return std::nullopt;
+    }
+    return range.value();
+}
+
+std::optional<astraea::memory::GuestPermissions>
+make_permissions(std::uint8_t bits) {
+    auto permissions =
+        astraea::memory::GuestPermissions::
+            checked_from_bits(bits);
+    if (!permissions.has_value()) {
+        return std::nullopt;
+    }
+    return permissions.value();
+}
+
+std::optional<std::uint64_t>
+native_mapping_unit() noexcept {
+#if defined(__linux__) && defined(__x86_64__)
+    const auto page = ::sysconf(_SC_PAGESIZE);
+    if (page <= 0) {
+        return std::nullopt;
+    }
+    return static_cast<std::uint64_t>(page);
+#elif defined(_WIN32) && defined(_M_X64)
+    SYSTEM_INFO info{};
+    ::GetSystemInfo(&info);
+    if (info.dwAllocationGranularity == 0U) {
+        return std::nullopt;
+    }
+    return static_cast<std::uint64_t>(
+        info.dwAllocationGranularity);
+#else
+    return std::nullopt;
+#endif
+}
+
+std::optional<std::uint64_t>
+find_native_free_block(std::size_t size) noexcept {
+#if defined(__linux__) && defined(__x86_64__)
+    void* const mapped =
+        ::mmap(
+            nullptr,
+            size,
+            PROT_NONE,
+            MAP_PRIVATE | MAP_ANONYMOUS,
+            -1,
+            0);
+    if (mapped == MAP_FAILED) {
+        return std::nullopt;
+    }
+
+    const auto address =
+        static_cast<std::uint64_t>(
+            reinterpret_cast<std::uintptr_t>(mapped));
+    if (::munmap(mapped, size) != 0) {
+        return std::nullopt;
+    }
+    return address;
+#elif defined(_WIN32) && defined(_M_X64)
+    void* const reserved =
+        ::VirtualAlloc(
+            nullptr,
+            size,
+            MEM_RESERVE,
+            PAGE_NOACCESS);
+    if (reserved == nullptr) {
+        return std::nullopt;
+    }
+
+    const auto address =
+        static_cast<std::uint64_t>(
+            reinterpret_cast<std::uintptr_t>(
+                reserved));
+    if (::VirtualFree(
+            reserved,
+            0,
+            MEM_RELEASE) == 0) {
+        return std::nullopt;
+    }
+    return address;
+#else
+    (void)size;
+    return std::nullopt;
+#endif
+}
+
+void append_u32(
+    std::vector<std::byte>& code,
+    std::uint32_t value) {
+    for (unsigned shift = 0U;
+         shift < 32U;
+         shift += 8U) {
+        code.push_back(
+            static_cast<std::byte>(
+                static_cast<unsigned char>(
+                    (value >> shift) & 0xffU)));
+    }
+}
+
+void append_u64(
+    std::vector<std::byte>& code,
+    std::uint64_t value) {
+    for (unsigned shift = 0U;
+         shift < 64U;
+         shift += 8U) {
+        code.push_back(
+            static_cast<std::byte>(
+                static_cast<unsigned char>(
+                    (value >> shift) & 0xffU)));
+    }
+}
+
+bool append_mov_imm64(
+    std::vector<std::byte>& code,
+    unsigned register_index,
+    std::uint64_t value) {
+    if (register_index >= 16U ||
+        register_index == 4U) {
+        return false;
+    }
+
+    const bool extended =
+        register_index >= 8U;
+    const auto low_index =
+        extended
+            ? register_index - 8U
+            : register_index;
+
+    code.push_back(
+        static_cast<std::byte>(
+            extended ? 0x49U : 0x48U));
+    code.push_back(
+        static_cast<std::byte>(
+            static_cast<unsigned char>(
+                0xb8U + low_index)));
+    append_u64(code, value);
+    return true;
+}
+
+bool append_call_gate(
+    std::vector<std::byte>& code,
+    std::uint64_t code_base,
+    std::uint64_t gate_base) {
+    if (code_base >
+            static_cast<std::uint64_t>(
+                std::numeric_limits<std::int64_t>::max()) ||
+        gate_base >
+            static_cast<std::uint64_t>(
+                std::numeric_limits<std::int64_t>::max())) {
+        return false;
+    }
+
+    const auto code_size =
+        static_cast<std::uint64_t>(
+            code.size());
+    if (code_size >
+            std::numeric_limits<std::uint64_t>::max() -
+                5U ||
+        code_base >
+            std::numeric_limits<std::uint64_t>::max() -
+                code_size -
+                5U) {
+        return false;
+    }
+
+    const auto next_rip =
+        code_base + code_size + 5U;
+    if (next_rip >
+        static_cast<std::uint64_t>(
+            std::numeric_limits<std::int64_t>::max())) {
+        return false;
+    }
+
+    const auto displacement =
+        static_cast<std::int64_t>(gate_base) -
+        static_cast<std::int64_t>(next_rip);
+    if (displacement <
+            std::numeric_limits<std::int32_t>::min() ||
+        displacement >
+            std::numeric_limits<std::int32_t>::max()) {
+        return false;
+    }
+
+    code.push_back(std::byte{0xe8});
+    append_u32(
+        code,
+        static_cast<std::uint32_t>(
+            static_cast<std::int32_t>(
+                displacement)));
+    return true;
+}
+
+std::optional<astraea::loader::GuestImage>
+make_native_guest_image(
+    std::uint64_t code_base,
+    std::uint64_t stack_base,
+    std::uint64_t stack_size,
+    std::vector<std::byte> code) {
+    constexpr auto kRead =
+        static_cast<std::uint8_t>(
+            astraea::memory::GuestPermission::read);
+    constexpr auto kExecute =
+        static_cast<std::uint8_t>(
+            astraea::memory::GuestPermission::execute);
+
+    const auto code_range =
+        make_range(
+            code_base,
+            static_cast<std::uint64_t>(
+                code.size()));
+    const auto stack_range =
+        make_range(
+            stack_base,
+            stack_size);
+    if (!code_range.has_value() ||
+        !stack_range.has_value()) {
+        return std::nullopt;
+    }
+
+    const auto permissions =
+        make_permissions(kRead | kExecute);
+    if (!permissions.has_value()) {
+        return std::nullopt;
+    }
+
+    const auto stack_pointer =
+        astraea::memory::GuestAddress{
+            stack_base + stack_size - 8U};
+    const auto used_range =
+        make_range(
+            stack_pointer.value(),
+            0U);
+    if (!used_range.has_value()) {
+        return std::nullopt;
+    }
+
+    astraea::loader::ElfHeader header{};
+    header.entry = code_base;
+
+    const auto code_size =
+        static_cast<std::uint64_t>(
+            code.size());
+
+    return astraea::loader::GuestImage{
+        .image_bytes = std::move(code),
+        .elf =
+            astraea::loader::ElfImage{
+                .header = header,
+                .program_headers = {},
+            },
+        .mappings =
+            std::vector<
+                astraea::memory::MappingIntent>{
+                astraea::memory::MappingIntent{
+                    .range = code_range.value(),
+                    .permissions =
+                        permissions.value(),
+                    .backing =
+                        astraea::memory::MappingBacking{
+                            .kind =
+                                astraea::memory::
+                                    MappingBackingKind::
+                                        file,
+                            .file_offset = 0U,
+                            .byte_count =
+                                astraea::memory::GuestSize{
+                                    code_size},
+                        },
+                    .source_index = 0U,
+                },
+            },
+        .dynamic_table = std::nullopt,
+        .dynamic_strings = std::nullopt,
+        .dynamic_symbols = std::nullopt,
+        .general_relocations =
+            astraea::loader::
+                GeneralDynamicRelocationMetadata{
+                    .rel = std::nullopt,
+                    .rela = std::nullopt,
+                },
+        .plt_relocations = std::nullopt,
+        .tls = std::nullopt,
+        .initial_stack =
+            astraea::loader::InitialStackImage{
+                .storage = stack_range.value(),
+                .used_range = used_range.value(),
+                .rsp = stack_pointer,
+                .bytes = {},
+            },
+    };
+}
+
+std::optional<astraea::execution::SyntheticGateRegion>
+make_native_gate_region(
+    const astraea::loader::GuestImage& image,
+    std::uint64_t gate_base) {
+    auto registry =
+        astraea::execution::HleRegistry::create(
+            std::vector<
+                astraea::execution::
+                    HleFunctionDescriptor>{
+                astraea::execution::
+                    HleFunctionDescriptor{
+                        .id =
+                            astraea::execution::
+                                HleFunctionId{1U},
+                        .canonical_name =
+                            "astraea.test.syscall-return",
+                        .argument_count = 0U,
+                    },
+            });
+    if (!registry.has_value()) {
+        return std::nullopt;
+    }
+
+    auto gate =
+        astraea::execution::
+            build_synthetic_gate_region(
+                registry.value(),
+                astraea::memory::GuestAddress{
+                    gate_base},
+                1U,
+                std::vector<
+                    astraea::execution::GateBinding>{
+                    astraea::execution::GateBinding{
+                        .slot = 0U,
+                        .function_id =
+                            astraea::execution::
+                                HleFunctionId{1U},
+                    },
+                },
+                image);
+    if (!gate.has_value()) {
+        return std::nullopt;
+    }
+    return std::move(gate).value();
+}
+
+#endif
+
+std::optional<astraea::execution::GuestWorkerStop>
+run_owned_native_syscall_roundtrip(
+    astraea::execution::GuestWorkerId worker_id,
+    astraea::execution::GuestThreadId thread_id) {
+#if !((defined(__linux__) && defined(__x86_64__)) || \
+      (defined(_WIN32) && defined(_M_X64)))
+    (void)worker_id;
+    (void)thread_id;
+    return std::nullopt;
+#else
+    using namespace astraea::execution;
+
+    const auto unit =
+        native_mapping_unit();
+    if (!unit.has_value() ||
+        unit.value() >
+            std::numeric_limits<std::size_t>::max() /
+                4U) {
+        return std::nullopt;
+    }
+
+    const auto block =
+        find_native_free_block(
+            static_cast<std::size_t>(
+                unit.value() * 4U));
+    if (!block.has_value()) {
+        return std::nullopt;
+    }
+
+    const auto code_base = block.value();
+    if (unit.value() >
+            std::numeric_limits<std::uint64_t>::max() /
+                3U ||
+        code_base >
+            std::numeric_limits<std::uint64_t>::max() -
+                unit.value() * 3U) {
+        return std::nullopt;
+    }
+
+    const auto stack_base =
+        code_base + unit.value();
+    const auto gate_base =
+        code_base + unit.value() * 3U;
+
+    constexpr std::uint64_t kSyscallNumber =
+        0x5152535455565758ULL;
+    constexpr std::array<std::uint64_t, 6> kArguments{
+        0x1111111111111111ULL,
+        0x2222222222222222ULL,
+        0x3333333333333333ULL,
+        0x4444444444444444ULL,
+        0x5555555555555555ULL,
+        0x6666666666666666ULL,
+    };
+
+    std::vector<std::byte> code;
+    code.reserve(96U);
+
+    if (!append_mov_imm64(code, 0U, kSyscallNumber) ||
+        !append_mov_imm64(code, 7U, kArguments[0]) ||
+        !append_mov_imm64(code, 6U, kArguments[1]) ||
+        !append_mov_imm64(code, 2U, kArguments[2]) ||
+        !append_mov_imm64(code, 10U, kArguments[3]) ||
+        !append_mov_imm64(code, 8U, kArguments[4]) ||
+        !append_mov_imm64(code, 9U, kArguments[5])) {
+        return std::nullopt;
+    }
+
+    const auto syscall_offset = code.size();
+    code.push_back(std::byte{0x0f});
+    code.push_back(std::byte{0x05});
+
+    // The fixture must consume the synthetic return value after resume.
+    code.push_back(std::byte{0x48});
+    code.push_back(std::byte{0x83});
+    code.push_back(std::byte{0xc0});
+    code.push_back(std::byte{0x01});
+
+    if (!append_call_gate(
+            code,
+            code_base,
+            gate_base)) {
+        return std::nullopt;
+    }
+
+    // A returned gate call is always an error in this owned fixture.
+    code.push_back(std::byte{0x0f});
+    code.push_back(std::byte{0x0b});
+
+    if (syscall_offset >
+        std::numeric_limits<std::uint64_t>::max() -
+            code_base) {
+        return std::nullopt;
+    }
+    const auto syscall_rip =
+        astraea::memory::GuestAddress{
+            code_base +
+            static_cast<std::uint64_t>(
+                syscall_offset)};
+
+    const auto planned_trap =
+        plan_registered_syscall_trap(
+            astraea::memory::GuestAddress{
+                code_base},
+            code,
+            syscall_rip);
+    if (!planned_trap.has_value()) {
+        return std::nullopt;
+    }
+
+    if (!apply_registered_syscall_trap(
+             std::span<std::byte>{code},
+             planned_trap.value())
+             .has_value()) {
+        return std::nullopt;
+    }
+
+    auto image =
+        make_native_guest_image(
+            code_base,
+            stack_base,
+            unit.value() * 2U,
+            std::move(code));
+    if (!image.has_value()) {
+        return std::nullopt;
+    }
+
+    auto gate =
+        make_native_gate_region(
+            image.value(),
+            gate_base);
+    if (!gate.has_value()) {
+        return std::nullopt;
+    }
+
+    const std::array<
+        RegisteredSyscallTrapSite,
+        1> traps{
+            planned_trap.value(),
+        };
+
+#if defined(__linux__) && defined(__x86_64__)
+    if (!linux_native_execution_backend_available()) {
+        return std::nullopt;
+    }
+    auto prepared =
+        prepare_linux_guest_memory(
+            image.value());
+    if (!prepared.has_value()) {
+        return std::nullopt;
+    }
+    const auto enter =
+        [&](GuestCpuContext context) {
+            return enter_linux_guest(
+                image.value(),
+                prepared.value(),
+                gate.value(),
+                context,
+                traps);
+        };
+#elif defined(_WIN32) && defined(_M_X64)
+    if (!windows_native_execution_backend_available()) {
+        return std::nullopt;
+    }
+    auto prepared =
+        prepare_windows_guest_memory(
+            image.value());
+    if (!prepared.has_value()) {
+        return std::nullopt;
+    }
+    const auto enter =
+        [&](GuestCpuContext context) {
+            return enter_windows_guest(
+                image.value(),
+                prepared.value(),
+                gate.value(),
+                context,
+                traps);
+        };
+#endif
+
+    const auto first_stop =
+        enter(
+            make_synthetic_initial_context(
+                image.value()));
+    if (!first_stop.has_value() ||
+        first_stop->reason !=
+            ExecutionStopReason::
+                registered_syscall_trap) {
+        return std::nullopt;
+    }
+
+    const auto request =
+        project_registered_syscall_request(
+            first_stop.value(),
+            GuestRequestId{.value = 41U},
+            worker_id,
+            thread_id);
+    if (!request.has_value()) {
+        return std::nullopt;
+    }
+
+    if (!write_message(
+            GuestWorkerWireMessage{
+                request.value()})) {
+        return std::nullopt;
+    }
+
+    const auto result_message =
+        read_message();
+    if (!result_message.has_value()) {
+        return std::nullopt;
+    }
+
+    const auto* syscall_result =
+        std::get_if<GuestWorkerSyscallResult>(
+            &result_message.value());
+    if (syscall_result == nullptr) {
+        return GuestWorkerStop{
+            .worker_id = worker_id,
+            .thread_id = thread_id,
+            .reason =
+                GuestWorkerStopReason::
+                    protocol_failure,
+            .guest_rip =
+                request->guest_rip,
+        };
+    }
+
+    const auto resumed_context =
+        apply_registered_syscall_result_to_context(
+            first_stop.value(),
+            planned_trap.value(),
+            request.value(),
+            *syscall_result);
+    if (!resumed_context.has_value()) {
+        return GuestWorkerStop{
+            .worker_id = worker_id,
+            .thread_id = thread_id,
+            .reason =
+                GuestWorkerStopReason::
+                    protocol_failure,
+            .guest_rip =
+                request->guest_rip,
+        };
+    }
+
+    const auto second_stop =
+        enter(resumed_context.value());
+    if (!second_stop.has_value() ||
+        second_stop->reason !=
+            ExecutionStopReason::host_gate ||
+        !second_stop->has_gate_slot ||
+        second_stop->gate_slot != 0U) {
+        return std::nullopt;
+    }
+
+    const auto expected_rax =
+        std::bit_cast<std::uint64_t>(
+            syscall_result->return_value) +
+        1U;
+    if (second_stop->context.rax !=
+        expected_rax) {
+        return std::nullopt;
+    }
+
+    return GuestWorkerStop{
+        .worker_id = worker_id,
+        .thread_id = thread_id,
+        .reason =
+            GuestWorkerStopReason::
+                normal_guest_return,
+        .guest_rip =
+            astraea::memory::GuestAddress{
+                second_stop->context.rip},
+    };
+#endif
+}
 
 }  // namespace
 
@@ -333,6 +981,33 @@ int main(int argc, char** argv) {
         std::this_thread::sleep_for(
             std::chrono::hours{1});
         return 25;
+    }
+
+    if (mode ==
+        ProbeMode::native_syscall_roundtrip) {
+        const auto native_stop =
+            run_owned_native_syscall_roundtrip(
+                kWorkerId,
+                kThreadId);
+        if (!native_stop.has_value()) {
+            return 28;
+        }
+
+        if (!write_message(
+                GuestWorkerWireMessage{
+                    native_stop.value()})) {
+            return 29;
+        }
+
+        const auto terminate_message =
+            read_message();
+        if (!terminate_message.has_value() ||
+            std::get_if<GuestWorkerTerminate>(
+                &terminate_message.value()) ==
+                nullptr) {
+            return 30;
+        }
+        return 0;
     }
 
     GuestWorkerStopReason stop_reason =
