@@ -1377,12 +1377,20 @@ utf8_to_wide(
         return std::wstring{};
     }
 
+    if (value.size() >
+        static_cast<std::size_t>(
+            std::numeric_limits<int>::max())) {
+        return std::nullopt;
+    }
+
+    const auto input_size =
+        static_cast<int>(value.size());
     const auto required =
         ::MultiByteToWideChar(
             CP_UTF8,
             MB_ERR_INVALID_CHARS,
             value.data(),
-            static_cast<int>(value.size()),
+            input_size,
             nullptr,
             0);
     if (required <= 0) {
@@ -1396,7 +1404,7 @@ utf8_to_wide(
             CP_UTF8,
             MB_ERR_INVALID_CHARS,
             value.data(),
-            static_cast<int>(value.size()),
+            input_size,
             result.data(),
             required) != required) {
         return std::nullopt;
@@ -1705,12 +1713,22 @@ spawn_worker(
         attribute_list;
 
     const auto executable =
-        std::filesystem::path{
-            config.worker_executable}
-            .wstring();
+        utf8_to_wide(
+            config.worker_executable);
+    if (!executable.has_value()) {
+        return astraea::core::Result<
+            std::pair<UniqueHandle, ChildGuard>,
+            GuestWorkerProcessSessionError>::
+            failure(
+                error(
+                    GuestWorkerProcessSessionErrorCode::
+                        invalid_config,
+                    ERROR_NO_UNICODE_TRANSLATION));
+    }
 
     std::wstring command_line =
-        quote_windows_argument(executable);
+        quote_windows_argument(
+            executable.value());
     for (const auto& argument :
          config.worker_arguments) {
         const auto wide_argument =
@@ -1781,7 +1799,7 @@ spawn_worker(
 
     PROCESS_INFORMATION process_info{};
     if (!::CreateProcessW(
-            executable.c_str(),
+            executable->c_str(),
             command_buffer.data(),
             nullptr,
             nullptr,
@@ -1812,6 +1830,8 @@ spawn_worker(
     if (!::AssignProcessToJobObject(
             job.get(),
             process.get())) {
+        const auto assignment_error =
+            ::GetLastError();
         (void)::TerminateProcess(
             process.get(),
             0xc000013aU);
@@ -1825,7 +1845,7 @@ spawn_worker(
                 error(
                     GuestWorkerProcessSessionErrorCode::
                         spawn_failed,
-                    ::GetLastError()));
+                    assignment_error));
     }
 
     ChildGuard child{
