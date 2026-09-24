@@ -644,7 +644,7 @@ using ResourcePolicyApplyResult =
 [[nodiscard]] ResourcePolicyApplyResult
 apply_linux_resource_limit(
     pid_t pid,
-    int resource,
+    decltype(RLIMIT_AS) resource,
     std::uint64_t requested) noexcept {
     if constexpr (
         sizeof(rlim_t) <
