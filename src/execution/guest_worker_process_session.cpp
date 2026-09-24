@@ -824,8 +824,8 @@ prepare_linux_artifact(
     }
 
     if constexpr (
-        sizeof(off_t) <
-        sizeof(std::size_t)) {
+        sizeof(std::size_t) >=
+        sizeof(off_t)) {
         if (bytes.size() >
             static_cast<std::size_t>(
                 std::numeric_limits<off_t>::max())) {
