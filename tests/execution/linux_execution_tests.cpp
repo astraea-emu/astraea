@@ -408,6 +408,125 @@ TEST_CASE(
 }
 
 TEST_CASE(
+    "Linux seccomp traps raw guest filesystem and network syscall entry",
+    "[execution][linux-transition][c0][seccomp][host-resource]") {
+    const auto prove_trapped =
+        [](std::uint64_t syscall_number,
+           std::array<std::uint64_t, 3> arguments) {
+            const auto page = page_size();
+            const auto base =
+                find_free_block(
+                    static_cast<std::size_t>(
+                        page * 3U));
+            const auto stack_base = base + page;
+            const auto gate_base = base + 2U * page;
+
+            std::vector<std::byte> code;
+            REQUIRE(
+                append_mov_imm64(
+                    code,
+                    0U,
+                    syscall_number));
+            REQUIRE(
+                append_mov_imm64(
+                    code,
+                    7U,
+                    arguments[0]));
+            REQUIRE(
+                append_mov_imm64(
+                    code,
+                    6U,
+                    arguments[1]));
+            REQUIRE(
+                append_mov_imm64(
+                    code,
+                    2U,
+                    arguments[2]));
+
+            const auto syscall_offset = code.size();
+            code.push_back(std::byte{0x0f});
+            code.push_back(std::byte{0x05});
+            code.push_back(std::byte{0x0f});
+            code.push_back(std::byte{0x0b});
+
+            auto image =
+                make_guest_image(
+                    base,
+                    stack_base,
+                    page,
+                    std::move(code));
+            auto prepared =
+                astraea::execution::
+                    prepare_linux_guest_memory(
+                        image);
+            REQUIRE(prepared.has_value());
+            auto gate =
+                make_gate_region(
+                    image,
+                    gate_base);
+
+            const auto result =
+                astraea::execution::
+                    enter_linux_guest_with_seccomp_syscall_trap(
+                        image,
+                        prepared.value(),
+                        gate,
+                        astraea::execution::
+                            make_synthetic_initial_context(
+                                image));
+
+            REQUIRE(result.has_value());
+            const auto* trapped =
+                std::get_if<
+                    astraea::execution::
+                        LinuxSeccompSyscallTrap>(
+                            &result.value());
+            REQUIRE(trapped != nullptr);
+            REQUIRE(
+                trapped->guest_rip.value() ==
+                base +
+                    static_cast<std::uint64_t>(
+                        syscall_offset));
+            REQUIRE(
+                trapped->syscall_number ==
+                static_cast<std::int32_t>(
+                    syscall_number));
+            REQUIRE(
+                trapped->audit_arch ==
+                static_cast<std::uint32_t>(
+                    AUDIT_ARCH_X86_64));
+        };
+
+    SECTION("openat") {
+        // AT_FDCWD plus a null pathname would fail harmlessly if a broken
+        // filter ever let it reach the host. The required result is still
+        // pre-kernel SIGSYS at the guest instruction.
+        prove_trapped(
+            static_cast<std::uint64_t>(
+                SYS_openat),
+            {
+                static_cast<std::uint64_t>(
+                    static_cast<std::int64_t>(-100)),
+                0U,
+                0U,
+            });
+    }
+
+    SECTION("socket") {
+        // An invalid domain avoids creating a socket even if containment were
+        // broken; the proof still requires seccomp interception first.
+        prove_trapped(
+            static_cast<std::uint64_t>(
+                SYS_socket),
+            {
+                0x7fffffffU,
+                0U,
+                0U,
+            });
+    }
+}
+
+TEST_CASE(
     "Linux seccomp range filter traps guest int 0x80 alternate ABI entry",
     "[execution][linux-transition][c0][seccomp][int80]") {
     const auto page = page_size();
