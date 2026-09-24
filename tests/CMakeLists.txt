@@ -64,6 +64,7 @@ add_executable(astraea_core_tests
     execution/sce_agc_link_shaders_output_tests.cpp
     execution/sce_agc_driver_submit_dcb_tests.cpp
     execution/sce_agc_first_raster_submission_tests.cpp
+    execution/submitted_raster_vulkan_integration_tests.cpp
     execution/sce_agc_shader_preparation_tests.cpp
     execution/sce_agc_shader_registry_tests.cpp
     execution/sce_agc_shader_stage_lookup_tests.cpp
