@@ -146,4 +146,56 @@ resolve_pixel_program_address(
         });
 }
 
+GeometryEsProgramAddressResult
+resolve_geometry_es_program_address(
+    const ShaderRegisterState& state) noexcept {
+    const auto lo_index =
+        static_cast<std::size_t>(
+            kGeometryEsProgramLoRegisterOffset);
+    const auto hi_index =
+        static_cast<std::size_t>(
+            kGeometryEsProgramHiRegisterOffset);
+
+    if (!state.initialized.test(lo_index)) {
+        return GeometryEsProgramAddressResult::failure(
+            GeometryEsProgramAddressError{
+                .code =
+                    GeometryEsProgramAddressErrorCode::
+                        pgm_lo_uninitialized,
+            });
+    }
+
+    const auto pgm_lo = state.values[lo_index];
+
+    if (!state.initialized.test(hi_index)) {
+        return GeometryEsProgramAddressResult::failure(
+            GeometryEsProgramAddressError{
+                .code =
+                    GeometryEsProgramAddressErrorCode::
+                        pgm_hi_uninitialized,
+                .pgm_lo = pgm_lo,
+            });
+    }
+
+    const auto pgm_hi = state.values[hi_index];
+    if ((pgm_hi & 0xffffff00U) != 0U) {
+        return GeometryEsProgramAddressResult::failure(
+            GeometryEsProgramAddressError{
+                .code =
+                    GeometryEsProgramAddressErrorCode::
+                        unsupported_pgm_hi_bits,
+                .pgm_lo = pgm_lo,
+                .pgm_hi = pgm_hi,
+            });
+    }
+
+    return GeometryEsProgramAddressResult::success(
+        GeometryEsProgramGpuAddress{
+            .value =
+                (static_cast<std::uint64_t>(pgm_lo) << 8U) |
+                (static_cast<std::uint64_t>(pgm_hi & 0xffU)
+                 << 40U),
+        });
+}
+
 }  // namespace astraea::graphics
