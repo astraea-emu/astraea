@@ -1989,6 +1989,67 @@ spawn_worker(
         JOB_OBJECT_LIMIT_ACTIVE_PROCESS;
     limits.BasicLimitInformation.ActiveProcessLimit =
         1U;
+
+    if (config.resource_policy.has_value()) {
+        const auto& policy =
+            config.resource_policy.value();
+
+        if (policy.process_memory_limit_bytes.has_value()) {
+            const auto memory_limit =
+                policy.process_memory_limit_bytes.value();
+            if constexpr (
+                sizeof(SIZE_T) <
+                sizeof(std::uint64_t)) {
+                if (memory_limit >
+                    static_cast<std::uint64_t>(
+                        std::numeric_limits<SIZE_T>::max())) {
+                    return astraea::core::Result<
+                        std::pair<UniqueHandle, ChildGuard>,
+                        GuestWorkerProcessSessionError>::
+                        failure(
+                            error(
+                                GuestWorkerProcessSessionErrorCode::
+                                    resource_policy_failure,
+                                ERROR_ARITHMETIC_OVERFLOW));
+                }
+            }
+
+            limits.BasicLimitInformation.LimitFlags |=
+                JOB_OBJECT_LIMIT_PROCESS_MEMORY;
+            limits.ProcessMemoryLimit =
+                static_cast<SIZE_T>(
+                    memory_limit);
+        }
+
+        if (policy.process_cpu_time_seconds.has_value()) {
+            constexpr std::uint64_t kTicksPerSecond =
+                10'000'000ULL;
+            const auto seconds =
+                policy.process_cpu_time_seconds.value();
+            if (seconds >
+                static_cast<std::uint64_t>(
+                    std::numeric_limits<LONGLONG>::max()) /
+                    kTicksPerSecond) {
+                return astraea::core::Result<
+                    std::pair<UniqueHandle, ChildGuard>,
+                    GuestWorkerProcessSessionError>::
+                    failure(
+                        error(
+                            GuestWorkerProcessSessionErrorCode::
+                                resource_policy_failure,
+                            ERROR_ARITHMETIC_OVERFLOW));
+            }
+
+            limits.BasicLimitInformation.LimitFlags |=
+                JOB_OBJECT_LIMIT_PROCESS_TIME;
+            limits.BasicLimitInformation.
+                PerProcessUserTimeLimit.QuadPart =
+                    static_cast<LONGLONG>(
+                        seconds *
+                        kTicksPerSecond);
+        }
+    }
+
     if (!::SetInformationJobObject(
             job.get(),
             JobObjectExtendedLimitInformation,
@@ -1999,9 +2060,57 @@ spawn_worker(
             GuestWorkerProcessSessionError>::
             failure(
                 error(
-                    GuestWorkerProcessSessionErrorCode::
-                        spawn_failed,
+                    config.resource_policy.has_value()
+                        ? GuestWorkerProcessSessionErrorCode::
+                              resource_policy_failure
+                        : GuestWorkerProcessSessionErrorCode::
+                              spawn_failed,
                     ::GetLastError()));
+    }
+
+    if (config.resource_policy.has_value()) {
+        JOBOBJECT_EXTENDED_LIMIT_INFORMATION actual{};
+        if (!::QueryInformationJobObject(
+                job.get(),
+                JobObjectExtendedLimitInformation,
+                &actual,
+                sizeof(actual),
+                nullptr)) {
+            return astraea::core::Result<
+                std::pair<UniqueHandle, ChildGuard>,
+                GuestWorkerProcessSessionError>::
+                failure(
+                    error(
+                        GuestWorkerProcessSessionErrorCode::
+                            resource_policy_failure,
+                        ::GetLastError()));
+        }
+
+        const auto required_flags =
+            limits.BasicLimitInformation.LimitFlags;
+        if ((actual.BasicLimitInformation.LimitFlags &
+             required_flags) != required_flags ||
+            actual.BasicLimitInformation.ActiveProcessLimit !=
+                1U ||
+            ((required_flags &
+              JOB_OBJECT_LIMIT_PROCESS_MEMORY) != 0U &&
+             actual.ProcessMemoryLimit !=
+                 limits.ProcessMemoryLimit) ||
+            ((required_flags &
+              JOB_OBJECT_LIMIT_PROCESS_TIME) != 0U &&
+             actual.BasicLimitInformation.
+                     PerProcessUserTimeLimit.QuadPart !=
+                 limits.BasicLimitInformation.
+                     PerProcessUserTimeLimit.QuadPart)) {
+            return astraea::core::Result<
+                std::pair<UniqueHandle, ChildGuard>,
+                GuestWorkerProcessSessionError>::
+                failure(
+                    error(
+                        GuestWorkerProcessSessionErrorCode::
+                            resource_policy_failure,
+                        ERROR_INVALID_DATA));
+        }
     }
 
     PROCESS_INFORMATION process_info{};
