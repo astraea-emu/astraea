@@ -26,6 +26,7 @@ enum class GuestWorkerWireMessageKind : std::uint16_t {
     stop = 6,
     fault = 7,
     terminate = 8,
+    diagnostic = 9,
 };
 
 using GuestWorkerWireMessage =
@@ -37,7 +38,8 @@ using GuestWorkerWireMessage =
         GuestWorkerSyscallResult,
         GuestWorkerStop,
         GuestWorkerFault,
-        GuestWorkerTerminate>;
+        GuestWorkerTerminate,
+        GuestWorkerDiagnostic>;
 
 enum class GuestWorkerWireErrorCode {
     frame_too_short,
