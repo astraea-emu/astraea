@@ -132,11 +132,17 @@ target_link_libraries(astraea_core_tests PRIVATE
 add_dependencies(
     astraea_core_tests
     astraea_guest_worker_probe
+    astraea
 )
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux" OR
    CMAKE_SYSTEM_NAME STREQUAL "Windows")
     target_compile_definitions(astraea_core_tests PRIVATE
         ASTRAEA_GUEST_WORKER_PROBE_PATH="$<TARGET_FILE:astraea_guest_worker_probe>"
+    )
+endif()
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    target_compile_definitions(astraea_core_tests PRIVATE
+        ASTRAEA_APP_PATH="$<TARGET_FILE:astraea>"
     )
 endif()
 astraea_set_project_warnings(astraea_core_tests)
