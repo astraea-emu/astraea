@@ -5,6 +5,7 @@
 #include <cstdint>
 #include <limits>
 #include <new>
+#include <span>
 #include <stdexcept>
 #include <type_traits>
 #include <utility>
@@ -70,7 +71,7 @@ void append_u64(
 }
 
 [[nodiscard]] std::uint32_t read_u32(
-    const std::vector<std::byte>& bytes,
+    std::span<const std::byte> bytes,
     std::size_t offset) noexcept {
     std::uint32_t value = 0U;
     for (unsigned index = 0U; index < 4U; ++index) {
@@ -84,7 +85,7 @@ void append_u64(
 }
 
 [[nodiscard]] std::uint64_t read_u64(
-    const std::vector<std::byte>& bytes,
+    std::span<const std::byte> bytes,
     std::size_t offset) noexcept {
     std::uint64_t value = 0U;
     for (unsigned index = 0U; index < 8U; ++index) {
