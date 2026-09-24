@@ -145,7 +145,7 @@ TEST_CASE(
             run_guest_worker_process_session(
                 config(
                     {"--hang-after-run"},
-                    250U));
+                    1000U));
 
     const auto elapsed =
         std::chrono::steady_clock::now() -
