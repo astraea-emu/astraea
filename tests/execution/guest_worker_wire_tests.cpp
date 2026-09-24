@@ -112,6 +112,30 @@ TEST_CASE(
                 unsupported_guest_behavior,
     };
     REQUIRE(round_trip(terminate) == terminate);
+
+    const GuestWorkerDiagnostic diagnostic{
+        .worker_id = syscall.worker_id,
+        .thread_id = syscall.thread_id,
+        .kind =
+            GuestWorkerDiagnosticKind::
+                unsupported_relocations,
+        .guest_rip = syscall.guest_rip,
+        .detail0 = 7U,
+        .detail1 = 9U,
+    };
+    REQUIRE(round_trip(diagnostic) == diagnostic);
+
+    const GuestWorkerStop diagnostic_stop{
+        .worker_id = syscall.worker_id,
+        .thread_id = syscall.thread_id,
+        .reason =
+            GuestWorkerStopReason::
+                diagnostic_boundary,
+        .guest_rip = syscall.guest_rip,
+    };
+    REQUIRE(
+        round_trip(diagnostic_stop) ==
+        diagnostic_stop);
 }
 
 TEST_CASE(
@@ -177,6 +201,46 @@ TEST_CASE(
                 std::byte{0x00});
         }
     }
+}
+
+TEST_CASE(
+    "DIAGNOSTIC wire fixture preserves bounded numeric evidence",
+    "[execution][c0][wire][fixture][diagnostic]") {
+    using namespace astraea::execution;
+
+    const GuestWorkerDiagnostic diagnostic{
+        .worker_id = GuestWorkerId{.value = 1U},
+        .thread_id = GuestThreadId{.value = 2U},
+        .kind =
+            GuestWorkerDiagnosticKind::
+                unsupported_dynamic_dependencies,
+        .guest_rip =
+            astraea::memory::GuestAddress{3U},
+        .detail0 = 4U,
+        .detail1 = 5U,
+    };
+
+    const auto encoded =
+        encode_guest_worker_wire_message(
+            Message{diagnostic});
+    REQUIRE(encoded.has_value());
+    REQUIRE(encoded->size() == 56U);
+
+    const std::vector<std::byte> header{
+        std::byte{0x41}, std::byte{0x53},
+        std::byte{0x54}, std::byte{0x52},
+        std::byte{0x01}, std::byte{0x00},
+        std::byte{0x09}, std::byte{0x00},
+        std::byte{0x2c}, std::byte{0x00},
+        std::byte{0x00}, std::byte{0x00},
+    };
+    REQUIRE(
+        std::vector<std::byte>(
+            encoded->begin(),
+            encoded->begin() + 12) ==
+        header);
+
+    REQUIRE(round_trip(diagnostic) == diagnostic);
 }
 
 TEST_CASE(
@@ -336,6 +400,61 @@ TEST_CASE(
         const auto result =
             encode_guest_worker_wire_message(
                 Message{stop});
+        REQUIRE_FALSE(result.has_value());
+        REQUIRE(
+            result.error().code ==
+            GuestWorkerWireErrorCode::
+                invalid_message_value);
+    }
+
+    SECTION("invalid diagnostic kind at encode") {
+        const GuestWorkerDiagnostic diagnostic{
+            .worker_id = GuestWorkerId{.value = 1U},
+            .thread_id = GuestThreadId{.value = 2U},
+            .kind =
+                static_cast<GuestWorkerDiagnosticKind>(
+                    99U),
+            .guest_rip =
+                astraea::memory::GuestAddress{3U},
+            .detail0 = 0U,
+            .detail1 = 0U,
+        };
+        const auto result =
+            encode_guest_worker_wire_message(
+                Message{diagnostic});
+        REQUIRE_FALSE(result.has_value());
+        REQUIRE(
+            result.error().code ==
+            GuestWorkerWireErrorCode::
+                invalid_message_value);
+    }
+
+    SECTION("invalid diagnostic kind at decode") {
+        const GuestWorkerDiagnostic diagnostic{
+            .worker_id = GuestWorkerId{.value = 1U},
+            .thread_id = GuestThreadId{.value = 2U},
+            .kind =
+                GuestWorkerDiagnosticKind::
+                    unsupported_tls,
+            .guest_rip =
+                astraea::memory::GuestAddress{3U},
+            .detail0 = 4U,
+            .detail1 = 5U,
+        };
+        const auto valid =
+            encode_guest_worker_wire_message(
+                Message{diagnostic});
+        REQUIRE(valid.has_value());
+
+        auto frame = valid.value();
+        // Header is 12 bytes; diagnostic kind starts 16 bytes into payload.
+        frame[28] = std::byte{0x63};
+        frame[29] = std::byte{0x00};
+        frame[30] = std::byte{0x00};
+        frame[31] = std::byte{0x00};
+
+        const auto result =
+            decode_guest_worker_wire_message(frame);
         REQUIRE_FALSE(result.has_value());
         REQUIRE(
             result.error().code ==
