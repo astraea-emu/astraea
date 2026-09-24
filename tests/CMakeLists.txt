@@ -42,6 +42,7 @@ add_executable(astraea_core_tests
     execution/memory_plan_tests.cpp
     execution/linux_memory_tests.cpp
     execution/linux_execution_tests.cpp
+    execution/linux_retail_diagnostic_tests.cpp
     execution/linux_seccomp_syscall_context_tests.cpp
     execution/windows_execution_tests.cpp
     execution/windows_memory_tests.cpp
