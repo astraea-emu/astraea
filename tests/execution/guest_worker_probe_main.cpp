@@ -1,4 +1,5 @@
 #include <astraea/execution/guest_worker_protocol.hpp>
+#include <astraea/execution/guest_worker_artifact.hpp>
 #include <astraea/execution/guest_worker_fault_projection.hpp>
 #include <astraea/execution/guest_worker_syscall_context.hpp>
 #include <astraea/execution/guest_worker_wire.hpp>
@@ -285,52 +286,21 @@ constexpr std::array<std::byte, 12> kExpectedArtifactBytes{
         F_SEAL_SEAL;
 
     const auto seals =
-        ::fcntl(3, F_GET_SEALS);
+        ::fcntl(
+            astraea::execution::
+                kLinuxWorkerArtifactFd,
+            F_GET_SEALS);
     if (seals < 0 ||
         (seals & kRequiredSeals) !=
             kRequiredSeals) {
         return false;
     }
 
-    struct stat metadata {};
-    if (::fstat(3, &metadata) != 0 ||
-        metadata.st_size !=
-            static_cast<off_t>(
-                kExpectedArtifactBytes.size())) {
-        return false;
-    }
-
-    std::array<std::byte, kExpectedArtifactBytes.size()>
-        bytes{};
-    std::size_t offset = 0U;
-    while (offset < bytes.size()) {
-        const auto count =
-            ::pread(
-                3,
-                bytes.data() + offset,
-                bytes.size() - offset,
-                static_cast<off_t>(offset));
-        if (count < 0) {
-            if (errno == EINTR) {
-                continue;
-            }
-            return false;
-        }
-        if (count == 0) {
-            return false;
-        }
-        offset +=
-            static_cast<std::size_t>(count);
-    }
-
-    if (bytes != kExpectedArtifactBytes) {
-        return false;
-    }
-
     const std::byte replacement{0x99};
     errno = 0;
     if (::pwrite(
-            3,
+            astraea::execution::
+                kLinuxWorkerArtifactFd,
             &replacement,
             1U,
             0) != -1 ||
@@ -340,21 +310,36 @@ constexpr std::array<std::byte, 12> kExpectedArtifactBytes{
 
     errno = 0;
     if (::ftruncate(
-            3,
-            metadata.st_size + 1) != -1 ||
+            astraea::execution::
+                kLinuxWorkerArtifactFd,
+            static_cast<off_t>(
+                kExpectedArtifactBytes.size() + 1U)) != -1 ||
         errno != EPERM) {
         return false;
     }
 
     errno = 0;
     if (::ftruncate(
-            3,
-            metadata.st_size - 1) != -1 ||
+            astraea::execution::
+                kLinuxWorkerArtifactFd,
+            static_cast<off_t>(
+                kExpectedArtifactBytes.size() - 1U)) != -1 ||
         errno != EPERM) {
         return false;
     }
 
-    if (::close(3) != 0) {
+    const auto artifact =
+        astraea::execution::
+            read_linux_sealed_worker_artifact(
+                1024U);
+    if (!artifact.has_value() ||
+        artifact->size() !=
+            kExpectedArtifactBytes.size() ||
+        !std::equal(
+            artifact->begin(),
+            artifact->end(),
+            kExpectedArtifactBytes.begin(),
+            kExpectedArtifactBytes.end())) {
         return false;
     }
 
