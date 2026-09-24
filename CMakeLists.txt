@@ -211,6 +211,7 @@ astraea_enable_sanitizers(astraea_core)
 
 add_executable(astraea
     src/app/main.cpp
+    src/app/linux_retail_diagnostic.cpp
 )
 target_link_libraries(astraea PRIVATE Astraea::core)
 astraea_set_project_warnings(astraea)
