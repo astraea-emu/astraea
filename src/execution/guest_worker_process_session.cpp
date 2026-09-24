@@ -32,6 +32,7 @@
 #include <fcntl.h>
 #include <poll.h>
 #include <spawn.h>
+#include <sys/resource.h>
 #include <sys/socket.h>
 #include <sys/types.h>
 #include <sys/wait.h>
@@ -98,6 +99,28 @@ namespace {
     if (has_syscall_service !=
         accepts_syscalls) {
         return false;
+    }
+
+    if (config.resource_policy.has_value()) {
+        const auto& policy =
+            config.resource_policy.value();
+
+        if ((policy.process_memory_limit_bytes.has_value() &&
+             policy.process_memory_limit_bytes.value() == 0U) ||
+            (policy.process_cpu_time_seconds.has_value() &&
+             policy.process_cpu_time_seconds.value() == 0U) ||
+            (policy.linux_max_open_files.has_value() &&
+             policy.linux_max_open_files.value() < 3U)) {
+            return false;
+        }
+
+#if !defined(__linux__)
+        if (policy.linux_max_open_files.has_value() ||
+            policy.linux_disable_core_dumps ||
+            policy.linux_disable_file_growth) {
+            return false;
+        }
+#endif
     }
 
     for (const auto& argument :
