@@ -3,13 +3,16 @@
 A verification-first PlayStation 5 compatibility research and emulation
 project.
 
-> **Status:** Controlled Astraea-owned x86-64 guest execution is established on
-> Linux and Windows. V0 shader ingestion, V1 guest-created shader identity, and
-> the bounded V2 validated-SPIR-V proof are complete. V3 is active: Astraea has
-> a mandatory headless Vulkan semantic proof, captured AGC submissions, typed
-> PM4 shader-register state, and created-shader identity, but submitted guest
-> state/resources do not yet execute end to end on Vulkan. Astraea does not
-> currently claim retail PlayStation 5 software compatibility.
+> **Status:** V0 shader ingestion, V1 guest-created shader identity, V2
+> validated SPIR-V, and the bounded V3 submitted-state/resources -> generated
+> SPIR-V -> Vulkan raster proof are complete. Astraea also has a supervised
+> Linux x86-64 retail-diagnostic boundary: user-selected artifact bytes cross
+> into a separate worker only through a sealed immutable handoff, guest raw
+> syscalls are contained before host-kernel execution, and unsupported
+> behavior is returned as typed diagnostics/faults. The current production
+> diagnostic intentionally stops an otherwise-ready PS5/SCE image at the
+> unsupported initial-process ABI boundary. Astraea does **not** claim that
+> retail PlayStation 5 games boot, render, or are playable.
 
 ## Principles
 
@@ -44,9 +47,12 @@ Astraea keeps guest-domain behavior separate from host implementation.
    workload-driven compiler/value IR when required, then SPIR-V lowering.
 4. **Host GPU backend** — Vulkan resource/pipeline/synchronization
    materialization from the guest GPU model. Vulkan is not the guest API.
-5. **Astraea Lab** — trace capture, normalization, diffing, regression
+5. **Retail supervisor** — a separate worker process, bounded typed protocol,
+   kernel/resource containment, sealed artifact authority, and deterministic
+   first-unsupported reporting for Linux x86-64 diagnostics.
+6. **Astraea Lab** — trace capture, normalization, diffing, regression
    minimization, and behavioral corpora.
-6. **Astraea Probe** — controlled owned programs and experiments for isolating
+7. **Astraea Probe** — controlled owned programs and experiments for isolating
    platform behavior and, when appropriate, lawful hardware comparison.
 
 "Generic RDNA2" in Astraea means AMD-defined guest ISA semantics shared by the
@@ -57,33 +63,43 @@ not interchangeable.
 ## Development hosts
 
 The project is designed to be developed from macOS, Linux, and Windows. Native
-x86-64 guest execution targets x86-64 Linux and Windows first. Apple Silicon
-macOS remains a first-class development host for portable components, but it
-is not treated as an x86-64 execution host.
+x86-64 guest execution targets x86-64 Linux and Windows. Apple Silicon macOS
+remains a first-class development host for portable components, but it is not
+treated as an x86-64 execution host.
 
-The first graphics backend target is Vulkan. SPIR-V is the first host shader
-IR. Astraea's existing Shader IR remains the backend-independent
-guest-semantic/oracle representation; a separate compiler/value IR is
-introduced only when a concrete workload requires structured control flow,
-resources, or stage I/O. See ADR 0007.
+The first graphics backend is Vulkan. SPIR-V is the first host shader IR.
+Astraea's Shader IR remains the backend-independent guest-semantic/oracle
+representation; a separate compiler/value IR is used when a concrete workload
+requires structured control flow, values, resources, or stage I/O. See ADR
+0007.
+
+Retail diagnostic admission is currently Linux x86-64 only. Windows continues
+to support the trusted owned-probe worker/runtime contracts but is not an
+admitted retail-diagnostic host.
 
 ## Current integration path
 
-Astraea now uses vertical gates rather than a strict "finish all HLE, then
-graphics" waterfall:
+Astraea uses dependency-driven vertical gates rather than a strict "finish all
+HLE, then graphics" waterfall:
 
 ```text
-V0  AGC container -> RDNA2 -> semantic Shader IR           COMPLETE
+V0  AGC container -> RDNA2 -> semantic Shader IR                 COMPLETE
  |
  v
-V1  owned guest -> guest-domain AGC shader identity         COMPLETE
+V1  owned guest -> persistent AGC shader identity                 COMPLETE
  |
  v
-V2  supported semantic Shader IR -> validated SPIR-V        COMPLETE
+V2  supported semantic Shader IR -> validated SPIR-V              COMPLETE
  |
  v
-V3  submitted guest state/resources -> Vulkan -> result     ACTIVE
- |   (first headless Vulkan semantic proof is complete)
+V3  submitted guest state/resources -> Vulkan -> deterministic    COMPLETE
+ |
+ v
+C0  supervised Linux retail diagnostic admission                  ESTABLISHED
+ |   current truthful stop: unsupported PS5 initial-process ABI
+ v
+compatibility dependency loop
+ |   process ABI -> modules/relocations/TLS -> HLE/syscalls -> wider GPU state
  v
 V4  controlled PS5 differential when evidence requires it
  |
@@ -91,30 +107,49 @@ V4  controlled PS5 differential when evidence requires it
 V5  guest flip/VideoOut -> host presentation
 ```
 
-Platform HLE, RDNA2 instruction coverage, resource semantics, and command
-decoding are pulled into this path when a gate needs them. Unknown
-Sony-specific behavior is recorded as an evidence blocker rather than guessed.
+V3 completion means the selected Astraea-owned raster workload reaches a real
+Vulkan graphics pipeline and deterministic readback. It does not mean broad
+PS5 GPU coverage.
+
+C0 establishment means a lawfully obtained artifact can be admitted to the
+Linux diagnostic pipeline without giving retail code ambient controller
+authority or allowing raw guest syscalls to become host syscalls. It does not
+mean a commercial title is bootable.
+
+Platform HLE, RDNA2 instruction coverage, resource semantics, command decoding,
+process ABI, TLS, and system services are pulled into the path only when the
+next diagnostic/workload requires them. Unknown Sony-specific behavior is
+recorded as an evidence blocker rather than guessed.
 
 The last merged frontier, blockers, and next dependency live in
 `docs/STATUS.md`; live open GitHub PRs/issues identify any in-flight branch
 or work item. This README intentionally describes durable architecture rather
-than duplicating either volatile source.
+than duplicating volatile branch state.
 
 See:
 
 - `docs/PROJECT_PLAN.md`
 - `docs/STATUS.md`
+- `docs/CLEAN_ROOM.md`
 - `docs/adr/0006-dependency-driven-vertical-integration.md`
-- `docs/adr/0007-separate-shader-semantic-and-compiler-ir.md`
+- `docs/adr/0010-supervised-retail-execution.md`
+- `docs/research/retail_execution_supervisor.md`
 - `docs/DEVELOPMENT_MACOS.md`
 - `docs/CHAT_HANDOFF.md`
 
 ## Compatibility boundary
 
-Astraea currently executes only trusted Astraea-owned synthetic probes through
-the native guest path. Commercial-title compatibility is an integration
-outcome, not the correctness oracle, and arbitrary retail guest execution is
-not enabled.
+Astraea's production retail diagnostic accepts a user-selected artifact only
+on Linux x86-64. The controller reads the host path, passes immutable sealed
+bytes to a separate worker, applies finite resource limits, and receives typed
+diagnostic/fault events. The worker does not receive the original host path and
+no generic filesystem/network syscall service is enabled.
+
+The current path does **not** synthesize a PS5 process-entry ABI merely to
+execute more instructions. An otherwise-ready image stops at
+`unsupported_initial_process_abi` until that contract is independently
+justified. Commercial-title progress remains an integration signal, not a
+correctness oracle.
 
 ## License
 
