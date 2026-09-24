@@ -52,6 +52,8 @@ using astraea::execution::GuestWorkerStopReason;
 using astraea::execution::GuestWorkerTerminationReason;
 using astraea::execution::GuestWorkerWireMessage;
 
+#if defined(__linux__) && defined(__x86_64__)
+
 constexpr std::size_t kMaxDiagnosticArtifactBytes =
     512U * 1024U * 1024U;
 constexpr std::uint64_t kControllerRunBudgetUs =
@@ -107,8 +109,6 @@ constexpr GuestThreadId kThreadId{.value = 1U};
     }
     return "unknown";
 }
-
-#if defined(__linux__)
 
 [[nodiscard]] bool read_exact(
     int fd,
