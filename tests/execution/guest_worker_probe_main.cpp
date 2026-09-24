@@ -67,6 +67,7 @@ enum class ProbeMode {
     fault_then_syscall,
     burn_cpu,
     artifact_probe,
+    artifact_limit_probe,
     no_artifact_fd_probe,
 };
 
@@ -245,6 +246,10 @@ using ReadResult =
         if (argument ==
             "--artifact-probe") {
             return ProbeMode::artifact_probe;
+        }
+        if (argument ==
+            "--artifact-limit-probe") {
+            return ProbeMode::artifact_limit_probe;
         }
         if (argument ==
             "--no-artifact-fd") {
@@ -1236,6 +1241,21 @@ int main(int argc, char** argv) {
         }
     } else if (
         mode ==
+            ProbeMode::artifact_limit_probe) {
+        const auto artifact =
+            astraea::execution::
+                read_linux_sealed_worker_artifact(
+                    4U);
+        if (artifact.has_value() ||
+            artifact.error().code !=
+                astraea::execution::
+                    LinuxWorkerArtifactErrorCode::
+                        artifact_too_large ||
+            !artifact_fd_is_closed()) {
+            return 42;
+        }
+    } else if (
+        mode ==
         ProbeMode::no_artifact_fd_probe) {
         if (!artifact_fd_is_closed()) {
             return 39;
@@ -1315,6 +1335,8 @@ int main(int argc, char** argv) {
 
 #if defined(__linux__)
     if ((mode == ProbeMode::artifact_probe ||
+         mode ==
+             ProbeMode::artifact_limit_probe ||
          mode ==
              ProbeMode::no_artifact_fd_probe) &&
         !artifact_fd_is_closed()) {
