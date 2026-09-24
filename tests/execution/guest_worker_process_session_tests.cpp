@@ -64,6 +64,8 @@ config(
                 100000U,
             .timeout_milliseconds =
                 timeout_milliseconds,
+            .syscall_service = {},
+            .max_syscall_requests = 0U,
         };
 }
 
