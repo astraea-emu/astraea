@@ -15,6 +15,7 @@
 #include <limits>
 #include <new>
 #include <optional>
+#include <span>
 #include <stdexcept>
 #include <string>
 #include <thread>
@@ -143,6 +144,17 @@ public:
 
     ChildGuard(const ChildGuard&) = delete;
     ChildGuard& operator=(const ChildGuard&) = delete;
+
+    ChildGuard(ChildGuard&& other) noexcept
+        : pid_(std::exchange(other.pid_, -1)) {}
+
+    ChildGuard& operator=(ChildGuard&& other) noexcept {
+        if (this != &other) {
+            terminate_and_reap();
+            pid_ = std::exchange(other.pid_, -1);
+        }
+        return *this;
+    }
 
     ~ChildGuard() {
         terminate_and_reap();
@@ -359,27 +371,6 @@ struct IoResult {
         .status = IoStatus::ok,
         .platform_error = 0,
     };
-}
-
-[[nodiscard]] GuestWorkerProcessSessionRunResult
-io_failure(IoResult result) noexcept {
-    if (result.status == IoStatus::timeout) {
-        return GuestWorkerProcessSessionRunResult::failure(
-            error(
-                GuestWorkerProcessSessionErrorCode::
-                    timeout));
-    }
-    if (result.status == IoStatus::eof) {
-        return GuestWorkerProcessSessionRunResult::failure(
-            error(
-                GuestWorkerProcessSessionErrorCode::
-                    unexpected_eof));
-    }
-    return GuestWorkerProcessSessionRunResult::failure(
-        error(
-            GuestWorkerProcessSessionErrorCode::
-                io_failure,
-            result.platform_error));
 }
 
 [[nodiscard]] astraea::core::Result<
@@ -702,7 +693,14 @@ spawn_worker(
     }
     argv.push_back(nullptr);
 
-    char* empty_environment[] = {nullptr};
+    std::string controller_environment =
+        "ASTRAEA_CONTROLLER_PID=" +
+        std::to_string(
+            static_cast<long long>(::getpid()));
+    char* worker_environment[] = {
+        controller_environment.data(),
+        nullptr,
+    };
 
     pid_t child_pid = -1;
     const auto spawn_result =
@@ -712,7 +710,7 @@ spawn_worker(
             &actions,
             nullptr,
             argv.data(),
-            empty_environment);
+            worker_environment);
 
     destroy_actions();
 
