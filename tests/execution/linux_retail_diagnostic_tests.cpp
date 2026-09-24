@@ -1,5 +1,7 @@
 #include <astraea/execution/linux_retail_diagnostic.hpp>
 
+#include <algorithm>
+#include <array>
 #include <bit>
 #include <cstddef>
 #include <cstdint>
@@ -522,3 +524,187 @@ TEST_CASE(
         result.image->elf.header.entry ==
         kEntry);
 }
+
+
+TEST_CASE(
+    "retail diagnostic stack is deterministic and follows PT_LOAD mappings",
+    "[execution][c0][retail][stack]") {
+    const auto bytes = make_sce_fixture();
+
+    const auto first =
+        astraea::execution::
+            choose_linux_retail_diagnostic_stack(bytes);
+    const auto second =
+        astraea::execution::
+            choose_linux_retail_diagnostic_stack(bytes);
+
+    REQUIRE(first.has_value());
+    REQUIRE(second.has_value());
+    REQUIRE(first.value() == second.value());
+    REQUIRE(
+        first->size() ==
+        astraea::memory::GuestSize{
+            astraea::execution::
+                kLinuxRetailDiagnosticStackSize});
+
+    const auto image_end =
+        kGuestBase +
+        static_cast<std::uint64_t>(kImageSize);
+    REQUIRE(
+        first->base().value() >=
+        image_end +
+            astraea::execution::
+                kLinuxRetailDiagnosticStackGuard);
+    REQUIRE(
+        (first->base().value() %
+         astraea::execution::
+             kLinuxRetailDiagnosticStackAlignment) ==
+        0U);
+}
+
+TEST_CASE(
+    "retail diagnostic stack preserves ELF parse failure",
+    "[execution][c0][retail][stack][negative]") {
+    auto bytes = make_sce_fixture();
+    bytes[0] = std::byte{0};
+
+    const auto result =
+        astraea::execution::
+            choose_linux_retail_diagnostic_stack(bytes);
+
+    REQUIRE_FALSE(result.has_value());
+    REQUIRE(
+        result.error().code ==
+        astraea::execution::
+            LinuxRetailDiagnosticStackErrorCode::
+                elf_parse_failure);
+    REQUIRE(result.error().elf_error.has_value());
+}
+
+#if defined(__linux__) && defined(__x86_64__)
+
+TEST_CASE(
+    "one-step retail native diagnostic traps literal syscall pre-kernel",
+    "[execution][c0][retail][native][seccomp]") {
+    if (!astraea::execution::
+            linux_guest_syscall_seccomp_available()) {
+        SKIP("Linux seccomp syscall trap unavailable");
+    }
+
+    auto bytes = make_sce_fixture();
+
+    // mov rax, 0x1234; syscall; ud2
+    const std::array<std::byte, 11> code{
+        std::byte{0x48},
+        std::byte{0xc7},
+        std::byte{0xc0},
+        std::byte{0x34},
+        std::byte{0x12},
+        std::byte{0x00},
+        std::byte{0x00},
+        std::byte{0x0f},
+        std::byte{0x05},
+        std::byte{0x0f},
+        std::byte{0x0b},
+    };
+    std::copy(
+        code.begin(),
+        code.end(),
+        bytes.begin() + 0x100);
+
+    const auto stack =
+        astraea::execution::
+            choose_linux_retail_diagnostic_stack(bytes);
+    REQUIRE(stack.has_value());
+
+    auto admitted =
+        astraea::execution::
+            preflight_linux_retail_diagnostic(
+                astraea::execution::
+                    LinuxRetailDiagnosticPreflightRequest{
+                        .artifact_bytes =
+                            std::move(bytes),
+                        .stack_storage =
+                            stack.value(),
+                        .arguments = {
+                            "retail-diagnostic"},
+                        .environment = {},
+                        .auxiliary_vector = {},
+                    });
+    REQUIRE(
+        admitted.boundary ==
+        astraea::execution::
+            LinuxRetailDiagnosticPreflightBoundaryKind::
+                ready_for_native_entry);
+    REQUIRE(admitted.image.has_value());
+
+    const auto boundary =
+        astraea::execution::
+            run_linux_retail_diagnostic_native_once(
+                *admitted.image);
+
+    REQUIRE(
+        boundary.kind ==
+        astraea::execution::
+            LinuxRetailDiagnosticRuntimeBoundaryKind::
+                unsupported_syscall);
+    REQUIRE(boundary.syscall_number == 0x1234);
+    REQUIRE(boundary.guest_rip.value() == kEntry + 7U);
+    REQUIRE(boundary.audit_arch != 0U);
+    REQUIRE_FALSE(boundary.guest_fault.has_value());
+    REQUIRE_FALSE(boundary.backend_error.has_value());
+}
+
+TEST_CASE(
+    "one-step retail native diagnostic preserves unregistered UD2 as fault",
+    "[execution][c0][retail][native][fault]") {
+    auto bytes = make_sce_fixture();
+    bytes[0x100] = std::byte{0x0f};
+    bytes[0x101] = std::byte{0x0b};
+
+    const auto stack =
+        astraea::execution::
+            choose_linux_retail_diagnostic_stack(bytes);
+    REQUIRE(stack.has_value());
+
+    auto admitted =
+        astraea::execution::
+            preflight_linux_retail_diagnostic(
+                astraea::execution::
+                    LinuxRetailDiagnosticPreflightRequest{
+                        .artifact_bytes =
+                            std::move(bytes),
+                        .stack_storage =
+                            stack.value(),
+                        .arguments = {
+                            "retail-diagnostic"},
+                        .environment = {},
+                        .auxiliary_vector = {},
+                    });
+    REQUIRE(
+        admitted.boundary ==
+        astraea::execution::
+            LinuxRetailDiagnosticPreflightBoundaryKind::
+                ready_for_native_entry);
+    REQUIRE(admitted.image.has_value());
+
+    const auto boundary =
+        astraea::execution::
+            run_linux_retail_diagnostic_native_once(
+                *admitted.image);
+
+    REQUIRE(
+        boundary.kind ==
+        astraea::execution::
+            LinuxRetailDiagnosticRuntimeBoundaryKind::
+                guest_fault);
+    REQUIRE(boundary.guest_fault.has_value());
+    REQUIRE(
+        boundary.guest_fault->kind ==
+        astraea::execution::
+            GuestFaultKind::illegal_instruction);
+    REQUIRE(boundary.guest_rip.value() == kEntry);
+    REQUIRE_FALSE(boundary.backend_error.has_value());
+}
+
+#endif
