@@ -231,6 +231,19 @@ TEST_CASE(
         astraea::graphics::
             Gfx10ColorTargetImageErrorCode;
 
+    SECTION("endian") {
+        auto target = decoded_target();
+        target.raw_info |= 1U;
+        const auto result =
+            astraea::graphics::
+                plan_gfx10_linear_rgba8_unorm_color_target_image(
+                    target);
+        REQUIRE_FALSE(result.has_value());
+        REQUIRE(
+            result.error().code ==
+            Error::unsupported_endian);
+    }
+
     SECTION("format") {
         auto target = decoded_target();
         target.format = 9U;
@@ -338,7 +351,7 @@ TEST_CASE(
 
     SECTION("CMASK") {
         auto target = decoded_target();
-        target.raw_info |= 1U << 29U;
+        target.raw_info |= 1U << 19U;
         const auto result =
             astraea::graphics::
                 plan_gfx10_linear_rgba8_unorm_color_target_image(
