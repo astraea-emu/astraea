@@ -51,8 +51,13 @@ linux_guest_syscall_seccomp_available() noexcept;
         registered_syscall_traps = {});
 
 // Executes with a Linux seccomp filter on the existing dedicated native
-// execution thread. Any syscall whose kernel-reported instruction pointer lies
-// inside an exact executable GuestImage mapping is trapped before execution.
+// execution thread.
+//
+// On x86 Linux, seccomp exposes the saved post-syscall instruction pointer to
+// BPF/SIGSYS. Astraea therefore derives a bounded post-instruction ownership
+// range from each exact executable GuestImage mapping, traps there before the
+// host syscall executes, then normalizes the event back to a verified literal
+// guest syscall opcode in ordinary code before returning it.
 [[nodiscard]] LinuxSeccompExecutionResult
 enter_linux_guest_with_seccomp_syscall_trap(
     const astraea::loader::GuestImage& image,
