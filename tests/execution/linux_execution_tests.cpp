@@ -409,6 +409,119 @@ TEST_CASE(
 }
 
 TEST_CASE(
+    "Linux seccomp no-gate entry traps literal guest syscall",
+    "[execution][linux-transition][c0][seccomp][no-gate][syscall]") {
+    const auto page = page_size();
+    const auto base =
+        find_free_block(
+            static_cast<std::size_t>(
+                page * 2U));
+    const auto stack_base = base + page;
+
+    std::vector<std::byte> code;
+    append_mov_imm64(
+        code,
+        0U,
+        static_cast<std::uint64_t>(
+            SYS_getpid));
+    const auto syscall_offset = code.size();
+    code.push_back(std::byte{0x0f});
+    code.push_back(std::byte{0x05});
+    code.push_back(std::byte{0x0f});
+    code.push_back(std::byte{0x0b});
+
+    auto image =
+        make_guest_image(
+            base,
+            stack_base,
+            page,
+            std::move(code));
+    auto prepared =
+        astraea::execution::
+            prepare_linux_guest_memory(image);
+    REQUIRE(prepared.has_value());
+
+    const auto result =
+        astraea::execution::
+            enter_linux_guest_with_seccomp_syscall_trap(
+                image,
+                prepared.value(),
+                astraea::execution::
+                    make_synthetic_initial_context(
+                        image));
+
+    REQUIRE(result.has_value());
+    const auto* trapped =
+        std::get_if<
+            astraea::execution::
+                LinuxSeccompSyscallTrap>(
+                    &result.value());
+    REQUIRE(trapped != nullptr);
+    REQUIRE(
+        trapped->guest_rip.value() ==
+        base +
+            static_cast<std::uint64_t>(
+                syscall_offset));
+    REQUIRE(
+        trapped->syscall_number ==
+        static_cast<std::int32_t>(
+            SYS_getpid));
+    REQUIRE(
+        trapped->context.rip ==
+        trapped->guest_rip.value() + 2U);
+}
+
+TEST_CASE(
+    "Linux seccomp no-gate entry keeps UD2 as ordinary guest fault",
+    "[execution][linux-transition][c0][seccomp][no-gate][fault]") {
+    const auto page = page_size();
+    const auto base =
+        find_free_block(
+            static_cast<std::size_t>(
+                page * 2U));
+    const auto stack_base = base + page;
+
+    auto image =
+        make_guest_image(
+            base,
+            stack_base,
+            page,
+            std::vector<std::byte>{
+                std::byte{0x0f},
+                std::byte{0x0b},
+            });
+    auto prepared =
+        astraea::execution::
+            prepare_linux_guest_memory(image);
+    REQUIRE(prepared.has_value());
+
+    const auto result =
+        astraea::execution::
+            enter_linux_guest_with_seccomp_syscall_trap(
+                image,
+                prepared.value(),
+                astraea::execution::
+                    make_synthetic_initial_context(
+                        image));
+
+    REQUIRE(result.has_value());
+    const auto* stopped =
+        std::get_if<
+            astraea::execution::ExecutionStop>(
+                &result.value());
+    REQUIRE(stopped != nullptr);
+    REQUIRE(
+        stopped->reason ==
+        ExecutionStopReason::guest_fault);
+    REQUIRE(stopped->has_fault);
+    REQUIRE_FALSE(stopped->has_gate_slot);
+    REQUIRE(
+        stopped->fault.kind ==
+        GuestFaultKind::illegal_instruction);
+    REQUIRE(stopped->fault.instruction_pointer == base);
+}
+
+TEST_CASE(
     "Linux seccomp traps raw guest filesystem and network syscall entry",
     "[execution][linux-transition][c0][seccomp][host-resource]") {
     const auto prove_trapped =
