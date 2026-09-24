@@ -334,6 +334,29 @@ template <typename RegisterWriteRange>
     return "unsupported_encoding";
 }
 
+[[nodiscard]] std::string shader_ir_export_target_text(
+    astraea::graphics::ShaderIrExportTargetKind kind) {
+    using Kind =
+        astraea::graphics::ShaderIrExportTargetKind;
+
+    switch (kind) {
+    case Kind::mrt:
+        return "mrt";
+    case Kind::mrt_z:
+        return "mrt_z";
+    case Kind::null_target:
+        return "null";
+    case Kind::position:
+        return "position";
+    case Kind::primitive:
+        return "primitive";
+    case Kind::parameter:
+        return "parameter";
+    }
+
+    return "mrt";
+}
+
 [[nodiscard]] std::string shader_ir_branch_condition_text(
     astraea::graphics::ShaderIrBranchCondition condition) {
     switch (condition) {
@@ -857,6 +880,37 @@ trace_rdna2_decode_v0(
                         source1_selector));
         }
 
+        if (instruction.exp.has_value()) {
+            stable.push_back(
+                u64_field(
+                    "enable_mask",
+                    instruction.exp->enable_mask));
+            stable.push_back(
+                u64_field(
+                    "target",
+                    instruction.exp->target));
+            stable.push_back(
+                u64_field(
+                    "compressed",
+                    instruction.exp->compressed ? 1U : 0U));
+            stable.push_back(
+                u64_field(
+                    "done",
+                    instruction.exp->done ? 1U : 0U));
+            stable.push_back(
+                u64_field(
+                    "valid_mask",
+                    instruction.exp->valid_mask ? 1U : 0U));
+            for (std::size_t source = 0U;
+                 source < instruction.exp->source_vgprs.size();
+                 ++source) {
+                stable.push_back(
+                    u64_field(
+                        "source" + std::to_string(source) + "_vgpr",
+                        instruction.exp->source_vgprs[source]));
+            }
+        }
+
         return GraphicsTraceEventResultV0::success(
             TraceEventV0{
                 .id = event_id,
@@ -1139,6 +1193,45 @@ trace_shader_ir_v0(
                         u64_field(
                             "source1_vgpr",
                             operation.source1.index));
+                } else if constexpr (
+                    std::is_same_v<
+                        Operation,
+                        astraea::graphics::
+                            ShaderIrExport>) {
+                    event_type = "export";
+                    stable.push_back(
+                        text_field(
+                            "target_kind",
+                            shader_ir_export_target_text(
+                                operation.target_kind)));
+                    stable.push_back(
+                        u64_field(
+                            "target_index",
+                            operation.target_index));
+                    stable.push_back(
+                        u64_field(
+                            "enable_mask",
+                            operation.enable_mask));
+                    stable.push_back(
+                        u64_field(
+                            "compressed",
+                            operation.compressed ? 1U : 0U));
+                    stable.push_back(
+                        u64_field(
+                            "done",
+                            operation.done ? 1U : 0U));
+                    stable.push_back(
+                        u64_field(
+                            "valid_mask",
+                            operation.valid_mask ? 1U : 0U));
+                    for (std::size_t source = 0U;
+                         source < operation.sources.size();
+                         ++source) {
+                        stable.push_back(
+                            u64_field(
+                                "source" + std::to_string(source) + "_vgpr",
+                                operation.sources[source].index));
+                    }
                 } else if constexpr (
                     std::is_same_v<
                         Operation,
