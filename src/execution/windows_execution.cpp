@@ -170,6 +170,9 @@ struct WindowsExceptionFrame {
     std::uint64_t gate_base = 0;
     std::uint32_t gate_slot_count = 0;
     std::uint32_t reserved = 0;
+    const RegisteredSyscallTrapSite*
+        registered_syscall_traps = nullptr;
+    std::size_t registered_syscall_trap_count = 0;
     WindowsTransitionFrame* transition = nullptr;
     ExecutionStop stop;
 };
@@ -242,6 +245,22 @@ std::mutex g_windows_execution_mutex;
         static_cast<std::uint32_t>(
             candidate);
     return true;
+}
+
+[[nodiscard]] bool
+recognize_registered_syscall_trap(
+    const WindowsExceptionFrame& frame,
+    std::uint64_t rip) noexcept {
+    for (std::size_t i = 0;
+         i < frame.registered_syscall_trap_count;
+         ++i) {
+        if (registered_syscall_trap_matches_rip(
+                frame.registered_syscall_traps[i],
+                astraea::memory::GuestAddress{rip})) {
+            return true;
+        }
+    }
+    return false;
 }
 
 [[nodiscard]] GuestFaultKind fault_kind(
@@ -353,6 +372,18 @@ windows_guest_exception_handler(
         frame->stop.gate_slot =
             gate_slot;
         frame->stop.has_fault = false;
+    } else if (
+        record.ExceptionCode ==
+            EXCEPTION_ILLEGAL_INSTRUCTION &&
+        recognize_registered_syscall_trap(
+            *frame,
+            rip)) {
+        frame->stop.reason =
+            ExecutionStopReason::
+                registered_syscall_trap;
+        frame->stop.has_gate_slot = false;
+        frame->stop.gate_slot = 0;
+        frame->stop.has_fault = false;
     } else {
         frame->stop.reason =
             ExecutionStopReason::guest_fault;
@@ -416,6 +447,68 @@ windows_guest_exception_handler(
         }
     }
     return false;
+}
+
+[[nodiscard]] bool registered_traps_are_valid(
+    const astraea::loader::GuestImage& image,
+    std::span<const RegisteredSyscallTrapSite>
+        registered_syscall_traps) noexcept {
+    for (std::size_t i = 0;
+         i < registered_syscall_traps.size();
+         ++i) {
+        const auto& site =
+            registered_syscall_traps[i];
+        if (site.original_bytes !=
+                kX86SyscallBytes ||
+            site.trap_bytes !=
+                kX86Ud2Bytes) {
+            return false;
+        }
+
+        const auto rip = site.guest_rip.value();
+        if (rip ==
+                std::numeric_limits<
+                    std::uint64_t>::max() ||
+            !exact_executable_contains(
+                image,
+                rip) ||
+            !exact_executable_contains(
+                image,
+                rip + 1U)) {
+            return false;
+        }
+
+        if (rip >
+            static_cast<std::uint64_t>(
+                std::numeric_limits<
+                    std::uintptr_t>::max())) {
+            return false;
+        }
+
+        std::array<std::byte, 2> mapped_bytes{};
+        std::memcpy(
+            mapped_bytes.data(),
+            reinterpret_cast<const void*>(
+                static_cast<std::uintptr_t>(
+                    rip)),
+            mapped_bytes.size());
+        if (mapped_bytes !=
+            kX86Ud2Bytes) {
+            return false;
+        }
+
+        for (std::size_t j = i + 1U;
+             j < registered_syscall_traps.size();
+             ++j) {
+            if (registered_syscall_traps[j].
+                    guest_rip ==
+                site.guest_rip) {
+                return false;
+            }
+        }
+    }
+
+    return true;
 }
 
 [[nodiscard]] WindowsExecutionResult
@@ -890,7 +983,9 @@ run_windows_guest_thread(
     const SyntheticGateRegion& gate_region,
     GuestCpuContext context,
     const std::vector<ExecutableRange>&
-        executable_ranges) {
+        executable_ranges,
+    std::span<const RegisteredSyscallTrapSite>
+        registered_syscall_traps) {
     WindowsTransitionFrame transition{};
     WindowsExceptionFrame frame{};
     frame.executable_ranges =
@@ -902,6 +997,10 @@ run_windows_guest_thread(
             base().value();
     frame.gate_slot_count =
         gate_region.slot_count();
+    frame.registered_syscall_traps =
+        registered_syscall_traps.data();
+    frame.registered_syscall_trap_count =
+        registered_syscall_traps.size();
     frame.transition = &transition;
 
     ::SetLastError(ERROR_SUCCESS);
@@ -958,12 +1057,15 @@ WindowsExecutionResult enter_windows_guest(
     const astraea::loader::GuestImage& image,
     const WindowsPreparedMemory& prepared_memory,
     const SyntheticGateRegion& gate_region,
-    GuestCpuContext context) {
+    GuestCpuContext context,
+    std::span<const RegisteredSyscallTrapSite>
+        registered_syscall_traps) {
 #if !(defined(_WIN32) && defined(_M_X64))
     static_cast<void>(image);
     static_cast<void>(prepared_memory);
     static_cast<void>(gate_region);
     static_cast<void>(context);
+    static_cast<void>(registered_syscall_traps);
     return WindowsExecutionResult::failure(
         backend_error(
             NativeBackendErrorCode::
@@ -977,6 +1079,15 @@ WindowsExecutionResult enter_windows_guest(
     if (!valid.has_value()) {
         return WindowsExecutionResult::failure(
             valid.error());
+    }
+
+    if (!registered_traps_are_valid(
+            image,
+            registered_syscall_traps)) {
+        return WindowsExecutionResult::failure(
+            backend_error(
+                NativeBackendErrorCode::
+                    invalid_registered_syscall_trap));
     }
 
     std::unique_lock<std::mutex> execution_lock(
@@ -1012,7 +1123,8 @@ WindowsExecutionResult enter_windows_guest(
                         run_windows_guest_thread(
                             gate_region,
                             context,
-                            executable_ranges));
+                            executable_ranges,
+                            registered_syscall_traps));
                 } catch (
                     const std::bad_alloc&) {
                     thread_result.emplace(
