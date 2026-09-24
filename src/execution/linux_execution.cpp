@@ -1301,6 +1301,7 @@ run_linux_guest_thread(
         registered_syscall_traps,
     bool enable_seccomp_syscall_trap) {
     std::vector<SignalRange> executable_ranges;
+    std::vector<SignalRange> seccomp_ip_ranges;
     std::vector<std::byte> alternate_stack;
     try {
         executable_ranges =
@@ -1321,6 +1322,18 @@ run_linux_guest_thread(
             backend_error(
                 NativeBackendErrorCode::
                     recovery_setup_failure));
+    }
+
+    if (enable_seccomp_syscall_trap) {
+        auto ranges =
+            build_seccomp_post_instruction_ranges(
+                executable_ranges);
+        if (!ranges.has_value()) {
+            return LinuxThreadExecutionResult::failure(
+                ranges.error());
+        }
+        seccomp_ip_ranges =
+            std::move(ranges.value());
     }
 
     stack_t previous_stack{};
@@ -1389,6 +1402,10 @@ run_linux_guest_thread(
         executable_ranges.data();
     frame.executable_range_count =
         executable_ranges.size();
+    frame.seccomp_ip_ranges =
+        seccomp_ip_ranges.data();
+    frame.seccomp_ip_range_count =
+        seccomp_ip_ranges.size();
     frame.gate_base =
         gate_region.range().base().value();
     frame.gate_slot_count =
@@ -1407,7 +1424,7 @@ run_linux_guest_thread(
         enable_seccomp_syscall_trap) {
         const auto installed =
             install_guest_executable_syscall_filter(
-                executable_ranges);
+                seccomp_ip_ranges);
         if (!installed.has_value()) {
             interception_setup_error =
                 installed.error();
@@ -1436,13 +1453,27 @@ run_linux_guest_thread(
             interception_setup_error.value());
     }
 
+    LinuxSeccompSyscallTrap normalized_seccomp_trap{};
+    if (frame.has_seccomp_syscall_trap) {
+        const auto normalized =
+            normalize_seccomp_syscall_trap(
+                image,
+                frame.raw_seccomp_syscall_trap);
+        if (!normalized.has_value()) {
+            return LinuxThreadExecutionResult::failure(
+                normalized.error());
+        }
+        normalized_seccomp_trap =
+            normalized.value();
+    }
+
     return LinuxThreadExecutionResult::success(
         LinuxThreadExecutionOutcome{
             .stop = frame.stop,
             .has_seccomp_syscall_trap =
                 frame.has_seccomp_syscall_trap,
             .seccomp_syscall_trap =
-                frame.seccomp_syscall_trap,
+                normalized_seccomp_trap,
         });
 }
 
