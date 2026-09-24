@@ -392,6 +392,9 @@ TEST_CASE(
         base +
         static_cast<std::uint64_t>(
             syscall_offset);
+    CAPTURE(trapped->guest_rip.value());
+    CAPTURE(expected_rip);
+    CAPTURE(trapped->context.rip);
     REQUIRE(trapped->guest_rip.value() == expected_rip);
     REQUIRE(
         trapped->syscall_number ==
@@ -464,6 +467,9 @@ TEST_CASE(
                 LinuxSeccompSyscallTrap>(
                     &result.value());
     REQUIRE(trapped != nullptr);
+    CAPTURE(trapped->guest_rip.value());
+    CAPTURE(base);
+    CAPTURE(trapped->context.rip);
     REQUIRE(trapped->guest_rip.value() == base + 5U);
     REQUIRE(trapped->syscall_number == 20);
     REQUIRE(
