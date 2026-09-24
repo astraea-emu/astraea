@@ -6,6 +6,7 @@
 #include <string>
 #include <vector>
 
+#include <astraea/loader/dynamic_metadata.hpp>
 #include <astraea/loader/guest_image.hpp>
 #include <astraea/loader/initial_stack.hpp>
 #include <astraea/memory/guest_address.hpp>
@@ -15,6 +16,7 @@ namespace astraea::execution {
 enum class LinuxRetailDiagnosticPreflightBoundaryKind {
     loader_rejected,
     entry_not_executable,
+    sce_dynamic_metadata_rejected,
     unsupported_dynamic_dependencies,
     unsupported_relocations,
     unsupported_tls,
@@ -39,6 +41,10 @@ struct LinuxRetailDiagnosticPreflight {
     std::optional<astraea::loader::GuestImageError>
         loader_error;
 
+    // Present only for sce_dynamic_metadata_rejected.
+    std::optional<astraea::loader::SceDynamicMetadataError>
+        sce_dynamic_metadata_error;
+
     // Deterministic detail counts for unsupported pre-entry work.
     std::size_t dynamic_dependency_count = 0;
     std::uint64_t relocation_count = 0;
@@ -54,10 +60,11 @@ struct LinuxRetailDiagnosticPreflight {
 // Ordering is deliberate:
 //   1. loader structural rejection
 //   2. entry point is not executable
-//   3. unresolved dynamic/module dependencies
-//   4. unapplied dynamic relocations
-//   5. TLS runtime setup required
-//   6. ready for the Linux seccomp-protected native-entry stage
+//   3. SCE dynamic metadata cannot be represented faithfully
+//   4. unresolved dynamic/module dependencies
+//   5. unapplied dynamic relocations
+//   6. TLS runtime setup required
+//   7. ready for the Linux seccomp-protected native-entry stage
 //
 // This function never executes guest instructions, performs host filesystem
 // access, or resolves/imports modules. It is a diagnostic admission planner,
