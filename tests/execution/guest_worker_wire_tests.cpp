@@ -114,6 +114,43 @@ TEST_CASE(
     REQUIRE(round_trip(terminate) == terminate);
 }
 
+
+TEST_CASE(
+    "worker wire header inspection returns one exact bounded frame extent",
+    "[execution][c0][wire][header]") {
+    using namespace astraea::execution;
+
+    const auto encoded =
+        encode_guest_worker_wire_message(
+            Message{syscall_request()});
+    REQUIRE(encoded.has_value());
+    REQUIRE(
+        encoded->size() ==
+        kGuestWorkerWireHeaderSize + 88U);
+
+    const auto header =
+        decode_guest_worker_wire_header(
+            std::span<const std::byte>{
+                encoded->data(),
+                kGuestWorkerWireHeaderSize});
+    REQUIRE(header.has_value());
+    REQUIRE(
+        header->kind ==
+        GuestWorkerWireMessageKind::syscall_request);
+    REQUIRE(header->payload_size == 88U);
+    REQUIRE(header->frame_size == encoded->size());
+
+    const auto short_header =
+        decode_guest_worker_wire_header(
+            std::span<const std::byte>{
+                encoded->data(),
+                kGuestWorkerWireHeaderSize - 1U});
+    REQUIRE_FALSE(short_header.has_value());
+    REQUIRE(
+        short_header.error().code ==
+        GuestWorkerWireErrorCode::frame_too_short);
+}
+
 TEST_CASE(
     "HELLO wire fixture is exact little-endian bytes",
     "[execution][c0][wire][fixture]") {
