@@ -72,6 +72,7 @@ list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 include(AstraeaWarnings)
 include(AstraeaSanitizers)
 include(AstraeaFuzzing)
+include(AstraeaSourceListGuard)
 
 find_package(Threads REQUIRED)
 
@@ -204,6 +205,11 @@ add_executable(astraea
 target_link_libraries(astraea PRIVATE Astraea::core)
 astraea_set_project_warnings(astraea)
 astraea_enable_sanitizers(astraea)
+
+astraea_verify_explicit_cpp_sources(
+    ROOT src
+    TARGETS astraea_core astraea
+)
 
 if(BUILD_TESTING)
     add_subdirectory(tests)
