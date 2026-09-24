@@ -932,7 +932,9 @@ normalize_seccomp_syscall_trap(
         raw.kernel_instruction_pointer -
         kX86SyscallInstructionLength;
 
-    if (!exact_executable_contains(
+    if (guest_rip ==
+            std::numeric_limits<std::uint64_t>::max() ||
+        !exact_executable_contains(
             image,
             guest_rip) ||
         !exact_executable_contains(
