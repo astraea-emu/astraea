@@ -1,9 +1,15 @@
 # ADR 0005: Guarded native x86-64 execution boundary
 
-**Status:** Proposed  
-**Date:** 2026-09-21
+**Status:** Accepted  
+**Date:** 2026-09-21  
+**Implementation established:** 2026-09-24
 
 ## Context
+
+This ADR was proposed before M2 native execution existed. Its guarded
+owned-probe execution contract is now implemented on Linux x86-64 and Windows
+x86-64. ADR 0010 separately governs supervised retail diagnostic/native
+execution.
 
 M1 produces a deterministic owned `GuestImage` but does not execute it.
 
@@ -193,7 +199,8 @@ Rejected as a core dependency. It is useful for experiments and debugging but do
 
 Revisit when:
 
-- untrusted/retail guest execution becomes a goal
+- the owned-probe native execution assumptions change materially (retail
+  execution is handled separately by ADR 0010)
 - an ARM64 interpreter/JIT backend is prioritized
 - self-modifying guest code is required
 - mixed W/X guest pages are observed in required workloads
