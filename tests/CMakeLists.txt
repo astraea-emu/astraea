@@ -47,6 +47,7 @@ add_executable(astraea_core_tests
     execution/sce_multi_import_prototype_tests.cpp
     execution/hle_runtime_tests.cpp
     execution/guest_worker_protocol_tests.cpp
+    execution/guest_worker_process_tests.cpp
     execution/guest_worker_service_tests.cpp
     execution/guest_worker_wire_tests.cpp
     execution/registered_syscall_trap_tests.cpp
@@ -110,6 +111,13 @@ target_link_libraries(astraea_core_tests PRIVATE
     Astraea::core
     Catch2::Catch2WithMain
     SPIRV-Tools
+)
+add_dependencies(
+    astraea_core_tests
+    astraea_guest_worker
+)
+target_compile_definitions(astraea_core_tests PRIVATE
+    ASTRAEA_TEST_GUEST_WORKER_PATH="$<TARGET_FILE:astraea_guest_worker>"
 )
 astraea_set_project_warnings(astraea_core_tests)
 astraea_enable_sanitizers(astraea_core_tests)
