@@ -7,16 +7,6 @@
 namespace astraea::graphics {
 namespace {
 
-constexpr std::uint32_t kEndianMask = 0x3U;
-constexpr std::uint32_t kLinearGeneralBit = 1U << 7U;
-constexpr std::uint32_t kFastClearBit = 1U << 13U;
-constexpr std::uint32_t kCompressionBit = 1U << 14U;
-constexpr std::uint32_t kFmaskCompressionDisableBit = 1U << 26U;
-constexpr std::uint32_t kFmaskCompressOneFragmentBit = 1U << 27U;
-constexpr std::uint32_t kCmaskIsLinearBit = 1U << 19U;
-constexpr std::uint32_t kCmaskAddressTypeMask = 0x3U << 29U;
-constexpr std::uint32_t kNbcTilingBit = 1U << 31U;
-
 [[nodiscard]] Gfx10ColorTargetImageError error(
     Gfx10ColorTargetImageErrorCode code,
     std::uint64_t actual_value = 0U,
@@ -48,12 +38,12 @@ constexpr std::uint32_t kNbcTilingBit = 1U << 31U;
 Gfx10ColorTargetImageResult
 plan_gfx10_linear_rgba8_unorm_color_target_image(
     const ColorTarget0ContextState& target) noexcept {
-    if ((target.raw_info & kEndianMask) != 0U) {
+    if (target.endian != 0U) {
         return Gfx10ColorTargetImageResult::failure(
             error(
                 Gfx10ColorTargetImageErrorCode::
                     unsupported_endian,
-                target.raw_info & kEndianMask));
+                target.endian));
     }
 
     if (target.format != kGfx10ColorFormatR8G8B8A8) {
@@ -80,7 +70,7 @@ plan_gfx10_linear_rgba8_unorm_color_target_image(
                 target.component_swap));
     }
 
-    if ((target.raw_info & kLinearGeneralBit) != 0U) {
+    if (target.linear_general) {
         return Gfx10ColorTargetImageResult::failure(
             error(
                 Gfx10ColorTargetImageErrorCode::
@@ -88,7 +78,7 @@ plan_gfx10_linear_rgba8_unorm_color_target_image(
                 target.raw_info));
     }
 
-    if ((target.raw_info & kFastClearBit) != 0U) {
+    if (target.fast_clear) {
         return Gfx10ColorTargetImageResult::failure(
             error(
                 Gfx10ColorTargetImageErrorCode::
@@ -96,7 +86,7 @@ plan_gfx10_linear_rgba8_unorm_color_target_image(
                 target.raw_info));
     }
 
-    if ((target.raw_info & kCompressionBit) != 0U) {
+    if (target.compression) {
         return Gfx10ColorTargetImageResult::failure(
             error(
                 Gfx10ColorTargetImageErrorCode::
@@ -104,9 +94,8 @@ plan_gfx10_linear_rgba8_unorm_color_target_image(
                 target.raw_info));
     }
 
-    if ((target.raw_info &
-         (kFmaskCompressionDisableBit |
-          kFmaskCompressOneFragmentBit)) != 0U) {
+    if (target.fmask_compression_disable ||
+        target.fmask_compress_one_fragment) {
         return Gfx10ColorTargetImageResult::failure(
             error(
                 Gfx10ColorTargetImageErrorCode::
@@ -122,9 +111,8 @@ plan_gfx10_linear_rgba8_unorm_color_target_image(
                 target.raw_info));
     }
 
-    if ((target.raw_info &
-         (kCmaskIsLinearBit |
-          kCmaskAddressTypeMask)) != 0U) {
+    if (target.cmask_is_linear ||
+        target.cmask_address_type != 0U) {
         return Gfx10ColorTargetImageResult::failure(
             error(
                 Gfx10ColorTargetImageErrorCode::
@@ -132,7 +120,7 @@ plan_gfx10_linear_rgba8_unorm_color_target_image(
                 target.raw_info));
     }
 
-    if ((target.raw_info & kNbcTilingBit) != 0U) {
+    if (target.nbc_tiling) {
         return Gfx10ColorTargetImageResult::failure(
             error(
                 Gfx10ColorTargetImageErrorCode::
