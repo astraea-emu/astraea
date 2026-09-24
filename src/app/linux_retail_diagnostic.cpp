@@ -371,6 +371,32 @@ diagnostic_from_preflight(
     return diagnostic;
 }
 
+[[nodiscard]] std::string_view diagnostic_stage(
+    astraea::execution::GuestWorkerDiagnosticKind
+        kind) noexcept {
+    using astraea::execution::GuestWorkerDiagnosticKind;
+
+    switch (kind) {
+    case GuestWorkerDiagnosticKind::loader_rejected:
+    case GuestWorkerDiagnosticKind::entry_not_executable:
+    case GuestWorkerDiagnosticKind::
+        sce_dynamic_metadata_rejected:
+    case GuestWorkerDiagnosticKind::
+        unsupported_dynamic_dependencies:
+    case GuestWorkerDiagnosticKind::
+        unsupported_relocations:
+    case GuestWorkerDiagnosticKind::unsupported_tls:
+    case GuestWorkerDiagnosticKind::
+        unsupported_initial_process_abi:
+        return "pre_entry";
+    case GuestWorkerDiagnosticKind::native_backend_error:
+        return "native_entry";
+    case GuestWorkerDiagnosticKind::unsupported_syscall:
+        return "syscall";
+    }
+    return "unknown";
+}
+
 [[nodiscard]] std::string_view diagnostic_name(
     astraea::execution::GuestWorkerDiagnosticKind
         kind) noexcept {
@@ -503,7 +529,7 @@ int run_linux_retail_diagnostic_worker() {
         return 71;
     }
 
-    const auto artifact =
+    auto artifact =
         read_linux_sealed_worker_artifact(
             kMaxRetailArtifactBytes);
     if (!artifact.has_value()) {
@@ -560,7 +586,7 @@ int run_linux_retail_diagnostic_worker() {
         preflight_linux_retail_diagnostic(
             LinuxRetailDiagnosticPreflightRequest{
                 .artifact_bytes =
-                    artifact.value(),
+                    std::move(artifact.value()),
                 .stack_storage =
                     stack.value(),
                 .arguments = {
@@ -640,6 +666,9 @@ int run_linux_retail_diagnostic(
     }
 
     GuestWorkerResourcePolicy policy{};
+    // Containment ceiling only; this is not an emulated PS5 memory size.
+    policy.process_memory_limit_bytes =
+        8ULL * 1024ULL * 1024ULL * 1024ULL;
     policy.process_cpu_time_seconds = 10U;
     policy.linux_max_open_files = 32U;
     policy.linux_disable_core_dumps = true;
@@ -684,6 +713,10 @@ int run_linux_retail_diagnostic(
             << diagnostic_name(
                    diagnostic.kind)
             << "\n"
+            << "stage="
+            << diagnostic_stage(
+                   diagnostic.kind)
+            << "\n"
             << "guest_rip=0x"
             << std::hex
             << diagnostic.guest_rip.value()
@@ -704,6 +737,7 @@ int run_linux_retail_diagnostic(
         std::cout
             << "Astraea retail diagnostic\n"
             << "boundary=guest_fault\n"
+            << "stage=native_fault\n"
             << "guest_rip=0x"
             << std::hex
             << fault.guest_rip.value()
@@ -712,6 +746,11 @@ int run_linux_retail_diagnostic(
             << "fault_kind="
             << static_cast<std::uint32_t>(
                    fault.kind)
+            << "\n"
+            << "fault_address=0x"
+            << std::hex
+            << fault.fault_address.value()
+            << std::dec
             << "\n";
         return 0;
     }
