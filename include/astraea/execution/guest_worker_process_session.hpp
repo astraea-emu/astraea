@@ -5,6 +5,7 @@
 #include <cstdint>
 #include <functional>
 #include <optional>
+#include <span>
 #include <string>
 #include <vector>
 
@@ -49,6 +50,13 @@ struct GuestWorkerProcessSessionConfig {
 
     // Optional kernel-enforced worker ceilings installed before guest RUN.
     std::optional<GuestWorkerResourcePolicy> resource_policy;
+
+    // Linux-only immutable artifact bytes. The synchronous session call keeps
+    // this non-owning view valid for the complete handoff. When configured,
+    // the controller creates a sealed anonymous memfd and the child receives
+    // only that object on the fixed artifact descriptor, never a host path.
+    std::optional<std::span<const std::byte>>
+        linux_artifact;
 };
 
 struct GuestWorkerProcessSessionResult {
@@ -78,6 +86,7 @@ enum class GuestWorkerProcessSessionErrorCode {
     syscall_service_rejected,
     syscall_request_limit_exceeded,
     resource_policy_failure,
+    artifact_preparation_failure,
     child_exit_failure,
     host_allocation_failure,
 };
