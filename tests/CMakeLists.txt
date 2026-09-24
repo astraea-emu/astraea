@@ -78,6 +78,7 @@ add_executable(astraea_core_tests
     graphics/geometry_es_program_address_tests.cpp
     graphics/context_register_state_tests.cpp
     graphics/color_target_state_tests.cpp
+    graphics/gfx10_color_target_image_tests.cpp
     graphics/user_config_register_state_tests.cpp
     graphics/rdna2_decoder_tests.cpp
     graphics/rdna2_exp_tests.cpp
