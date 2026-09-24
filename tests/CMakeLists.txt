@@ -94,6 +94,7 @@ add_executable(astraea_core_tests
     trace/diff_v0_tests.cpp
     trace/graphics_v0_tests.cpp
     trace/shader_vector_execution_v0_tests.cpp
+    research/v3_first_raster_binding_tests.cpp
 )
 target_link_libraries(astraea_core_tests PRIVATE
     Astraea::core
