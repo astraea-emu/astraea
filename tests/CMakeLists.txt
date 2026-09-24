@@ -57,6 +57,7 @@ add_executable(astraea_core_tests
     execution/hle_runtime_tests.cpp
     execution/guest_worker_protocol_tests.cpp
     execution/guest_worker_wire_tests.cpp
+    execution/guest_worker_syscall_context_tests.cpp
     execution/guest_worker_process_session_tests.cpp
     execution/registered_syscall_trap_tests.cpp
     execution/sce_agc_create_shader_tests.cpp
