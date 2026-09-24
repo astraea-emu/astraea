@@ -19,6 +19,22 @@ using GuestWorkerSyscallService =
         std::optional<GuestWorkerSyscallResult>(
             const GuestWorkerSyscallRequest&)>;
 
+struct GuestWorkerResourcePolicy {
+    // Common cross-platform ceilings. Linux interprets memory as RLIMIT_AS;
+    // Windows interprets it as the Job Object per-process committed-memory
+    // limit. These are containment ceilings, not emulated PS5 hardware sizes.
+    std::optional<std::uint64_t> process_memory_limit_bytes;
+    std::optional<std::uint64_t> process_cpu_time_seconds;
+
+    // Linux-only limits. Requesting these on another platform is invalid
+    // rather than silently weakening the requested policy.
+    std::optional<std::uint64_t> linux_max_open_files;
+    bool linux_disable_core_dumps = false;
+    bool linux_disable_file_growth = false;
+
+    auto operator<=>(const GuestWorkerResourcePolicy&) const = default;
+};
+
 struct GuestWorkerProcessSessionConfig {
     std::string worker_executable;
     std::vector<std::string> worker_arguments;
@@ -30,6 +46,9 @@ struct GuestWorkerProcessSessionConfig {
     // callback is ever invoked from signal/exception-handler context.
     GuestWorkerSyscallService syscall_service;
     std::size_t max_syscall_requests = 0;
+
+    // Optional kernel-enforced worker ceilings installed before guest RUN.
+    std::optional<GuestWorkerResourcePolicy> resource_policy;
 };
 
 struct GuestWorkerProcessSessionResult {
@@ -58,6 +77,7 @@ enum class GuestWorkerProcessSessionErrorCode {
     syscall_service_unavailable,
     syscall_service_rejected,
     syscall_request_limit_exceeded,
+    resource_policy_failure,
     child_exit_failure,
     host_allocation_failure,
 };
