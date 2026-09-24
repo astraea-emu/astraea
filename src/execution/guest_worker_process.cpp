@@ -4,6 +4,7 @@
 
 #include <astraea/execution/guest_worker_process.hpp>
 
+#include <algorithm>
 #include <array>
 #include <chrono>
 #include <cstddef>
@@ -77,8 +78,31 @@ struct NativeWorker {
     bool active = false;
 
     NativeWorker() = default;
+    NativeWorker(
+        pid_t child_pid,
+        int child_input_fd,
+        int child_output_fd) noexcept
+        : pid(child_pid),
+          input_fd(child_input_fd),
+          output_fd(child_output_fd),
+          active(true) {}
+
     NativeWorker(const NativeWorker&) = delete;
     NativeWorker& operator=(const NativeWorker&) = delete;
+
+    NativeWorker(NativeWorker&& other) noexcept
+        : pid(std::exchange(other.pid, -1)),
+          input_fd(std::exchange(other.input_fd, -1)),
+          output_fd(std::exchange(other.output_fd, -1)),
+          active(std::exchange(other.active, false)) {}
+
+    NativeWorker& operator=(NativeWorker&& other) noexcept {
+        if (this != &other) {
+            this->~NativeWorker();
+            new (this) NativeWorker(std::move(other));
+        }
+        return *this;
+    }
 
     ~NativeWorker() {
         if (input_fd >= 0) {
@@ -137,6 +161,8 @@ spawn_worker(
     posix_spawn_file_actions_t actions{};
     int spawn_error =
         posix_spawn_file_actions_init(&actions);
+    const bool actions_initialized =
+        spawn_error == 0;
     if (spawn_error == 0) {
         spawn_error =
             posix_spawn_file_actions_adddup2(
@@ -171,7 +197,9 @@ spawn_worker(
     try {
         executable = worker_executable.string();
     } catch (const std::bad_alloc&) {
-        posix_spawn_file_actions_destroy(&actions);
+        if (actions_initialized) {
+            posix_spawn_file_actions_destroy(&actions);
+        }
         ::close(to_worker[0]);
         ::close(to_worker[1]);
         ::close(from_worker[0]);
@@ -217,7 +245,9 @@ spawn_worker(
         }
     }
 
-    posix_spawn_file_actions_destroy(&actions);
+    if (actions_initialized) {
+        posix_spawn_file_actions_destroy(&actions);
+    }
     ::close(to_worker[0]);
     ::close(from_worker[1]);
 
@@ -237,11 +267,9 @@ spawn_worker(
         NativeWorker,
         GuestWorkerProcessError>::success(
             NativeWorker{
-                .pid = pid,
-                .input_fd = to_worker[1],
-                .output_fd = from_worker[0],
-                .active = true,
-            });
+                pid,
+                to_worker[1],
+                from_worker[0]});
 }
 
 [[nodiscard]] bool write_all(
@@ -434,8 +462,43 @@ struct NativeWorker {
     bool active = false;
 
     NativeWorker() = default;
+    NativeWorker(
+        HANDLE child_process,
+        HANDLE child_input_write,
+        HANDLE child_output_read) noexcept
+        : process(child_process),
+          input_write(child_input_write),
+          output_read(child_output_read),
+          active(true) {}
+
     NativeWorker(const NativeWorker&) = delete;
     NativeWorker& operator=(const NativeWorker&) = delete;
+
+    NativeWorker(NativeWorker&& other) noexcept
+        : process(
+              std::exchange(
+                  other.process,
+                  nullptr)),
+          input_write(
+              std::exchange(
+                  other.input_write,
+                  nullptr)),
+          output_read(
+              std::exchange(
+                  other.output_read,
+                  nullptr)),
+          active(
+              std::exchange(
+                  other.active,
+                  false)) {}
+
+    NativeWorker& operator=(NativeWorker&& other) noexcept {
+        if (this != &other) {
+            this->~NativeWorker();
+            new (this) NativeWorker(std::move(other));
+        }
+        return *this;
+    }
 
     ~NativeWorker() {
         if (input_write != nullptr) {
@@ -550,11 +613,16 @@ spawn_worker(
         0U,
         &attribute_size);
 
-    std::vector<std::byte> attribute_storage;
+    std::vector<std::max_align_t> attribute_storage;
     std::wstring application;
     std::vector<wchar_t> command_line;
     try {
-        attribute_storage.resize(attribute_size);
+        const auto attribute_words =
+            (attribute_size +
+             sizeof(std::max_align_t) - 1U) /
+            sizeof(std::max_align_t);
+        attribute_storage.resize(
+            attribute_words);
         application = worker_executable.wstring();
 
         std::wstring command =
@@ -691,11 +759,9 @@ spawn_worker(
         NativeWorker,
         GuestWorkerProcessError>::success(
             NativeWorker{
-                .process = process.hProcess,
-                .input_write = parent_input,
-                .output_read = parent_output,
-                .active = true,
-            });
+                process.hProcess,
+                parent_input,
+                parent_output});
 }
 
 [[nodiscard]] bool write_all(
@@ -855,7 +921,8 @@ void close_input(NativeWorker& worker) noexcept {
                 1,
                 std::min<std::int64_t>(
                     remaining.count(),
-                    INFINITE - 1U)));
+                    static_cast<std::int64_t>(
+                        INFINITE - 1U))));
 
     const auto waited =
         WaitForSingleObject(
