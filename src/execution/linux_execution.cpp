@@ -812,6 +812,71 @@ build_executable_ranges(
     return ranges;
 }
 
+using SeccompIpRangeBuildResult =
+    astraea::core::Result<
+        std::vector<SignalRange>,
+        NativeBackendError>;
+
+[[nodiscard]] SeccompIpRangeBuildResult
+build_seccomp_instruction_pointer_ranges(
+    std::span<const SignalRange> executable_ranges) {
+    try {
+        std::vector<SignalRange> ranges;
+        ranges.reserve(executable_ranges.size());
+
+        for (const auto& executable :
+             executable_ranges) {
+            // On x86 the saved user RIP after SYSCALL/INT 0x80 is two bytes
+            // past the call site. Some kernel paths expose that post-call
+            // value to seccomp's instruction-pointer check. Extend the
+            // half-open ownership envelope by exactly one byte so a valid
+            // two-byte call ending at the final executable byte still traps.
+            //
+            // Ordinary-code normalization later requires the actual two-byte
+            // syscall opcode to lie completely inside the exact executable
+            // mapping, so this one-byte filter envelope cannot admit a
+            // non-guest call site as a valid guest syscall event.
+            if (executable.size ==
+                    std::numeric_limits<
+                        std::uint64_t>::max() ||
+                executable.base >
+                    std::numeric_limits<
+                        std::uint64_t>::max() -
+                        executable.size) {
+                return SeccompIpRangeBuildResult::failure(
+                    backend_error(
+                        NativeBackendErrorCode::
+                            syscall_interception_setup_failure,
+                        true,
+                        executable.base));
+            }
+
+            ranges.push_back(
+                SignalRange{
+                    .base = executable.base,
+                    .size = executable.size + 1U,
+                });
+        }
+
+        return SeccompIpRangeBuildResult::success(
+            std::move(ranges));
+    } catch (const std::bad_alloc&) {
+        return SeccompIpRangeBuildResult::failure(
+            backend_error(
+                NativeBackendErrorCode::
+                    syscall_interception_setup_failure));
+    } catch (const std::length_error&) {
+        return SeccompIpRangeBuildResult::failure(
+            backend_error(
+                NativeBackendErrorCode::
+                    syscall_interception_setup_failure,
+                false,
+                0,
+                true,
+                E2BIG));
+    }
+}
+
 using SeccompTrapNormalizeResult =
     astraea::core::Result<
         LinuxSeccompSyscallTrap,
@@ -827,16 +892,30 @@ normalize_seccomp_syscall_trap(
         std::byte{0x80},
     };
 
-    const auto guest_rip =
-        raw.kernel_instruction_pointer;
+    // Linux documents si_call_addr/seccomp_data.instruction_pointer as the
+    // system-call instruction address, while the saved processor RIP is
+    // post-instruction. In practice, supported x86 kernels/environments may
+    // expose the post-instruction value through the seccomp metadata path.
+    //
+    // Do not trust either spelling on its own. Reconstruct the only admitted
+    // call site from the captured post-instruction RIP, verify the literal
+    // guest opcode there, and require the kernel-reported IP to agree with
+    // either the verified call site or that post-instruction RIP.
+    if (raw.context.rip <
+        kX86SyscallInstructionLength) {
+        return SeccompTrapNormalizeResult::failure(
+            backend_error(
+                NativeBackendErrorCode::
+                    syscall_interception_metadata_failure,
+                true,
+                raw.context.rip));
+    }
 
-    if (guest_rip >
-            std::numeric_limits<std::uint64_t>::max() -
-                kX86SyscallInstructionLength ||
-        raw.context.rip !=
-            guest_rip +
-                kX86SyscallInstructionLength ||
-        !exact_executable_contains(
+    const auto guest_rip =
+        raw.context.rip -
+        kX86SyscallInstructionLength;
+
+    if (!exact_executable_contains(
             image,
             guest_rip) ||
         !exact_executable_contains(
@@ -844,7 +923,10 @@ normalize_seccomp_syscall_trap(
             guest_rip + 1U) ||
         guest_rip >
             static_cast<std::uint64_t>(
-                std::numeric_limits<std::uintptr_t>::max())) {
+                std::numeric_limits<std::uintptr_t>::max()) ||
+        (raw.kernel_instruction_pointer != guest_rip &&
+         raw.kernel_instruction_pointer !=
+             raw.context.rip)) {
         return SeccompTrapNormalizeResult::failure(
             backend_error(
                 NativeBackendErrorCode::
@@ -1205,10 +1287,23 @@ run_linux_guest_thread(
         registered_syscall_traps,
     bool enable_seccomp_syscall_trap) {
     std::vector<SignalRange> executable_ranges;
+    std::vector<SignalRange> seccomp_instruction_ranges;
     std::vector<std::byte> alternate_stack;
     try {
         executable_ranges =
             build_executable_ranges(image);
+        if (enable_seccomp_syscall_trap) {
+            auto built_seccomp_ranges =
+                build_seccomp_instruction_pointer_ranges(
+                    executable_ranges);
+            if (!built_seccomp_ranges.has_value()) {
+                return LinuxThreadExecutionResult::failure(
+                    built_seccomp_ranges.error());
+            }
+            seccomp_instruction_ranges =
+                std::move(
+                    built_seccomp_ranges.value());
+        }
         const std::size_t alternate_size =
             static_cast<std::size_t>(SIGSTKSZ) >
                     kMinimumAlternateSignalStackSize
@@ -1294,9 +1389,9 @@ run_linux_guest_thread(
     frame.executable_range_count =
         executable_ranges.size();
     frame.seccomp_instruction_ranges =
-        executable_ranges.data();
+        seccomp_instruction_ranges.data();
     frame.seccomp_ip_range_count =
-        executable_ranges.size();
+        seccomp_instruction_ranges.size();
     frame.gate_base =
         gate_region.range().base().value();
     frame.gate_slot_count =
@@ -1315,7 +1410,7 @@ run_linux_guest_thread(
         enable_seccomp_syscall_trap) {
         const auto installed =
             install_guest_executable_syscall_filter(
-                executable_ranges);
+                seccomp_instruction_ranges);
         if (!installed.has_value()) {
             interception_setup_error =
                 installed.error();
