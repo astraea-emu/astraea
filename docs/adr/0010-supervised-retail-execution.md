@@ -3,6 +3,27 @@
 **Status:** Accepted  
 **Date:** 2026-09-24
 
+## Implementation status
+
+The Linux x86-64 diagnostic-admission profile is implemented:
+
+- controller and guest worker are separate processes with bounded typed IPC;
+- worker lifetime, time/CPU/address-space/descriptor/core/file-growth limits,
+  and inherited-resource policy are explicit;
+- artifact authority crosses through a sealed immutable anonymous file
+  descriptor rather than the original host pathname;
+- guest-originated raw syscalls are contained before host-kernel execution by
+  an instruction-pointer-scoped seccomp/SIGSYS path and are normalized only
+  after ordinary code verifies the literal guest syscall instruction/RIP;
+- typed syscall, fault, diagnostic, STOP, and TERMINATE ordering is enforced;
+- the production Linux diagnostic stops before retail native entry when
+  process-entry prerequisites are unsupported.
+
+The current first load-bearing stop is the unverified PS5 initial-process ABI.
+Astraea therefore does **not** yet claim arbitrary retail native instruction
+execution, boot, or compatibility. Windows retail admission remains unsupported
+even though trusted owned-probe worker/native execution exists there.
+
 ## Context
 
 Astraea's current native x86-64 backend deliberately executes only trusted,
