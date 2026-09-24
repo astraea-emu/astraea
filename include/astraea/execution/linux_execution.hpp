@@ -65,4 +65,13 @@ enter_linux_guest_with_seccomp_syscall_trap(
     const SyntheticGateRegion& gate_region,
     GuestCpuContext context);
 
+// Retail/diagnostic entry variant with no synthetic HLE gate region mapped
+// into the guest address space. Any guest UD2 remains an ordinary guest fault
+// unless separately recognized by another explicit mechanism.
+[[nodiscard]] LinuxSeccompExecutionResult
+enter_linux_guest_with_seccomp_syscall_trap(
+    const astraea::loader::GuestImage& image,
+    const LinuxPreparedMemory& prepared_memory,
+    GuestCpuContext context);
+
 }  // namespace astraea::execution
