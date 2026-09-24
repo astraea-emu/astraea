@@ -23,6 +23,7 @@ enum class NativeBackendErrorCode {
     recovery_setup_failure,
     invalid_guest_context,
     invalid_registered_syscall_trap,
+    syscall_interception_setup_failure,
     internal_transition_failure,
 };
 
