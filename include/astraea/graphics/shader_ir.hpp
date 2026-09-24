@@ -1,5 +1,6 @@
 #pragma once
 
+#include <array>
 #include <compare>
 #include <cstdint>
 #include <variant>
@@ -76,6 +77,28 @@ struct ShaderIrVectorAddF32 {
     auto operator<=>(const ShaderIrVectorAddF32&) const = default;
 };
 
+enum class ShaderIrExportTargetKind {
+    mrt,
+    mrt_z,
+    null_target,
+    position,
+    primitive,
+    parameter,
+};
+
+struct ShaderIrExport {
+    ShaderIrExportTargetKind target_kind =
+        ShaderIrExportTargetKind::mrt;
+    std::uint8_t target_index = 0;
+    std::uint8_t enable_mask = 0;
+    bool compressed = false;
+    bool done = false;
+    bool valid_mask = false;
+    std::array<ShaderIrVgpr, 4> sources{};
+
+    auto operator<=>(const ShaderIrExport&) const = default;
+};
+
 struct ShaderIrSgpr {
     std::uint8_t index = 0;
 
@@ -143,6 +166,7 @@ enum class ShaderIrUnsupportedReason {
     unknown_sop1_opcode,
     unknown_vop1_opcode,
     unknown_vop2_opcode,
+    unknown_export_target,
     unsupported_scalar_operand,
     unsupported_vector_operand,
     unsupported_encoding,
@@ -168,6 +192,7 @@ using ShaderIrOperation =
         ShaderIrScalarMove64,
         ShaderIrVectorMove32,
         ShaderIrVectorAddF32,
+        ShaderIrExport,
         ShaderIrUnsupported>;
 
 struct ShaderIrProvenance {
