@@ -94,8 +94,10 @@ guest_worker_process_session_available() noexcept;
 // controller timeout are finite. Any timeout/protocol/I/O failure tears the
 // worker down before returning.
 //
-// This function performs no guest instruction execution, trap handling,
-// syscall dispatch, filesystem brokering, or retail loading.
+// This function performs no guest instruction execution or trap handling.
+// When explicitly configured, it may broker bounded typed syscall messages in
+// ordinary controller code. It performs no filesystem/network brokering or
+// retail loading.
 [[nodiscard]] GuestWorkerProcessSessionRunResult
 run_guest_worker_process_session(
     const GuestWorkerProcessSessionConfig& config);
