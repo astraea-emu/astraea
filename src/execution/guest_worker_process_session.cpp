@@ -32,6 +32,7 @@
 #include <fcntl.h>
 #include <poll.h>
 #include <spawn.h>
+#include <sys/mman.h>
 #include <sys/resource.h>
 #include <sys/socket.h>
 #include <sys/types.h>
@@ -100,6 +101,17 @@ namespace {
         accepts_syscalls) {
         return false;
     }
+
+#if defined(__linux__)
+    if (config.linux_artifact_bytes.has_value() &&
+        config.linux_artifact_bytes->empty()) {
+        return false;
+    }
+#else
+    if (config.linux_artifact_bytes.has_value()) {
+        return false;
+    }
+#endif
 
     if (config.resource_policy.has_value()) {
         const auto& policy =
@@ -796,6 +808,132 @@ apply_linux_resource_policy(
     return ResourcePolicyApplyResult::success(true);
 }
 
+using ArtifactPrepareResult =
+    astraea::core::Result<
+        UniqueFd,
+        GuestWorkerProcessSessionError>;
+
+[[nodiscard]] ArtifactPrepareResult
+prepare_linux_artifact(
+    std::span<const std::byte> bytes) {
+    if (bytes.empty()) {
+        return ArtifactPrepareResult::failure(
+            error(
+                GuestWorkerProcessSessionErrorCode::
+                    invalid_config));
+    }
+
+    if constexpr (
+        sizeof(off_t) <
+        sizeof(std::size_t)) {
+        if (bytes.size() >
+            static_cast<std::size_t>(
+                std::numeric_limits<off_t>::max())) {
+            return ArtifactPrepareResult::failure(
+                error(
+                    GuestWorkerProcessSessionErrorCode::
+                        artifact_preparation_failure,
+                    EOVERFLOW));
+        }
+    }
+
+    UniqueFd artifact{
+        ::memfd_create(
+            "astraea-artifact",
+            MFD_CLOEXEC |
+                MFD_ALLOW_SEALING)};
+    if (artifact.get() < 0) {
+        return ArtifactPrepareResult::failure(
+            error(
+                GuestWorkerProcessSessionErrorCode::
+                    artifact_preparation_failure,
+                errno));
+    }
+
+    const auto artifact_size =
+        static_cast<off_t>(bytes.size());
+    if (::ftruncate(
+            artifact.get(),
+            artifact_size) != 0) {
+        return ArtifactPrepareResult::failure(
+            error(
+                GuestWorkerProcessSessionErrorCode::
+                    artifact_preparation_failure,
+                errno));
+    }
+
+    std::size_t written = 0U;
+    while (written < bytes.size()) {
+        const auto remaining =
+            bytes.size() - written;
+        const auto chunk =
+            std::min<std::size_t>(
+                remaining,
+                static_cast<std::size_t>(
+                    std::numeric_limits<ssize_t>::max()));
+
+        const auto count =
+            ::pwrite(
+                artifact.get(),
+                bytes.data() + written,
+                chunk,
+                static_cast<off_t>(written));
+        if (count < 0) {
+            if (errno == EINTR) {
+                continue;
+            }
+            return ArtifactPrepareResult::failure(
+                error(
+                    GuestWorkerProcessSessionErrorCode::
+                        artifact_preparation_failure,
+                    errno));
+        }
+        if (count == 0) {
+            return ArtifactPrepareResult::failure(
+                error(
+                    GuestWorkerProcessSessionErrorCode::
+                        artifact_preparation_failure,
+                    EIO));
+        }
+        written +=
+            static_cast<std::size_t>(count);
+    }
+
+    constexpr int kRequiredSeals =
+        F_SEAL_WRITE |
+        F_SEAL_GROW |
+        F_SEAL_SHRINK |
+        F_SEAL_SEAL;
+
+    if (::fcntl(
+            artifact.get(),
+            F_ADD_SEALS,
+            kRequiredSeals) != 0) {
+        return ArtifactPrepareResult::failure(
+            error(
+                GuestWorkerProcessSessionErrorCode::
+                    artifact_preparation_failure,
+                errno));
+    }
+
+    const auto seals =
+        ::fcntl(
+            artifact.get(),
+            F_GET_SEALS);
+    if (seals < 0 ||
+        (seals & kRequiredSeals) !=
+            kRequiredSeals) {
+        return ArtifactPrepareResult::failure(
+            error(
+                GuestWorkerProcessSessionErrorCode::
+                    artifact_preparation_failure,
+                seals < 0 ? errno : EIO));
+    }
+
+    return ArtifactPrepareResult::success(
+        std::move(artifact));
+}
+
 [[nodiscard]] astraea::core::Result<
     std::pair<UniqueFd, ChildGuard>,
     GuestWorkerProcessSessionError>
@@ -819,6 +957,23 @@ spawn_worker(
 
     UniqueFd controller_fd{sockets[0]};
     UniqueFd worker_fd{sockets[1]};
+
+    std::optional<UniqueFd> artifact_fd;
+    if (config.linux_artifact_bytes.has_value()) {
+        auto prepared_artifact =
+            prepare_linux_artifact(
+                config.linux_artifact_bytes.value());
+        if (!prepared_artifact.has_value()) {
+            return astraea::core::Result<
+                std::pair<UniqueFd, ChildGuard>,
+                GuestWorkerProcessSessionError>::
+                failure(
+                    prepared_artifact.error());
+        }
+        artifact_fd.emplace(
+            std::move(
+                prepared_artifact.value()));
+    }
 
     posix_spawn_file_actions_t actions{};
     const auto init_result =
@@ -861,11 +1016,21 @@ spawn_worker(
                 O_WRONLY,
                 0);
     }
+    if (add_result == 0 &&
+        artifact_fd.has_value()) {
+        add_result =
+            ::posix_spawn_file_actions_adddup2(
+                &actions,
+                artifact_fd->get(),
+                3);
+    }
     if (add_result == 0) {
         add_result =
             ::posix_spawn_file_actions_addclosefrom_np(
                 &actions,
-                3);
+                artifact_fd.has_value()
+                    ? 4
+                    : 3);
     }
 
     if (add_result != 0) {
