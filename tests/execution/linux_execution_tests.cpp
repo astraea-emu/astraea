@@ -422,26 +422,22 @@ TEST_CASE(
             const auto gate_base = base + 2U * page;
 
             std::vector<std::byte> code;
-            REQUIRE(
-                append_mov_imm64(
-                    code,
-                    0U,
-                    syscall_number));
-            REQUIRE(
-                append_mov_imm64(
-                    code,
-                    7U,
-                    arguments[0]));
-            REQUIRE(
-                append_mov_imm64(
-                    code,
-                    6U,
-                    arguments[1]));
-            REQUIRE(
-                append_mov_imm64(
-                    code,
-                    2U,
-                    arguments[2]));
+            append_mov_imm64(
+                code,
+                0U,
+                syscall_number);
+            append_mov_imm64(
+                code,
+                7U,
+                arguments[0]);
+            append_mov_imm64(
+                code,
+                6U,
+                arguments[1]);
+            append_mov_imm64(
+                code,
+                2U,
+                arguments[2]);
 
             const auto syscall_offset = code.size();
             code.push_back(std::byte{0x0f});
