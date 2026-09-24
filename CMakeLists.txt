@@ -119,6 +119,7 @@ add_library(astraea_core STATIC
     src/execution/hle_runtime.cpp
     src/execution/guest_memory.cpp
     src/execution/guest_worker_protocol.cpp
+    src/execution/guest_worker_wire.cpp
     src/execution/registered_syscall_trap.cpp
     src/execution/sce_agc_create_shader.cpp
     src/execution/sce_agc_link_shaders.cpp
