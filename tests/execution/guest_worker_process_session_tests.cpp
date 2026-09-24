@@ -1,6 +1,7 @@
 #include <astraea/execution/guest_worker_process_session.hpp>
 
 #include <chrono>
+#include <cstddef>
 #include <cstdint>
 #include <optional>
 #include <string>
@@ -67,6 +68,7 @@ config(
             .syscall_service = {},
             .max_syscall_requests = 0U,
             .resource_policy = std::nullopt,
+            .linux_artifact_bytes = std::nullopt,
         };
 }
 
@@ -83,6 +85,131 @@ TEST_CASE(
     REQUIRE_FALSE(
         astraea::execution::
             guest_worker_process_session_available());
+#endif
+}
+
+TEST_CASE(
+    "Linux sealed artifact handoff reaches worker as immutable fd 3 bytes",
+    "[execution][c0][process][artifact][linux]") {
+#if defined(__linux__)
+    auto artifact_config =
+        config({"--artifact-probe"});
+    artifact_config.linux_artifact_bytes =
+        std::vector<std::byte>{
+            std::byte{0x00},
+            std::byte{0x41},
+            std::byte{0xff},
+            std::byte{0x7f},
+            std::byte{0x10},
+            std::byte{0x20},
+            std::byte{0x30},
+            std::byte{0x40},
+            std::byte{0xaa},
+            std::byte{0x55},
+            std::byte{0x00},
+            std::byte{0xee},
+        };
+
+    const auto result =
+        astraea::execution::
+            run_guest_worker_process_session(
+                artifact_config);
+
+    REQUIRE(result.has_value());
+    REQUIRE(result->child_exit_code == 0);
+    REQUIRE(
+        result->stop.reason ==
+        astraea::execution::
+            GuestWorkerStopReason::
+                normal_guest_return);
+#else
+    SUCCEED();
+#endif
+}
+
+TEST_CASE(
+    "Linux sealed artifact consumer rejects bytes above explicit worker limit",
+    "[execution][c0][process][artifact][linux][bound]") {
+#if defined(__linux__)
+    auto artifact_config =
+        config({"--artifact-limit-probe"});
+    artifact_config.linux_artifact_bytes =
+        std::vector<std::byte>{
+            std::byte{0x00},
+            std::byte{0x41},
+            std::byte{0xff},
+            std::byte{0x7f},
+            std::byte{0x10},
+            std::byte{0x20},
+            std::byte{0x30},
+            std::byte{0x40},
+            std::byte{0xaa},
+            std::byte{0x55},
+            std::byte{0x00},
+            std::byte{0xee},
+        };
+
+    const auto result =
+        astraea::execution::
+            run_guest_worker_process_session(
+                artifact_config);
+
+    REQUIRE(result.has_value());
+    REQUIRE(result->child_exit_code == 0);
+#else
+    SUCCEED();
+#endif
+}
+
+TEST_CASE(
+    "session without artifact leaves child fd 3 closed",
+    "[execution][c0][process][artifact][negative]") {
+#if defined(__linux__)
+    const auto result =
+        astraea::execution::
+            run_guest_worker_process_session(
+                config({"--no-artifact-fd"}));
+
+    REQUIRE(result.has_value());
+    REQUIRE(result->child_exit_code == 0);
+#else
+    SUCCEED();
+#endif
+}
+
+TEST_CASE(
+    "Linux artifact option is rejected on non-Linux hosts and rejects empty bytes",
+    "[execution][c0][process][artifact][config]") {
+    auto artifact_config = config();
+    artifact_config.linux_artifact_bytes =
+        std::vector<std::byte>{};
+
+    const auto empty =
+        astraea::execution::
+            run_guest_worker_process_session(
+                artifact_config);
+    REQUIRE_FALSE(empty.has_value());
+    REQUIRE(
+        empty.error().code ==
+        astraea::execution::
+            GuestWorkerProcessSessionErrorCode::
+                invalid_config);
+
+#if !defined(__linux__)
+    artifact_config.linux_artifact_bytes =
+        std::vector<std::byte>{
+            std::byte{0x01},
+        };
+    const auto unsupported =
+        astraea::execution::
+            run_guest_worker_process_session(
+                artifact_config);
+    REQUIRE_FALSE(unsupported.has_value());
+    REQUIRE(
+        unsupported.error().code ==
+        astraea::execution::
+            GuestWorkerProcessSessionErrorCode::
+                invalid_config);
 #endif
 }
 
