@@ -113,6 +113,7 @@ void append_u64(
     case GuestWorkerDiagnosticKind::native_backend_error:
     case GuestWorkerDiagnosticKind::unsupported_syscall:
     case GuestWorkerDiagnosticKind::stack_placement_failure:
+    case GuestWorkerDiagnosticKind::unsupported_fault_class:
         return true;
     }
     return false;
