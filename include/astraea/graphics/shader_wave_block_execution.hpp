@@ -8,6 +8,7 @@
 
 #include <astraea/core/result.hpp>
 #include <astraea/graphics/shader_control_execution.hpp>
+#include <astraea/graphics/shader_export_execution.hpp>
 #include <astraea/graphics/shader_vector_execution.hpp>
 
 namespace astraea::graphics {
@@ -16,7 +17,8 @@ using ShaderWaveExecutionEffect =
     std::variant<
         ShaderScalarExecutionEffect,
         ShaderVectorMove32Effect,
-        ShaderVectorAddF32Effect>;
+        ShaderVectorAddF32Effect,
+        ShaderExportCaptureEffect>;
 
 struct ShaderWaveBlockExecution {
     std::size_t block_index = 0;
@@ -38,6 +40,7 @@ enum class ShaderWaveBlockExecutionErrorCode {
     unsupported_operation,
     scalar_execution_failure,
     vector_execution_failure,
+    export_capture_failure,
     cfg_successor_failure,
 };
 
@@ -50,6 +53,7 @@ struct ShaderWaveBlockExecutionError {
     std::size_t completed_emission_count = 0;
     std::optional<ShaderScalarExecutionError> scalar_error;
     std::optional<ShaderVectorExecutionError> vector_error;
+    std::optional<ShaderExportCaptureError> export_error;
     std::optional<ShaderCfgSuccessorError> successor_error;
 
     auto operator<=>(const ShaderWaveBlockExecutionError&) const =

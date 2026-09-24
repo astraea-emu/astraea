@@ -18,6 +18,8 @@ namespace {
         std::nullopt,
     std::optional<ShaderVectorExecutionError> vector_error =
         std::nullopt,
+    std::optional<ShaderExportCaptureError> export_capture_error =
+        std::nullopt,
     std::optional<ShaderCfgSuccessorError> successor_error =
         std::nullopt) noexcept {
     return ShaderWaveBlockExecutionError{
@@ -27,6 +29,7 @@ namespace {
         .completed_emission_count = completed_emission_count,
         .scalar_error = std::move(scalar_error),
         .vector_error = std::move(vector_error),
+        .export_error = std::move(export_capture_error),
         .successor_error = std::move(successor_error),
     };
 }
@@ -241,6 +244,33 @@ execute_shader_wave_block(
             continue;
         }
 
+        if (std::holds_alternative<
+                ShaderIrExport>(
+                operation)) {
+            auto export_result =
+                capture_shader_export_operation(
+                    operation,
+                    scalar_state,
+                    vector_state);
+            if (!export_result.has_value()) {
+                return ShaderWaveBlockExecutionResult::failure(
+                    wave_block_error(
+                        ShaderWaveBlockExecutionErrorCode::
+                            export_capture_failure,
+                        block_index,
+                        emission_index,
+                        completed_emission_count,
+                        std::nullopt,
+                        std::nullopt,
+                        export_result.error()));
+            }
+
+            effects.emplace_back(
+                std::move(export_result).value());
+            ++completed_emission_count;
+            continue;
+        }
+
         return ShaderWaveBlockExecutionResult::failure(
             wave_block_error(
                 ShaderWaveBlockExecutionErrorCode::
@@ -264,6 +294,7 @@ execute_shader_wave_block(
                 block_index,
                 last_emission_index,
                 completed_emission_count,
+                std::nullopt,
                 std::nullopt,
                 std::nullopt,
                 successor.error()));
