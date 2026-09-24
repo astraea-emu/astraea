@@ -1185,6 +1185,93 @@ int main(int argc, char** argv) {
         return 25;
     }
 
+    if (mode == ProbeMode::native_access_fault ||
+        mode ==
+            ProbeMode::native_illegal_instruction_fault) {
+        const auto native_fault =
+            run_owned_native_fault(
+                mode ==
+                        ProbeMode::native_access_fault
+                    ? NativeFaultProbeKind::
+                          access_violation
+                    : NativeFaultProbeKind::
+                          illegal_instruction,
+                kWorkerId,
+                kThreadId);
+        if (!native_fault.has_value()) {
+            return 31;
+        }
+
+        if (!write_message(
+                GuestWorkerWireMessage{
+                    native_fault->fault}) ||
+            !write_message(
+                GuestWorkerWireMessage{
+                    native_fault->stop})) {
+            return 32;
+        }
+
+        const auto terminate_message =
+            read_message();
+        if (!terminate_message.has_value()) {
+            return 33;
+        }
+        const auto* terminate =
+            std::get_if<GuestWorkerTerminate>(
+                &terminate_message.value());
+        if (terminate == nullptr ||
+            terminate->reason !=
+                GuestWorkerTerminationReason::
+                    fatal_guest_fault) {
+            return 34;
+        }
+        return 0;
+    }
+
+    if (mode == ProbeMode::fault_then_syscall) {
+        constexpr astraea::memory::GuestAddress
+            kFaultRip{0x400100U};
+
+        if (!write_message(
+                GuestWorkerWireMessage{
+                    GuestWorkerFault{
+                        .worker_id = kWorkerId,
+                        .thread_id = kThreadId,
+                        .kind =
+                            GuestWorkerFaultKind::
+                                illegal_instruction,
+                        .guest_rip = kFaultRip,
+                        .fault_address =
+                            astraea::memory::
+                                GuestAddress{0U},
+                    }})) {
+            return 35;
+        }
+
+        if (!write_message(
+                GuestWorkerWireMessage{
+                    GuestWorkerSyscallRequest{
+                        .request_id =
+                            GuestRequestId{
+                                .value = 77U},
+                        .worker_id = kWorkerId,
+                        .thread_id = kThreadId,
+                        .guest_syscall_number =
+                            0x7172737475767778ULL,
+                        .arguments = {},
+                        .guest_rip = kFaultRip,
+                    }})) {
+            return 36;
+        }
+
+        // The controller must reject the resumable event after a terminal
+        // fault and tear this worker down. Remaining alive here makes any
+        // accidental acceptance observable as the session deadline.
+        std::this_thread::sleep_for(
+            std::chrono::hours{1});
+        return 37;
+    }
+
     if (mode ==
         ProbeMode::native_syscall_roundtrip) {
         const auto native_stop =
