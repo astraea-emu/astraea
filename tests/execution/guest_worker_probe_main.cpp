@@ -626,14 +626,14 @@ run_owned_native_syscall_roundtrip(
     if (!unit.has_value() ||
         unit.value() >
             std::numeric_limits<std::size_t>::max() /
-                3U) {
+                4U) {
         return std::nullopt;
     }
 
     const auto block =
         find_native_free_block(
             static_cast<std::size_t>(
-                unit.value() * 3U));
+                unit.value() * 4U));
     if (!block.has_value()) {
         return std::nullopt;
     }
@@ -641,17 +641,17 @@ run_owned_native_syscall_roundtrip(
     const auto code_base = block.value();
     if (unit.value() >
             std::numeric_limits<std::uint64_t>::max() /
-                2U ||
+                3U ||
         code_base >
             std::numeric_limits<std::uint64_t>::max() -
-                unit.value() * 2U) {
+                unit.value() * 3U) {
         return std::nullopt;
     }
 
     const auto stack_base =
         code_base + unit.value();
     const auto gate_base =
-        code_base + unit.value() * 2U;
+        code_base + unit.value() * 3U;
 
     constexpr std::uint64_t kSyscallNumber =
         0x5152535455565758ULL;
@@ -730,7 +730,7 @@ run_owned_native_syscall_roundtrip(
         make_native_guest_image(
             code_base,
             stack_base,
-            unit.value(),
+            unit.value() * 2U,
             std::move(code));
     if (!image.has_value()) {
         return std::nullopt;
