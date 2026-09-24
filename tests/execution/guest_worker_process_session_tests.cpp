@@ -24,6 +24,10 @@
 #define ASTRAEA_GUEST_WORKER_PROBE_PATH ""
 #endif
 
+#ifndef ASTRAEA_APP_PATH
+#define ASTRAEA_APP_PATH ""
+#endif
+
 namespace {
 
 #if defined(_WIN32)
@@ -85,6 +89,64 @@ TEST_CASE(
     REQUIRE_FALSE(
         astraea::execution::
             guest_worker_process_session_available());
+#endif
+}
+
+TEST_CASE(
+    "production Linux retail worker reports malformed artifact as typed loader boundary",
+    "[execution][c0][retail][process][production]") {
+#if defined(__linux__) && defined(__x86_64__)
+    const auto result =
+        astraea::execution::
+            run_guest_worker_process_session(
+                astraea::execution::
+                    GuestWorkerProcessSessionConfig{
+                        .worker_executable =
+                            ASTRAEA_APP_PATH,
+                        .worker_arguments = {
+                            "--linux-retail-diagnostic-worker",
+                        },
+                        .run_budget_microseconds =
+                            100000U,
+                        .timeout_milliseconds =
+                            3000U,
+                        .syscall_service = {},
+                        .max_syscall_requests = 0U,
+                        .resource_policy = std::nullopt,
+                        .linux_artifact_bytes =
+                            std::vector<std::byte>{
+                                std::byte{0x00},
+                                std::byte{0x01},
+                                std::byte{0x02},
+                                std::byte{0x03},
+                            },
+                    });
+
+    REQUIRE(result.has_value());
+    REQUIRE(result->terminal_diagnostic.has_value());
+    REQUIRE_FALSE(result->terminal_fault.has_value());
+    REQUIRE(
+        result->terminal_diagnostic->kind ==
+        astraea::execution::
+            GuestWorkerDiagnosticKind::
+                loader_rejected);
+    REQUIRE(
+        result->terminal_diagnostic->
+            guest_rip.value() == 0U);
+    REQUIRE(
+        result->stop.reason ==
+        astraea::execution::
+            GuestWorkerStopReason::
+                diagnostic_boundary);
+    REQUIRE(
+        result->stop.thread_id ==
+        result->terminal_diagnostic->thread_id);
+    REQUIRE(
+        result->stop.guest_rip ==
+        result->terminal_diagnostic->guest_rip);
+    REQUIRE(result->child_exit_code == 0);
+#else
+    SUCCEED();
 #endif
 }
 
