@@ -633,8 +633,12 @@ TEST_CASE(
 TEST_CASE(
     "kernel CPU ceiling terminates busy worker before controller deadline",
     "[execution][c0][process][resource-policy][cpu]") {
+    // CPU time is consumed only while the worker is scheduled. A loaded
+    // shared CI host can take several wall-clock seconds to accumulate one
+    // process CPU second, so keep the controller deadline comfortably above
+    // the kernel CPU ceiling while still requiring termination before it.
     auto limited =
-        config({"--burn-cpu"}, 5000U);
+        config({"--burn-cpu"}, 15000U);
 
     astraea::execution::GuestWorkerResourcePolicy policy{};
     policy.process_cpu_time_seconds = 1U;
@@ -656,7 +660,7 @@ TEST_CASE(
         astraea::execution::
             GuestWorkerProcessSessionErrorCode::
                 unexpected_eof);
-    REQUIRE(elapsed < std::chrono::seconds{5});
+    REQUIRE(elapsed < std::chrono::seconds{15});
 
     const auto subsequent =
         astraea::execution::
