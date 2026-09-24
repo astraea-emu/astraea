@@ -136,6 +136,7 @@ add_library(astraea_core STATIC
     src/graphics/gpu_buffer_address_space.cpp
     src/graphics/gpu_allocation_address_space.cpp
     src/graphics/gpu_image.cpp
+    src/graphics/gfx10_surface_layout.cpp
     src/graphics/graphics_ir.cpp
     src/graphics/shader_register_state.cpp
     src/graphics/context_register_state.cpp
