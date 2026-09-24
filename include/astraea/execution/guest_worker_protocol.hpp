@@ -88,6 +88,7 @@ enum class GuestWorkerDiagnosticKind : std::uint32_t {
     native_backend_error = 7U,
     unsupported_syscall = 8U,
     stack_placement_failure = 9U,
+    unsupported_fault_class = 10U,
 };
 
 struct GuestWorkerDiagnostic {
