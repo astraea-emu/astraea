@@ -1,7 +1,7 @@
 # Project Status
 
 **Integration gate:** V3 — submitted guest GPU state/resources -> Vulkan -> deterministic result  
-**State:** V0/V1/V2 complete; V3 active; verified generic raster substrate now reaches real Vulkan graphics-pipeline draw/readback; guest-visible LinkShaders remains capped at #189 while #191 is evidence-blocked on four native tail records; C0 retail-execution design is specified but retail execution remains disabled  
+**State:** V0/V1/V2 complete; V3 active; verified generic raster substrate now reaches real Vulkan graphics-pipeline draw/readback; guest-visible LinkShaders remains capped at #189 while #191 is evidence-blocked on four native tail records; C0 now has verified portable worker-protocol and registered-SYSCALL trap-site primitives, but retail execution remains disabled  
 **Repository:** astraea-emu/astraea  
 **In-flight work:** inspect live open GitHub PRs/issues; this file describes the expected merged frontier on `main`.
 
@@ -101,6 +101,8 @@
 - Generic Shader IR export capture is merged (#221): bounded wave execution records raw source-VGPR export effects under explicit EXEC/wave state without mutating registers or assigning PS5 linkage semantics.
 - A real headless Vulkan graphics-pipeline raster oracle is merged (#219): owned vertex/fragment SPIR-V -> VkGraphicsPipeline -> exactly one vkCmdDraw(3,1,0,0) -> 4x4 RGBA8 target -> deterministic opaque-magenta readback on Lavapipe.
 - The C0 supervised retail-execution research design is merged (#222), specifying controller/worker separation, syscall-before-host interception, typed IPC/fault semantics, and the first owned registered SYSCALL->UD2 proof without enabling retail execution.
+- The portable C0 controller/guest-worker protocol model is merged (#226): versioned HELLO/READY semantics, worker/thread/request identities, finite run budgets, typed syscall requests/results, typed faults/stops, and identity/version validation with no transport or retail execution.
+- The bounded registered x86-64 SYSCALL trap-site model is merged (#228): one explicitly registered guest RIP, exact `0F 05` -> `0F 0B` patch/restore semantics, checked spans, and exact trap lookup with no scanning, signal handler, process launcher, or syscall dispatch.
 - Public five-gate CI remains the merge requirement:
   - Linux x64
   - Windows x64
@@ -119,10 +121,10 @@
 7. Created shader identity covers Pixel and the verified type-2 Geometry/ES profile, including submitted program-address resolution and stage-qualified lookup.
 8. Generic RDNA2 EXP semantics and interpreter export capture are verified for the target classes needed to begin graphics-stage output work.
 9. The Vulkan backend has crossed the raster boundary: a real graphics pipeline executes exactly one 3-vertex fullscreen draw and returns deterministic 4x4 pixels (#219).
-10. The active software-side V3 compiler checkpoint is #223/#224: owned RDNA2 Position0/MRT0 export probes -> minimum compiler/value IR -> Vulkan-valid graphics SPIR-V under an explicit synthetic probe launch ABI.
+10. The active software-side V3 compiler/raster checkpoints are #223 and #230: owned RDNA2 Position0/MRT0 export probes -> minimum compiler/value IR -> Vulkan-valid graphics SPIR-V -> the verified Vulkan raster path under an explicit synthetic probe launch ABI.
 11. Parameter/varying linkage remains deliberately unsupported until actual linkage state such as SPI_PS_INPUT_CNTL_* and SPI_PS_INPUT_ENA/ADDR can be modeled without inventing PS5 ABI behavior.
 12. #191 remains the separate verified guest-visible LinkShaders blocker: CX[32] and UC[0..2] still require two reproducible native observations.
-13. C0 is now specified (#222). Portable worker protocol (#225/#226) and the registered trap-site model (#227/#228) are implementation slices; arbitrary retail execution remains disabled.
+13. C0 is now specified (#222), and its first two verified implementation slices are merged: portable worker protocol (#226) and the registered trap-site model (#228). The next dependency is a separate worker process plus deterministic trap delivery/controller round-trip; arbitrary retail execution remains disabled.
 14. Draft #215 remains a provisional exact-workload raster binding adapter. Generic pieces should continue to land independently on main under ADR 0008 rather than turning the draft stack into a shadow implementation.
 
 ## SCE metadata boundary
@@ -205,9 +207,9 @@ owned RDNA2 EXP Position0 / EXP MRT0
     -> deterministic 4x4 pixels
 ```
 
-Issue #223 / PR #224 is the current compiler slice. It uses an explicitly synthetic probe launch ABI only to bind the source VGPR values required by the owned export programs. It must not be described as the PS5 stage-entry ABI.
+Issue #223 is the current compiler slice. The prior PR #224 closed without landing code and is not part of the verified implementation. The compiler proof uses an explicitly synthetic probe launch ABI only to bind the source VGPR values required by the owned export programs. It must not be described as the PS5 stage-entry ABI.
 
-After that compiler slice is verified, integrate its generated modules into the already-merged #219 Vulkan raster oracle and require identical deterministic pixels. Do not add PARAM/interpolation linkage merely to make the probe pass.
+Issue #230 is the immediate end-to-end follow-up: integrate the generated modules into the already-merged #219 Vulkan raster oracle and require identical deterministic pixels. Do not add PARAM/interpolation linkage merely to make the probe pass.
 
 ### 2. Verified LinkShaders evidence path
 
@@ -228,8 +230,8 @@ No console action is required yet while the software-side owned raster proof can
 
 ADR 0010 and #222 define the pre-retail architecture. Continue in bounded layers:
 
-1. portable worker protocol (#225/#226);
-2. one exact registered owned SYSCALL->UD2 trap-site model (#227/#228);
+1. portable worker protocol (#225/#226) — complete;
+2. one exact registered owned SYSCALL->UD2 trap-site model (#227/#228) — complete;
 3. separate worker process + deterministic controller teardown;
 4. one owned syscall round-trip through an OS-specific trap handler;
 5. only then expand threads/TLS/syscall/HLE coverage as demanded by a lawful diagnostic workload.
