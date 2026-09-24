@@ -59,6 +59,20 @@ struct GuestWorkerWireError {
     auto operator<=>(const GuestWorkerWireError&) const = default;
 };
 
+struct GuestWorkerWireHeader {
+    GuestWorkerWireMessageKind kind =
+        GuestWorkerWireMessageKind::hello;
+    std::size_t payload_size = 0;
+    std::size_t frame_size = kGuestWorkerWireHeaderSize;
+
+    auto operator<=>(const GuestWorkerWireHeader&) const = default;
+};
+
+using GuestWorkerWireHeaderResult =
+    astraea::core::Result<
+        GuestWorkerWireHeader,
+        GuestWorkerWireError>;
+
 using GuestWorkerWireEncodeResult =
     astraea::core::Result<
         std::vector<std::byte>,
@@ -68,6 +82,13 @@ using GuestWorkerWireDecodeResult =
     astraea::core::Result<
         GuestWorkerWireMessage,
         GuestWorkerWireError>;
+
+// Validates only the fixed wire header and returns the exact total frame size.
+// This lets stream transports perform one bounded allocation/read without
+// reimplementing the wire format. Bytes after the first header are ignored.
+[[nodiscard]] GuestWorkerWireHeaderResult
+decode_guest_worker_wire_header(
+    std::span<const std::byte> bytes) noexcept;
 
 // Encodes one typed protocol message into a bounded, endian-explicit wire
 // frame. Native struct layout is never copied into the frame.
