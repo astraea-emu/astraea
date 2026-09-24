@@ -128,7 +128,8 @@ add_dependencies(
     astraea_core_tests
     astraea_guest_worker_probe
 )
-if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux" OR
+   CMAKE_SYSTEM_NAME STREQUAL "Windows")
     target_compile_definitions(astraea_core_tests PRIVATE
         ASTRAEA_GUEST_WORKER_PROBE_PATH="$<TARGET_FILE:astraea_guest_worker_probe>"
     )
