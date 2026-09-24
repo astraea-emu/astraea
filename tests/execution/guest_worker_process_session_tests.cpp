@@ -1,6 +1,7 @@
 #include <astraea/execution/guest_worker_process_session.hpp>
 
 #include <chrono>
+#include <cstddef>
 #include <cstdint>
 #include <optional>
 #include <string>
