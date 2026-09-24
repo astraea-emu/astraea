@@ -1,4 +1,5 @@
 #include <astraea/execution/guest_worker_protocol.hpp>
+#include <astraea/execution/guest_worker_fault_projection.hpp>
 #include <astraea/execution/guest_worker_syscall_context.hpp>
 #include <astraea/execution/guest_worker_wire.hpp>
 #include <astraea/execution/hle.hpp>
@@ -56,6 +57,9 @@ enum class ProbeMode {
     bad_frame_after_hello,
     syscall_roundtrip,
     native_syscall_roundtrip,
+    native_access_fault,
+    native_illegal_instruction_fault,
+    fault_then_syscall,
 };
 
 [[nodiscard]] bool configure_binary_stdio() noexcept {
@@ -213,6 +217,18 @@ using ReadResult =
         if (argument ==
             "--native-syscall-roundtrip") {
             return ProbeMode::native_syscall_roundtrip;
+        }
+        if (argument ==
+            "--native-access-fault") {
+            return ProbeMode::native_access_fault;
+        }
+        if (argument ==
+            "--native-illegal-instruction-fault") {
+            return ProbeMode::native_illegal_instruction_fault;
+        }
+        if (argument ==
+            "--fault-then-syscall") {
+            return ProbeMode::fault_then_syscall;
         }
     }
     return ProbeMode::normal;
@@ -608,6 +624,192 @@ make_native_gate_region(
 }
 
 #endif
+
+struct NativeFaultProbeResult {
+    astraea::execution::GuestWorkerFault fault;
+    astraea::execution::GuestWorkerStop stop;
+};
+
+enum class NativeFaultProbeKind {
+    access_violation,
+    illegal_instruction,
+};
+
+std::optional<NativeFaultProbeResult>
+run_owned_native_fault(
+    NativeFaultProbeKind kind,
+    astraea::execution::GuestWorkerId worker_id,
+    astraea::execution::GuestThreadId thread_id) {
+#if !((defined(__linux__) && defined(__x86_64__)) || \
+      (defined(_WIN32) && defined(_M_X64)))
+    (void)kind;
+    (void)worker_id;
+    (void)thread_id;
+    return std::nullopt;
+#else
+    using namespace astraea::execution;
+
+    const auto unit =
+        native_mapping_unit();
+    if (!unit.has_value() ||
+        unit.value() >
+            std::numeric_limits<std::size_t>::max() /
+                4U) {
+        return std::nullopt;
+    }
+
+    const auto block =
+        find_native_free_block(
+            static_cast<std::size_t>(
+                unit.value() * 4U));
+    if (!block.has_value()) {
+        return std::nullopt;
+    }
+
+    const auto code_base = block.value();
+    if (unit.value() >
+            std::numeric_limits<std::uint64_t>::max() /
+                3U ||
+        code_base >
+            std::numeric_limits<std::uint64_t>::max() -
+                unit.value() * 3U) {
+        return std::nullopt;
+    }
+
+    const auto stack_base =
+        code_base + unit.value();
+    const auto gate_base =
+        code_base + unit.value() * 3U;
+
+    std::vector<std::byte> code;
+    if (kind ==
+        NativeFaultProbeKind::access_violation) {
+        // xor rax, rax; mov rax, [rax]
+        // Address zero is intentionally outside the owned guest mappings.
+        code = {
+            std::byte{0x48},
+            std::byte{0x31},
+            std::byte{0xc0},
+            std::byte{0x48},
+            std::byte{0x8b},
+            std::byte{0x00},
+        };
+    } else {
+        // An unregistered UD2 must remain a generic illegal-instruction fault.
+        code = {
+            std::byte{0x0f},
+            std::byte{0x0b},
+        };
+    }
+
+    if (!append_call_gate(
+            code,
+            code_base,
+            gate_base)) {
+        return std::nullopt;
+    }
+
+    auto image =
+        make_native_guest_image(
+            code_base,
+            stack_base,
+            unit.value() * 2U,
+            std::move(code));
+    if (!image.has_value()) {
+        return std::nullopt;
+    }
+
+    auto gate =
+        make_native_gate_region(
+            image.value(),
+            gate_base);
+    if (!gate.has_value()) {
+        return std::nullopt;
+    }
+
+#if defined(__linux__) && defined(__x86_64__)
+    if (!linux_native_execution_backend_available()) {
+        return std::nullopt;
+    }
+    auto prepared =
+        prepare_linux_guest_memory(
+            image.value());
+    if (!prepared.has_value()) {
+        return std::nullopt;
+    }
+    const auto stopped =
+        enter_linux_guest(
+            image.value(),
+            prepared.value(),
+            gate.value(),
+            make_synthetic_initial_context(
+                image.value()));
+#elif defined(_WIN32) && defined(_M_X64)
+    if (!windows_native_execution_backend_available()) {
+        return std::nullopt;
+    }
+    auto prepared =
+        prepare_windows_guest_memory(
+            image.value());
+    if (!prepared.has_value()) {
+        return std::nullopt;
+    }
+    const auto stopped =
+        enter_windows_guest(
+            image.value(),
+            prepared.value(),
+            gate.value(),
+            make_synthetic_initial_context(
+                image.value()));
+#endif
+
+    if (!stopped.has_value() ||
+        stopped->reason !=
+            ExecutionStopReason::guest_fault ||
+        !stopped->has_fault) {
+        return std::nullopt;
+    }
+
+    const auto expected_kind =
+        kind ==
+                NativeFaultProbeKind::access_violation
+            ? GuestFaultKind::access_violation
+            : GuestFaultKind::illegal_instruction;
+    if (stopped->fault.kind != expected_kind) {
+        return std::nullopt;
+    }
+
+    if (kind ==
+            NativeFaultProbeKind::access_violation &&
+        (!stopped->fault.has_fault_address ||
+         stopped->fault.fault_address != 0U)) {
+        return std::nullopt;
+    }
+
+    const auto projected =
+        project_guest_worker_fault(
+            stopped.value(),
+            worker_id,
+            thread_id);
+    if (!projected.has_value()) {
+        return std::nullopt;
+    }
+
+    return NativeFaultProbeResult{
+        .fault = projected.value(),
+        .stop =
+            GuestWorkerStop{
+                .worker_id = worker_id,
+                .thread_id = thread_id,
+                .reason =
+                    GuestWorkerStopReason::
+                        guest_fault,
+                .guest_rip =
+                    projected->guest_rip,
+            },
+    };
+#endif
+}
 
 std::optional<astraea::execution::GuestWorkerStop>
 run_owned_native_syscall_roundtrip(
