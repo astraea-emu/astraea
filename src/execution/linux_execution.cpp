@@ -1251,20 +1251,32 @@ bool linux_native_execution_backend_available() noexcept {
 #endif
 }
 
-LinuxExecutionResult enter_linux_guest(
+bool
+linux_guest_syscall_seccomp_available() noexcept {
+#if defined(__linux__) && defined(__x86_64__) && defined(MAP_FIXED_NOREPLACE) && defined(SYS_seccomp)
+    return true;
+#else
+    return false;
+#endif
+}
+
+[[nodiscard]] static LinuxThreadExecutionResult
+enter_linux_guest_internal(
     const astraea::loader::GuestImage& image,
     const LinuxPreparedMemory& prepared_memory,
     const SyntheticGateRegion& gate_region,
     GuestCpuContext context,
     std::span<const RegisteredSyscallTrapSite>
-        registered_syscall_traps) {
+        registered_syscall_traps,
+    bool enable_seccomp_syscall_trap) {
 #if !(defined(__linux__) && defined(__x86_64__) && defined(MAP_FIXED_NOREPLACE))
     static_cast<void>(image);
     static_cast<void>(prepared_memory);
     static_cast<void>(gate_region);
     static_cast<void>(context);
     static_cast<void>(registered_syscall_traps);
-    return LinuxExecutionResult::failure(
+    static_cast<void>(enable_seccomp_syscall_trap);
+    return LinuxThreadExecutionResult::failure(
         backend_error(
             NativeBackendErrorCode::backend_unavailable));
 #else
@@ -1274,14 +1286,14 @@ LinuxExecutionResult enter_linux_guest(
             prepared_memory,
             context);
     if (!valid.has_value()) {
-        return LinuxExecutionResult::failure(
+        return LinuxThreadExecutionResult::failure(
             valid.error());
     }
 
     if (!registered_traps_are_valid(
             image,
             registered_syscall_traps)) {
-        return LinuxExecutionResult::failure(
+        return LinuxThreadExecutionResult::failure(
             backend_error(
                 NativeBackendErrorCode::
                     invalid_registered_syscall_trap));
@@ -1291,7 +1303,7 @@ LinuxExecutionResult enter_linux_guest(
         g_signal_mutex,
         std::try_to_lock);
     if (!execution_lock.owns_lock()) {
-        return LinuxExecutionResult::failure(
+        return LinuxThreadExecutionResult::failure(
             backend_error(
                 NativeBackendErrorCode::
                     nested_execution_unsupported));
@@ -1302,12 +1314,12 @@ LinuxExecutionResult enter_linux_guest(
             prepared_memory,
             gate_region);
     if (!gate_mapping.has_value()) {
-        return LinuxExecutionResult::failure(
+        return LinuxThreadExecutionResult::failure(
             gate_mapping.error());
     }
 
     try {
-        std::optional<LinuxExecutionResult>
+        std::optional<LinuxThreadExecutionResult>
             thread_result;
         std::thread worker(
             [&]() {
@@ -1317,16 +1329,17 @@ LinuxExecutionResult enter_linux_guest(
                             image,
                             gate_region,
                             context,
-                            registered_syscall_traps));
+                            registered_syscall_traps,
+                            enable_seccomp_syscall_trap));
                 } catch (const std::bad_alloc&) {
                     thread_result.emplace(
-                        LinuxExecutionResult::failure(
+                        LinuxThreadExecutionResult::failure(
                             backend_error(
                                 NativeBackendErrorCode::
                                     recovery_setup_failure)));
                 } catch (...) {
                     thread_result.emplace(
-                        LinuxExecutionResult::failure(
+                        LinuxThreadExecutionResult::failure(
                             backend_error(
                                 NativeBackendErrorCode::
                                     internal_transition_failure)));
@@ -1335,7 +1348,7 @@ LinuxExecutionResult enter_linux_guest(
         worker.join();
 
         if (!thread_result.has_value()) {
-            return LinuxExecutionResult::failure(
+            return LinuxThreadExecutionResult::failure(
                 backend_error(
                     NativeBackendErrorCode::
                         internal_transition_failure));
@@ -1344,7 +1357,7 @@ LinuxExecutionResult enter_linux_guest(
         return std::move(
             thread_result.value());
     } catch (const std::system_error& error) {
-        return LinuxExecutionResult::failure(
+        return LinuxThreadExecutionResult::failure(
             backend_error(
                 NativeBackendErrorCode::
                     recovery_setup_failure,
@@ -1354,12 +1367,73 @@ LinuxExecutionResult enter_linux_guest(
                 static_cast<std::uint64_t>(
                     error.code().value())));
     } catch (const std::bad_alloc&) {
-        return LinuxExecutionResult::failure(
+        return LinuxThreadExecutionResult::failure(
             backend_error(
                 NativeBackendErrorCode::
                     recovery_setup_failure));
     }
 #endif
+}
+
+LinuxExecutionResult enter_linux_guest(
+    const astraea::loader::GuestImage& image,
+    const LinuxPreparedMemory& prepared_memory,
+    const SyntheticGateRegion& gate_region,
+    GuestCpuContext context,
+    std::span<const RegisteredSyscallTrapSite>
+        registered_syscall_traps) {
+    auto result =
+        enter_linux_guest_internal(
+            image,
+            prepared_memory,
+            gate_region,
+            context,
+            registered_syscall_traps,
+            false);
+    if (!result.has_value()) {
+        return LinuxExecutionResult::failure(
+            result.error());
+    }
+
+    if (result->has_seccomp_syscall_trap) {
+        return LinuxExecutionResult::failure(
+            backend_error(
+                NativeBackendErrorCode::
+                    internal_transition_failure));
+    }
+
+    return LinuxExecutionResult::success(
+        result->stop);
+}
+
+LinuxSeccompExecutionResult
+enter_linux_guest_with_seccomp_syscall_trap(
+    const astraea::loader::GuestImage& image,
+    const LinuxPreparedMemory& prepared_memory,
+    const SyntheticGateRegion& gate_region,
+    GuestCpuContext context) {
+    auto result =
+        enter_linux_guest_internal(
+            image,
+            prepared_memory,
+            gate_region,
+            context,
+            {},
+            true);
+    if (!result.has_value()) {
+        return LinuxSeccompExecutionResult::failure(
+            result.error());
+    }
+
+    if (result->has_seccomp_syscall_trap) {
+        return LinuxSeccompExecutionResult::success(
+            LinuxSeccompExecutionEvent{
+                result->seccomp_syscall_trap});
+    }
+
+    return LinuxSeccompExecutionResult::success(
+        LinuxSeccompExecutionEvent{
+            result->stop});
 }
 
 }  // namespace astraea::execution
