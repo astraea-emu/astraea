@@ -5,6 +5,7 @@
 #include <astraea/execution/guest_worker_process_session.hpp>
 
 #include <algorithm>
+#include <atomic>
 #include <array>
 #include <chrono>
 #include <climits>
@@ -34,6 +35,16 @@
 #include <sys/types.h>
 #include <sys/wait.h>
 #include <unistd.h>
+#endif
+
+#if defined(_WIN32)
+#ifndef NOMINMAX
+#define NOMINMAX 1
+#endif
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN 1
+#endif
+#include <windows.h>
 #endif
 
 namespace astraea::execution {
@@ -736,13 +747,1125 @@ spawn_worker(
                 ChildGuard{child_pid}});
 }
 
+#elif defined(_WIN32)
+
+using Clock = std::chrono::steady_clock;
+using Deadline = Clock::time_point;
+
+class UniqueHandle {
+public:
+    UniqueHandle() = default;
+
+    explicit UniqueHandle(HANDLE handle) noexcept
+        : handle_(handle) {}
+
+    UniqueHandle(const UniqueHandle&) = delete;
+    UniqueHandle& operator=(const UniqueHandle&) = delete;
+
+    UniqueHandle(UniqueHandle&& other) noexcept
+        : handle_(
+              std::exchange(
+                  other.handle_,
+                  nullptr)) {}
+
+    UniqueHandle& operator=(UniqueHandle&& other) noexcept {
+        if (this != &other) {
+            reset();
+            handle_ =
+                std::exchange(
+                    other.handle_,
+                    nullptr);
+        }
+        return *this;
+    }
+
+    ~UniqueHandle() {
+        reset();
+    }
+
+    [[nodiscard]] HANDLE get() const noexcept {
+        return handle_;
+    }
+
+    [[nodiscard]] explicit operator bool() const noexcept {
+        return
+            handle_ != nullptr &&
+            handle_ != INVALID_HANDLE_VALUE;
+    }
+
+    [[nodiscard]] HANDLE release() noexcept {
+        return std::exchange(
+            handle_,
+            nullptr);
+    }
+
+    void reset(HANDLE replacement = nullptr) noexcept {
+        if (handle_ != nullptr &&
+            handle_ != INVALID_HANDLE_VALUE) {
+            (void)::CloseHandle(handle_);
+        }
+        handle_ = replacement;
+    }
+
+private:
+    HANDLE handle_ = nullptr;
+};
+
+class ChildGuard {
+public:
+    ChildGuard() = default;
+
+    ChildGuard(
+        UniqueHandle process,
+        UniqueHandle job) noexcept
+        : process_(std::move(process)),
+          job_(std::move(job)) {}
+
+    ChildGuard(const ChildGuard&) = delete;
+    ChildGuard& operator=(const ChildGuard&) = delete;
+
+    ChildGuard(ChildGuard&&) noexcept = default;
+    ChildGuard& operator=(ChildGuard&&) noexcept = default;
+
+    ~ChildGuard() {
+        terminate_and_wait();
+    }
+
+    [[nodiscard]] HANDLE process() const noexcept {
+        return process_.get();
+    }
+
+    void mark_exited() noexcept {
+        exited_ = true;
+    }
+
+    void terminate_and_wait() noexcept {
+        if (!process_) {
+            return;
+        }
+
+        if (!exited_) {
+            if (job_) {
+                (void)::TerminateJobObject(
+                    job_.get(),
+                    0xc000013aU);
+            } else {
+                (void)::TerminateProcess(
+                    process_.get(),
+                    0xc000013aU);
+            }
+        }
+
+        (void)::WaitForSingleObject(
+            process_.get(),
+            INFINITE);
+        exited_ = true;
+    }
+
+private:
+    UniqueHandle process_;
+    UniqueHandle job_;
+    bool exited_ = false;
+};
+
+enum class IoStatus {
+    ok,
+    timeout,
+    eof,
+    failure,
+};
+
+struct IoResult {
+    IoStatus status = IoStatus::failure;
+    DWORD platform_error = ERROR_SUCCESS;
+};
+
+[[nodiscard]] DWORD wait_timeout_ms(
+    Deadline deadline) noexcept {
+    const auto now = Clock::now();
+    if (now >= deadline) {
+        return 0U;
+    }
+
+    const auto remaining =
+        std::chrono::duration_cast<
+            std::chrono::milliseconds>(
+            deadline - now);
+
+    if (remaining.count() <= 0) {
+        return 1U;
+    }
+
+    constexpr auto kMaxFiniteWait =
+        static_cast<std::int64_t>(
+            INFINITE - 1U);
+    if (remaining.count() >= kMaxFiniteWait) {
+        return INFINITE - 1U;
+    }
+
+    return static_cast<DWORD>(
+        remaining.count());
+}
+
+[[nodiscard]] IoResult complete_overlapped_io(
+    HANDLE handle,
+    OVERLAPPED& overlapped,
+    DWORD& transferred,
+    Deadline deadline) noexcept {
+    const auto wait_result =
+        ::WaitForSingleObject(
+            overlapped.hEvent,
+            wait_timeout_ms(deadline));
+
+    if (wait_result == WAIT_TIMEOUT) {
+        if (!::CancelIoEx(
+                handle,
+                &overlapped)) {
+            const auto cancel_error =
+                ::GetLastError();
+            if (cancel_error != ERROR_NOT_FOUND) {
+                return IoResult{
+                    .status = IoStatus::failure,
+                    .platform_error = cancel_error,
+                };
+            }
+        }
+
+        (void)::WaitForSingleObject(
+            overlapped.hEvent,
+            INFINITE);
+        return IoResult{
+            .status = IoStatus::timeout,
+            .platform_error = ERROR_SUCCESS,
+        };
+    }
+
+    if (wait_result != WAIT_OBJECT_0) {
+        return IoResult{
+            .status = IoStatus::failure,
+            .platform_error =
+                wait_result == WAIT_FAILED
+                    ? ::GetLastError()
+                    : ERROR_GEN_FAILURE,
+        };
+    }
+
+    if (!::GetOverlappedResult(
+            handle,
+            &overlapped,
+            &transferred,
+            FALSE)) {
+        const auto io_error = ::GetLastError();
+        if (io_error == ERROR_BROKEN_PIPE ||
+            io_error == ERROR_NO_DATA) {
+            return IoResult{
+                .status = IoStatus::eof,
+                .platform_error = io_error,
+            };
+        }
+        return IoResult{
+            .status = IoStatus::failure,
+            .platform_error = io_error,
+        };
+    }
+
+    return IoResult{
+        .status = IoStatus::ok,
+        .platform_error = ERROR_SUCCESS,
+    };
+}
+
+[[nodiscard]] IoResult read_exact(
+    HANDLE handle,
+    std::span<std::byte> destination,
+    Deadline deadline) noexcept {
+    std::size_t offset = 0U;
+
+    while (offset < destination.size()) {
+        UniqueHandle event{
+            ::CreateEventW(
+                nullptr,
+                TRUE,
+                FALSE,
+                nullptr)};
+        if (!event) {
+            return IoResult{
+                .status = IoStatus::failure,
+                .platform_error =
+                    ::GetLastError(),
+            };
+        }
+
+        OVERLAPPED overlapped{};
+        overlapped.hEvent = event.get();
+
+        const auto remaining =
+            destination.size() - offset;
+        const auto request_size =
+            static_cast<DWORD>(
+                std::min<std::size_t>(
+                    remaining,
+                    std::numeric_limits<DWORD>::max()));
+
+        DWORD transferred = 0U;
+        const auto started =
+            ::ReadFile(
+                handle,
+                destination.data() + offset,
+                request_size,
+                &transferred,
+                &overlapped);
+
+        IoResult result{
+            .status = IoStatus::ok,
+            .platform_error = ERROR_SUCCESS,
+        };
+
+        if (!started) {
+            const auto io_error = ::GetLastError();
+            if (io_error == ERROR_BROKEN_PIPE ||
+                io_error == ERROR_NO_DATA) {
+                return IoResult{
+                    .status = IoStatus::eof,
+                    .platform_error = io_error,
+                };
+            }
+            if (io_error != ERROR_IO_PENDING) {
+                return IoResult{
+                    .status = IoStatus::failure,
+                    .platform_error = io_error,
+                };
+            }
+
+            result =
+                complete_overlapped_io(
+                    handle,
+                    overlapped,
+                    transferred,
+                    deadline);
+            if (result.status != IoStatus::ok) {
+                return result;
+            }
+        }
+
+        if (transferred == 0U) {
+            return IoResult{
+                .status = IoStatus::eof,
+                .platform_error = ERROR_BROKEN_PIPE,
+            };
+        }
+
+        offset +=
+            static_cast<std::size_t>(
+                transferred);
+    }
+
+    return IoResult{
+        .status = IoStatus::ok,
+        .platform_error = ERROR_SUCCESS,
+    };
+}
+
+[[nodiscard]] IoResult write_all(
+    HANDLE handle,
+    std::span<const std::byte> source,
+    Deadline deadline) noexcept {
+    std::size_t offset = 0U;
+
+    while (offset < source.size()) {
+        UniqueHandle event{
+            ::CreateEventW(
+                nullptr,
+                TRUE,
+                FALSE,
+                nullptr)};
+        if (!event) {
+            return IoResult{
+                .status = IoStatus::failure,
+                .platform_error =
+                    ::GetLastError(),
+            };
+        }
+
+        OVERLAPPED overlapped{};
+        overlapped.hEvent = event.get();
+
+        const auto remaining =
+            source.size() - offset;
+        const auto request_size =
+            static_cast<DWORD>(
+                std::min<std::size_t>(
+                    remaining,
+                    std::numeric_limits<DWORD>::max()));
+
+        DWORD transferred = 0U;
+        const auto started =
+            ::WriteFile(
+                handle,
+                source.data() + offset,
+                request_size,
+                &transferred,
+                &overlapped);
+
+        IoResult result{
+            .status = IoStatus::ok,
+            .platform_error = ERROR_SUCCESS,
+        };
+
+        if (!started) {
+            const auto io_error = ::GetLastError();
+            if (io_error == ERROR_BROKEN_PIPE ||
+                io_error == ERROR_NO_DATA) {
+                return IoResult{
+                    .status = IoStatus::eof,
+                    .platform_error = io_error,
+                };
+            }
+            if (io_error != ERROR_IO_PENDING) {
+                return IoResult{
+                    .status = IoStatus::failure,
+                    .platform_error = io_error,
+                };
+            }
+
+            result =
+                complete_overlapped_io(
+                    handle,
+                    overlapped,
+                    transferred,
+                    deadline);
+            if (result.status != IoStatus::ok) {
+                return result;
+            }
+        }
+
+        if (transferred == 0U) {
+            return IoResult{
+                .status = IoStatus::failure,
+                .platform_error = ERROR_WRITE_FAULT,
+            };
+        }
+
+        offset +=
+            static_cast<std::size_t>(
+                transferred);
+    }
+
+    return IoResult{
+        .status = IoStatus::ok,
+        .platform_error = ERROR_SUCCESS,
+    };
+}
+
+[[nodiscard]] astraea::core::Result<
+    bool,
+    GuestWorkerProcessSessionError>
+send_message(
+    HANDLE handle,
+    const GuestWorkerWireMessage& message,
+    Deadline deadline) {
+    const auto encoded =
+        encode_guest_worker_wire_message(message);
+    if (!encoded.has_value()) {
+        return astraea::core::Result<
+            bool,
+            GuestWorkerProcessSessionError>::
+            failure(
+                error(
+                    GuestWorkerProcessSessionErrorCode::
+                        wire_failure,
+                    0,
+                    encoded.error()));
+    }
+
+    const auto written =
+        write_all(
+            handle,
+            encoded.value(),
+            deadline);
+    if (written.status == IoStatus::timeout) {
+        return astraea::core::Result<
+            bool,
+            GuestWorkerProcessSessionError>::
+            failure(
+                error(
+                    GuestWorkerProcessSessionErrorCode::
+                        timeout));
+    }
+    if (written.status != IoStatus::ok) {
+        return astraea::core::Result<
+            bool,
+            GuestWorkerProcessSessionError>::
+            failure(
+                error(
+                    GuestWorkerProcessSessionErrorCode::
+                        io_failure,
+                    written.platform_error));
+    }
+
+    return astraea::core::Result<
+        bool,
+        GuestWorkerProcessSessionError>::
+        success(true);
+}
+
+using ReceiveMessageResult =
+    astraea::core::Result<
+        GuestWorkerWireMessage,
+        GuestWorkerProcessSessionError>;
+
+[[nodiscard]] ReceiveMessageResult receive_message(
+    HANDLE handle,
+    Deadline deadline) {
+    std::array<std::byte, kGuestWorkerWireHeaderSize>
+        header_bytes{};
+
+    const auto header_read =
+        read_exact(
+            handle,
+            header_bytes,
+            deadline);
+    if (header_read.status == IoStatus::timeout) {
+        return ReceiveMessageResult::failure(
+            error(
+                GuestWorkerProcessSessionErrorCode::
+                    timeout));
+    }
+    if (header_read.status == IoStatus::eof) {
+        return ReceiveMessageResult::failure(
+            error(
+                GuestWorkerProcessSessionErrorCode::
+                    unexpected_eof));
+    }
+    if (header_read.status != IoStatus::ok) {
+        return ReceiveMessageResult::failure(
+            error(
+                GuestWorkerProcessSessionErrorCode::
+                    io_failure,
+                header_read.platform_error));
+    }
+
+    const auto header =
+        decode_guest_worker_wire_header(
+            header_bytes);
+    if (!header.has_value()) {
+        return ReceiveMessageResult::failure(
+            error(
+                GuestWorkerProcessSessionErrorCode::
+                    wire_failure,
+                0,
+                header.error()));
+    }
+
+    std::vector<std::byte> frame(
+        header->frame_size);
+    std::copy(
+        header_bytes.begin(),
+        header_bytes.end(),
+        frame.begin());
+
+    if (header->payload_size != 0U) {
+        auto payload =
+            std::span<std::byte>{
+                frame.data() +
+                    kGuestWorkerWireHeaderSize,
+                header->payload_size};
+
+        const auto payload_read =
+            read_exact(
+                handle,
+                payload,
+                deadline);
+        if (payload_read.status == IoStatus::timeout) {
+            return ReceiveMessageResult::failure(
+                error(
+                    GuestWorkerProcessSessionErrorCode::
+                        timeout));
+        }
+        if (payload_read.status == IoStatus::eof) {
+            return ReceiveMessageResult::failure(
+                error(
+                    GuestWorkerProcessSessionErrorCode::
+                        unexpected_eof));
+        }
+        if (payload_read.status != IoStatus::ok) {
+            return ReceiveMessageResult::failure(
+                error(
+                    GuestWorkerProcessSessionErrorCode::
+                        io_failure,
+                    payload_read.platform_error));
+        }
+    }
+
+    const auto decoded =
+        decode_guest_worker_wire_message(frame);
+    if (!decoded.has_value()) {
+        return ReceiveMessageResult::failure(
+            error(
+                GuestWorkerProcessSessionErrorCode::
+                    wire_failure,
+                0,
+                decoded.error()));
+    }
+
+    return ReceiveMessageResult::success(
+        decoded.value());
+}
+
+[[nodiscard]] astraea::core::Result<
+    std::int32_t,
+    GuestWorkerProcessSessionError>
+wait_for_child(
+    ChildGuard& child,
+    Deadline deadline) noexcept {
+    const auto waited =
+        ::WaitForSingleObject(
+            child.process(),
+            wait_timeout_ms(deadline));
+
+    if (waited == WAIT_TIMEOUT) {
+        return astraea::core::Result<
+            std::int32_t,
+            GuestWorkerProcessSessionError>::
+            failure(
+                error(
+                    GuestWorkerProcessSessionErrorCode::
+                        timeout));
+    }
+
+    if (waited != WAIT_OBJECT_0) {
+        return astraea::core::Result<
+            std::int32_t,
+            GuestWorkerProcessSessionError>::
+            failure(
+                error(
+                    GuestWorkerProcessSessionErrorCode::
+                        child_exit_failure,
+                    waited == WAIT_FAILED
+                        ? ::GetLastError()
+                        : ERROR_GEN_FAILURE));
+    }
+
+    DWORD exit_code = 0U;
+    if (!::GetExitCodeProcess(
+            child.process(),
+            &exit_code)) {
+        return astraea::core::Result<
+            std::int32_t,
+            GuestWorkerProcessSessionError>::
+            failure(
+                error(
+                    GuestWorkerProcessSessionErrorCode::
+                        child_exit_failure,
+                    ::GetLastError()));
+    }
+
+    child.mark_exited();
+
+    return astraea::core::Result<
+        std::int32_t,
+        GuestWorkerProcessSessionError>::
+        success(
+            static_cast<std::int32_t>(
+                exit_code));
+}
+
+[[nodiscard]] std::optional<std::wstring>
+utf8_to_wide(
+    const std::string& value) {
+    if (value.empty()) {
+        return std::wstring{};
+    }
+
+    const auto required =
+        ::MultiByteToWideChar(
+            CP_UTF8,
+            MB_ERR_INVALID_CHARS,
+            value.data(),
+            static_cast<int>(value.size()),
+            nullptr,
+            0);
+    if (required <= 0) {
+        return std::nullopt;
+    }
+
+    std::wstring result(
+        static_cast<std::size_t>(required),
+        L'\0');
+    if (::MultiByteToWideChar(
+            CP_UTF8,
+            MB_ERR_INVALID_CHARS,
+            value.data(),
+            static_cast<int>(value.size()),
+            result.data(),
+            required) != required) {
+        return std::nullopt;
+    }
+
+    return result;
+}
+
+[[nodiscard]] std::wstring quote_windows_argument(
+    std::wstring_view argument) {
+    const bool requires_quotes =
+        argument.empty() ||
+        argument.find_first_of(L" \t\"") !=
+            std::wstring_view::npos;
+
+    if (!requires_quotes) {
+        return std::wstring{argument};
+    }
+
+    std::wstring result;
+    result.push_back(L'"');
+
+    std::size_t backslashes = 0U;
+    for (const auto character : argument) {
+        if (character == L'\\') {
+            ++backslashes;
+            continue;
+        }
+
+        if (character == L'"') {
+            result.append(
+                backslashes * 2U + 1U,
+                L'\\');
+            result.push_back(L'"');
+            backslashes = 0U;
+            continue;
+        }
+
+        result.append(
+            backslashes,
+            L'\\');
+        backslashes = 0U;
+        result.push_back(character);
+    }
+
+    result.append(
+        backslashes * 2U,
+        L'\\');
+    result.push_back(L'"');
+    return result;
+}
+
+struct ProcThreadAttributeListGuard {
+    LPPROC_THREAD_ATTRIBUTE_LIST list = nullptr;
+
+    ~ProcThreadAttributeListGuard() {
+        if (list != nullptr) {
+            ::DeleteProcThreadAttributeList(list);
+        }
+    }
+};
+
+[[nodiscard]] astraea::core::Result<
+    std::pair<UniqueHandle, ChildGuard>,
+    GuestWorkerProcessSessionError>
+spawn_worker(
+    const GuestWorkerProcessSessionConfig& config) {
+    static std::atomic<std::uint64_t> pipe_counter{0U};
+
+    const auto pipe_id =
+        pipe_counter.fetch_add(
+            1U,
+            std::memory_order_relaxed);
+    const auto pipe_name =
+        std::wstring{LR"(\\.\pipe\astraea-worker-)"} +
+        std::to_wstring(::GetCurrentProcessId()) +
+        L"-" +
+        std::to_wstring(::GetTickCount64()) +
+        L"-" +
+        std::to_wstring(pipe_id);
+
+    UniqueHandle server{
+        ::CreateNamedPipeW(
+            pipe_name.c_str(),
+            PIPE_ACCESS_DUPLEX |
+                FILE_FLAG_OVERLAPPED |
+                FILE_FLAG_FIRST_PIPE_INSTANCE,
+            PIPE_TYPE_BYTE |
+                PIPE_READMODE_BYTE |
+                PIPE_WAIT |
+                PIPE_REJECT_REMOTE_CLIENTS,
+            1U,
+            4096U,
+            4096U,
+            0U,
+            nullptr)};
+    if (!server) {
+        return astraea::core::Result<
+            std::pair<UniqueHandle, ChildGuard>,
+            GuestWorkerProcessSessionError>::
+            failure(
+                error(
+                    GuestWorkerProcessSessionErrorCode::
+                        channel_creation_failed,
+                    ::GetLastError()));
+    }
+
+    UniqueHandle connect_event{
+        ::CreateEventW(
+            nullptr,
+            TRUE,
+            FALSE,
+            nullptr)};
+    if (!connect_event) {
+        return astraea::core::Result<
+            std::pair<UniqueHandle, ChildGuard>,
+            GuestWorkerProcessSessionError>::
+            failure(
+                error(
+                    GuestWorkerProcessSessionErrorCode::
+                        channel_creation_failed,
+                    ::GetLastError()));
+    }
+
+    OVERLAPPED connect_overlapped{};
+    connect_overlapped.hEvent =
+        connect_event.get();
+
+    bool connect_pending = false;
+    if (!::ConnectNamedPipe(
+            server.get(),
+            &connect_overlapped)) {
+        const auto connect_error =
+            ::GetLastError();
+        if (connect_error == ERROR_IO_PENDING) {
+            connect_pending = true;
+        } else if (connect_error !=
+                   ERROR_PIPE_CONNECTED) {
+            return astraea::core::Result<
+                std::pair<UniqueHandle, ChildGuard>,
+                GuestWorkerProcessSessionError>::
+                failure(
+                    error(
+                        GuestWorkerProcessSessionErrorCode::
+                            channel_creation_failed,
+                        connect_error));
+        }
+    }
+
+    SECURITY_ATTRIBUTES inheritable{
+        .nLength = sizeof(SECURITY_ATTRIBUTES),
+        .lpSecurityDescriptor = nullptr,
+        .bInheritHandle = TRUE,
+    };
+
+    UniqueHandle client{
+        ::CreateFileW(
+            pipe_name.c_str(),
+            GENERIC_READ | GENERIC_WRITE,
+            0U,
+            &inheritable,
+            OPEN_EXISTING,
+            FILE_ATTRIBUTE_NORMAL,
+            nullptr)};
+    if (!client) {
+        if (connect_pending) {
+            (void)::CancelIoEx(
+                server.get(),
+                &connect_overlapped);
+        }
+        return astraea::core::Result<
+            std::pair<UniqueHandle, ChildGuard>,
+            GuestWorkerProcessSessionError>::
+            failure(
+                error(
+                    GuestWorkerProcessSessionErrorCode::
+                        channel_creation_failed,
+                    ::GetLastError()));
+    }
+
+    if (connect_pending) {
+        const auto deadline =
+            Clock::now() +
+            std::chrono::milliseconds{
+                static_cast<std::int64_t>(
+                    config.timeout_milliseconds)};
+        DWORD transferred = 0U;
+        const auto connected =
+            complete_overlapped_io(
+                server.get(),
+                connect_overlapped,
+                transferred,
+                deadline);
+        if (connected.status != IoStatus::ok) {
+            return astraea::core::Result<
+                std::pair<UniqueHandle, ChildGuard>,
+                GuestWorkerProcessSessionError>::
+                failure(
+                    error(
+                        connected.status ==
+                                IoStatus::timeout
+                            ? GuestWorkerProcessSessionErrorCode::
+                                  timeout
+                            : GuestWorkerProcessSessionErrorCode::
+                                  channel_creation_failed,
+                        connected.platform_error));
+        }
+    }
+
+    UniqueHandle stderr_sink{
+        ::CreateFileW(
+            L"NUL",
+            GENERIC_WRITE,
+            FILE_SHARE_READ |
+                FILE_SHARE_WRITE,
+            &inheritable,
+            OPEN_EXISTING,
+            FILE_ATTRIBUTE_NORMAL,
+            nullptr)};
+    if (!stderr_sink) {
+        return astraea::core::Result<
+            std::pair<UniqueHandle, ChildGuard>,
+            GuestWorkerProcessSessionError>::
+            failure(
+                error(
+                    GuestWorkerProcessSessionErrorCode::
+                        channel_creation_failed,
+                    ::GetLastError()));
+    }
+
+    SIZE_T attribute_bytes = 0U;
+    (void)::InitializeProcThreadAttributeList(
+        nullptr,
+        1U,
+        0U,
+        &attribute_bytes);
+    if (attribute_bytes == 0U) {
+        return astraea::core::Result<
+            std::pair<UniqueHandle, ChildGuard>,
+            GuestWorkerProcessSessionError>::
+            failure(
+                error(
+                    GuestWorkerProcessSessionErrorCode::
+                        spawn_failed,
+                    ::GetLastError()));
+    }
+
+    std::vector<std::byte> attribute_storage(
+        attribute_bytes);
+    auto* attribute_list =
+        reinterpret_cast<
+            LPPROC_THREAD_ATTRIBUTE_LIST>(
+                attribute_storage.data());
+    if (!::InitializeProcThreadAttributeList(
+            attribute_list,
+            1U,
+            0U,
+            &attribute_bytes)) {
+        return astraea::core::Result<
+            std::pair<UniqueHandle, ChildGuard>,
+            GuestWorkerProcessSessionError>::
+            failure(
+                error(
+                    GuestWorkerProcessSessionErrorCode::
+                        spawn_failed,
+                    ::GetLastError()));
+    }
+    ProcThreadAttributeListGuard attribute_guard{
+        .list = attribute_list,
+    };
+
+    std::array<HANDLE, 2> inherited_handles{
+        client.get(),
+        stderr_sink.get(),
+    };
+    if (!::UpdateProcThreadAttribute(
+            attribute_list,
+            0U,
+            PROC_THREAD_ATTRIBUTE_HANDLE_LIST,
+            inherited_handles.data(),
+            sizeof(inherited_handles),
+            nullptr,
+            nullptr)) {
+        return astraea::core::Result<
+            std::pair<UniqueHandle, ChildGuard>,
+            GuestWorkerProcessSessionError>::
+            failure(
+                error(
+                    GuestWorkerProcessSessionErrorCode::
+                        spawn_failed,
+                    ::GetLastError()));
+    }
+
+    STARTUPINFOEXW startup{};
+    startup.StartupInfo.cb =
+        sizeof(STARTUPINFOEXW);
+    startup.StartupInfo.dwFlags =
+        STARTF_USESTDHANDLES;
+    startup.StartupInfo.hStdInput =
+        client.get();
+    startup.StartupInfo.hStdOutput =
+        client.get();
+    startup.StartupInfo.hStdError =
+        stderr_sink.get();
+    startup.lpAttributeList =
+        attribute_list;
+
+    const auto executable =
+        std::filesystem::path{
+            config.worker_executable}
+            .wstring();
+
+    std::wstring command_line =
+        quote_windows_argument(executable);
+    for (const auto& argument :
+         config.worker_arguments) {
+        const auto wide_argument =
+            utf8_to_wide(argument);
+        if (!wide_argument.has_value()) {
+            return astraea::core::Result<
+                std::pair<UniqueHandle, ChildGuard>,
+                GuestWorkerProcessSessionError>::
+                failure(
+                    error(
+                        GuestWorkerProcessSessionErrorCode::
+                            invalid_config,
+                        ERROR_NO_UNICODE_TRANSLATION));
+        }
+        command_line.push_back(L' ');
+        command_line +=
+            quote_windows_argument(
+                wide_argument.value());
+    }
+
+    std::vector<wchar_t> command_buffer(
+        command_line.begin(),
+        command_line.end());
+    command_buffer.push_back(L'\0');
+
+    std::wstring environment =
+        L"ASTRAEA_CONTROLLER_PID=" +
+        std::to_wstring(
+            ::GetCurrentProcessId());
+    environment.push_back(L'\0');
+    environment.push_back(L'\0');
+
+    UniqueHandle job{
+        ::CreateJobObjectW(
+            nullptr,
+            nullptr)};
+    if (!job) {
+        return astraea::core::Result<
+            std::pair<UniqueHandle, ChildGuard>,
+            GuestWorkerProcessSessionError>::
+            failure(
+                error(
+                    GuestWorkerProcessSessionErrorCode::
+                        spawn_failed,
+                    ::GetLastError()));
+    }
+
+    JOBOBJECT_EXTENDED_LIMIT_INFORMATION limits{};
+    limits.BasicLimitInformation.LimitFlags =
+        JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE |
+        JOB_OBJECT_LIMIT_ACTIVE_PROCESS;
+    limits.BasicLimitInformation.ActiveProcessLimit =
+        1U;
+    if (!::SetInformationJobObject(
+            job.get(),
+            JobObjectExtendedLimitInformation,
+            &limits,
+            sizeof(limits))) {
+        return astraea::core::Result<
+            std::pair<UniqueHandle, ChildGuard>,
+            GuestWorkerProcessSessionError>::
+            failure(
+                error(
+                    GuestWorkerProcessSessionErrorCode::
+                        spawn_failed,
+                    ::GetLastError()));
+    }
+
+    PROCESS_INFORMATION process_info{};
+    if (!::CreateProcessW(
+            executable.c_str(),
+            command_buffer.data(),
+            nullptr,
+            nullptr,
+            TRUE,
+            CREATE_SUSPENDED |
+                CREATE_NO_WINDOW |
+                CREATE_UNICODE_ENVIRONMENT |
+                EXTENDED_STARTUPINFO_PRESENT,
+            environment.data(),
+            nullptr,
+            &startup.StartupInfo,
+            &process_info)) {
+        return astraea::core::Result<
+            std::pair<UniqueHandle, ChildGuard>,
+            GuestWorkerProcessSessionError>::
+            failure(
+                error(
+                    GuestWorkerProcessSessionErrorCode::
+                        spawn_failed,
+                    ::GetLastError()));
+    }
+
+    UniqueHandle process{
+        process_info.hProcess};
+    UniqueHandle thread{
+        process_info.hThread};
+
+    if (!::AssignProcessToJobObject(
+            job.get(),
+            process.get())) {
+        (void)::TerminateProcess(
+            process.get(),
+            0xc000013aU);
+        (void)::WaitForSingleObject(
+            process.get(),
+            INFINITE);
+        return astraea::core::Result<
+            std::pair<UniqueHandle, ChildGuard>,
+            GuestWorkerProcessSessionError>::
+            failure(
+                error(
+                    GuestWorkerProcessSessionErrorCode::
+                        spawn_failed,
+                    ::GetLastError()));
+    }
+
+    ChildGuard child{
+        std::move(process),
+        std::move(job)};
+
+    // The parent copy of the child-facing handles is no longer required.
+    client.reset();
+    stderr_sink.reset();
+
+    if (::ResumeThread(thread.get()) ==
+        static_cast<DWORD>(-1)) {
+        return astraea::core::Result<
+            std::pair<UniqueHandle, ChildGuard>,
+            GuestWorkerProcessSessionError>::
+            failure(
+                error(
+                    GuestWorkerProcessSessionErrorCode::
+                        spawn_failed,
+                    ::GetLastError()));
+    }
+
+    thread.reset();
+
+    return astraea::core::Result<
+        std::pair<UniqueHandle, ChildGuard>,
+        GuestWorkerProcessSessionError>::
+        success(
+            std::pair<UniqueHandle, ChildGuard>{
+                std::move(server),
+                std::move(child)});
+}
+
 #endif
 
 }  // namespace
 
 bool
 guest_worker_process_session_available() noexcept {
-#if defined(__linux__)
+#if defined(__linux__) || defined(_WIN32)
     return true;
 #else
     return false;
@@ -777,7 +1900,7 @@ run_guest_worker_process_session(
                     validated_run.error()));
         }
 
-#if !defined(__linux__)
+#if !defined(__linux__) && !defined(_WIN32)
         return GuestWorkerProcessSessionRunResult::failure(
             error(
                 GuestWorkerProcessSessionErrorCode::
