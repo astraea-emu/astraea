@@ -26,44 +26,12 @@ namespace {
     return false;
 }
 
-[[nodiscard]] std::size_t dynamic_dependency_count(
-    const astraea::loader::GuestImage& image) {
-    std::size_t count = 0;
-
-    if (image.dynamic_strings.has_value()) {
-        count = image.dynamic_strings->needed.size();
+[[nodiscard]] std::size_t generic_dynamic_dependency_count(
+    const astraea::loader::GuestImage& image) noexcept {
+    if (!image.dynamic_strings.has_value()) {
+        return 0U;
     }
-
-    if (!image.dynamic_table.has_value()) {
-        return count;
-    }
-
-    const auto sce =
-        astraea::loader::build_sce_dynamic_metadata(
-            *image.dynamic_table);
-    if (!sce.has_value()) {
-        // GuestImage has already structurally validated the dynamic table.
-        // If the evidence-only SCE metadata view cannot be materialized, fail
-        // closed by reporting unresolved dynamic work instead of admitting
-        // native entry.
-        return std::max<std::size_t>(count, 1U);
-    }
-
-    for (const auto& record : sce->records) {
-        if (record.kind ==
-                astraea::loader::
-                    SceDynamicTagKind::needed_module ||
-            record.kind ==
-                astraea::loader::
-                    SceDynamicTagKind::import_library) {
-            if (count !=
-                std::numeric_limits<std::size_t>::max()) {
-                ++count;
-            }
-        }
-    }
-
-    return count;
+    return image.dynamic_strings->needed.size();
 }
 
 [[nodiscard]] std::uint64_t relocation_count(
@@ -128,6 +96,7 @@ preflight_linux_retail_diagnostic(
                     loader_rejected,
             .loader_error =
                 std::move(built.error()),
+            .sce_dynamic_metadata_error = std::nullopt,
             .dynamic_dependency_count = 0,
             .relocation_count = 0,
             .image = std::nullopt,
@@ -142,6 +111,7 @@ preflight_linux_retail_diagnostic(
                 LinuxRetailDiagnosticPreflightBoundaryKind::
                     entry_not_executable,
             .loader_error = std::nullopt,
+            .sce_dynamic_metadata_error = std::nullopt,
             .dynamic_dependency_count = 0,
             .relocation_count = 0,
             .image =
@@ -150,14 +120,51 @@ preflight_linux_retail_diagnostic(
         };
     }
 
-    const auto dependencies =
-        dynamic_dependency_count(image);
+    std::size_t dependencies =
+        generic_dynamic_dependency_count(image);
+
+    if (image.dynamic_table.has_value()) {
+        const auto sce =
+            astraea::loader::build_sce_dynamic_metadata(
+                *image.dynamic_table);
+        if (!sce.has_value()) {
+            return LinuxRetailDiagnosticPreflight{
+                .boundary =
+                    LinuxRetailDiagnosticPreflightBoundaryKind::
+                        sce_dynamic_metadata_rejected,
+                .loader_error = std::nullopt,
+                .sce_dynamic_metadata_error =
+                    sce.error(),
+                .dynamic_dependency_count = 0,
+                .relocation_count = 0,
+                .image =
+                    std::optional<astraea::loader::GuestImage>{
+                        std::move(image)},
+            };
+        }
+
+        for (const auto& record : sce->records) {
+            if (record.kind ==
+                    astraea::loader::
+                        SceDynamicTagKind::needed_module ||
+                record.kind ==
+                    astraea::loader::
+                        SceDynamicTagKind::import_library) {
+                if (dependencies !=
+                    std::numeric_limits<std::size_t>::max()) {
+                    ++dependencies;
+                }
+            }
+        }
+    }
+
     if (dependencies != 0U) {
         return LinuxRetailDiagnosticPreflight{
             .boundary =
                 LinuxRetailDiagnosticPreflightBoundaryKind::
                     unsupported_dynamic_dependencies,
             .loader_error = std::nullopt,
+            .sce_dynamic_metadata_error = std::nullopt,
             .dynamic_dependency_count =
                 dependencies,
             .relocation_count = 0,
@@ -175,6 +182,7 @@ preflight_linux_retail_diagnostic(
                 LinuxRetailDiagnosticPreflightBoundaryKind::
                     unsupported_relocations,
             .loader_error = std::nullopt,
+            .sce_dynamic_metadata_error = std::nullopt,
             .dynamic_dependency_count = 0,
             .relocation_count =
                 relocations,
@@ -190,6 +198,7 @@ preflight_linux_retail_diagnostic(
                 LinuxRetailDiagnosticPreflightBoundaryKind::
                     unsupported_tls,
             .loader_error = std::nullopt,
+            .sce_dynamic_metadata_error = std::nullopt,
             .dynamic_dependency_count = 0,
             .relocation_count = 0,
             .image =
