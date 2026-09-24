@@ -24,6 +24,31 @@
 
 namespace {
 
+#if defined(_WIN32)
+class TestHandle {
+public:
+    explicit TestHandle(HANDLE handle) noexcept
+        : handle_(handle) {}
+
+    TestHandle(const TestHandle&) = delete;
+    TestHandle& operator=(const TestHandle&) = delete;
+
+    ~TestHandle() {
+        if (handle_ != nullptr &&
+            handle_ != INVALID_HANDLE_VALUE) {
+            (void)::CloseHandle(handle_);
+        }
+    }
+
+    [[nodiscard]] HANDLE get() const noexcept {
+        return handle_;
+    }
+
+private:
+    HANDLE handle_ = nullptr;
+};
+#endif
+
 astraea::execution::GuestWorkerProcessSessionConfig
 config(
     std::vector<std::string> arguments = {},
@@ -193,17 +218,17 @@ TEST_CASE(
         .bInheritHandle = TRUE,
     };
 
-    const auto unrelated_event =
+    TestHandle unrelated_event{
         ::CreateEventW(
             &attributes,
             TRUE,
             FALSE,
-            nullptr);
-    REQUIRE(unrelated_event != nullptr);
+            nullptr)};
+    REQUIRE(unrelated_event.get() != nullptr);
 
     const auto handle_value =
         reinterpret_cast<std::uintptr_t>(
-            unrelated_event);
+            unrelated_event.get());
     const auto argument =
         std::string{"--signal-handle="} +
         std::to_string(handle_value);
@@ -220,11 +245,9 @@ TEST_CASE(
     // would have signaled it before the HELLO/READY exchange.
     REQUIRE(
         ::WaitForSingleObject(
-            unrelated_event,
+            unrelated_event.get(),
             0U) ==
         WAIT_TIMEOUT);
-
-    REQUIRE(::CloseHandle(unrelated_event));
 }
 
 #endif
