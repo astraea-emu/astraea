@@ -3,9 +3,20 @@
 #include <chrono>
 #include <cstdint>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include <catch2/catch_test_macros.hpp>
+
+#if defined(_WIN32)
+#ifndef NOMINMAX
+#define NOMINMAX 1
+#endif
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN 1
+#endif
+#include <windows.h>
+#endif
 
 #ifndef ASTRAEA_GUEST_WORKER_PROBE_PATH
 #define ASTRAEA_GUEST_WORKER_PROBE_PATH ""
@@ -35,7 +46,7 @@ config(
 TEST_CASE(
     "guest-worker process session availability is platform explicit",
     "[execution][c0][process]") {
-#if defined(__linux__)
+#if defined(__linux__) || defined(_WIN32)
     REQUIRE(
         astraea::execution::
             guest_worker_process_session_available());
@@ -65,11 +76,11 @@ TEST_CASE(
                 invalid_config);
 }
 
-#if defined(__linux__)
+#if defined(__linux__) || defined(_WIN32)
 
 TEST_CASE(
-    "Linux controller and worker complete bounded handshake run stop terminate",
-    "[execution][c0][process][linux]") {
+    "controller and worker complete bounded handshake run stop terminate",
+    "[execution][c0][process][supervised]") {
     const auto result =
         astraea::execution::
             run_guest_worker_process_session(
@@ -95,8 +106,8 @@ TEST_CASE(
 }
 
 TEST_CASE(
-    "Linux worker crash before READY becomes deterministic EOF",
-    "[execution][c0][process][linux][negative]") {
+    "worker crash before READY becomes deterministic EOF",
+    "[execution][c0][process][supervised][negative]") {
     const auto result =
         astraea::execution::
             run_guest_worker_process_session(
@@ -112,8 +123,8 @@ TEST_CASE(
 }
 
 TEST_CASE(
-    "Linux malformed worker frame fails at wire boundary",
-    "[execution][c0][process][linux][negative][wire]") {
+    "malformed worker frame fails at wire boundary",
+    "[execution][c0][process][supervised][negative][wire]") {
     const auto result =
         astraea::execution::
             run_guest_worker_process_session(
@@ -135,8 +146,8 @@ TEST_CASE(
 }
 
 TEST_CASE(
-    "Linux worker timeout returns only after cleanup and session is reusable",
-    "[execution][c0][process][linux][negative][timeout]") {
+    "worker timeout returns only after cleanup and session is reusable",
+    "[execution][c0][process][supervised][negative][timeout]") {
     const auto started =
         std::chrono::steady_clock::now();
 
@@ -170,5 +181,52 @@ TEST_CASE(
     REQUIRE(subsequent.has_value());
     REQUIRE(subsequent->child_exit_code == 0);
 }
+
+#if defined(_WIN32)
+
+TEST_CASE(
+    "Windows worker does not inherit unrelated inheritable parent handle",
+    "[execution][c0][process][windows][inheritance]") {
+    SECURITY_ATTRIBUTES attributes{
+        .nLength = sizeof(SECURITY_ATTRIBUTES),
+        .lpSecurityDescriptor = nullptr,
+        .bInheritHandle = TRUE,
+    };
+
+    const auto unrelated_event =
+        ::CreateEventW(
+            &attributes,
+            TRUE,
+            FALSE,
+            nullptr);
+    REQUIRE(unrelated_event != nullptr);
+
+    const auto handle_value =
+        reinterpret_cast<std::uintptr_t>(
+            unrelated_event);
+    const auto argument =
+        std::string{"--signal-handle="} +
+        std::to_string(handle_value);
+
+    const auto result =
+        astraea::execution::
+            run_guest_worker_process_session(
+                config({argument}));
+
+    REQUIRE(result.has_value());
+    REQUIRE(result->child_exit_code == 0);
+
+    // If broad inheritance leaked this exact event into the worker, the worker
+    // would have signaled it before the HELLO/READY exchange.
+    REQUIRE(
+        ::WaitForSingleObject(
+            unrelated_event,
+            0U) ==
+        WAIT_TIMEOUT);
+
+    REQUIRE(::CloseHandle(unrelated_event));
+}
+
+#endif
 
 #endif
