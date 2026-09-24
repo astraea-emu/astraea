@@ -125,6 +125,21 @@ TEST_CASE(
     };
     REQUIRE(round_trip(diagnostic) == diagnostic);
 
+    auto initial_abi = diagnostic;
+    initial_abi.kind =
+        GuestWorkerDiagnosticKind::
+            unsupported_initial_process_abi;
+    REQUIRE(round_trip(initial_abi) == initial_abi);
+
+    auto unsupported_syscall = diagnostic;
+    unsupported_syscall.kind =
+        GuestWorkerDiagnosticKind::
+            unsupported_syscall;
+    unsupported_syscall.detail0 = 0x1234U;
+    REQUIRE(
+        round_trip(unsupported_syscall) ==
+        unsupported_syscall);
+
     const GuestWorkerStop diagnostic_stop{
         .worker_id = syscall.worker_id,
         .thread_id = syscall.thread_id,
