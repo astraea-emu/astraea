@@ -1612,7 +1612,7 @@ enter_linux_guest_internal(
 LinuxExecutionResult enter_linux_guest(
     const astraea::loader::GuestImage& image,
     const LinuxPreparedMemory& prepared_memory,
-    const SyntheticGateRegion* gate_region,
+    const SyntheticGateRegion& gate_region,
     GuestCpuContext context,
     std::span<const RegisteredSyscallTrapSite>
         registered_syscall_traps) {
