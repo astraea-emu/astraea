@@ -155,6 +155,7 @@ add_library(astraea_core STATIC
     src/graphics/shader_wave_block_execution.cpp
     src/graphics/shader_wave_program_execution.cpp
     src/graphics/spirv_vector_probe.cpp
+    src/graphics/spirv_raster_probe.cpp
     src/graphics/vulkan_vector_probe_execution.cpp
     src/graphics/vulkan_gpu_buffer_write_execution.cpp
     src/graphics/vulkan_offscreen_image_execution.cpp
