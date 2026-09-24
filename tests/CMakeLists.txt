@@ -52,6 +52,7 @@ add_executable(astraea_core_tests
     execution/sce_agc_driver_submit_dcb_tests.cpp
     execution/sce_agc_shader_preparation_tests.cpp
     execution/sce_agc_shader_registry_tests.cpp
+    execution/sce_agc_shader_stage_lookup_tests.cpp
     execution/sce_agc_submission_shader_binding_tests.cpp
     execution/sce_agc_create_shader_prototype_tests.cpp
     probe/hello_tests.cpp
@@ -72,6 +73,7 @@ add_executable(astraea_core_tests
     graphics/gfx10_surface_layout_tests.cpp
     graphics/graphics_ir_tests.cpp
     graphics/shader_register_state_tests.cpp
+    graphics/geometry_es_program_address_tests.cpp
     graphics/context_register_state_tests.cpp
     graphics/color_target_state_tests.cpp
     graphics/user_config_register_state_tests.cpp

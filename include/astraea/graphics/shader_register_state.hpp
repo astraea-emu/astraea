@@ -18,6 +18,11 @@ inline constexpr std::size_t kShaderRegisterStateDwords =
 inline constexpr std::uint16_t kPixelProgramLoRegisterOffset = 0x0008U;
 inline constexpr std::uint16_t kPixelProgramHiRegisterOffset = 0x0009U;
 
+// Type-2 Geometry/fused-pre-raster profile already validated by
+// CreateShader preparation. These are the leading ES PGM_LO/HI registers.
+inline constexpr std::uint16_t kGeometryEsProgramLoRegisterOffset = 0x00c8U;
+inline constexpr std::uint16_t kGeometryEsProgramHiRegisterOffset = 0x00c9U;
+
 struct ShaderRegisterState {
     std::array<std::uint32_t, kShaderRegisterStateDwords> values{};
     std::bitset<kShaderRegisterStateDwords> initialized{};
@@ -94,6 +99,39 @@ using PixelProgramAddressResult =
 // This returns a GPU-domain value, not a CPU guest pointer or Vulkan object.
 [[nodiscard]] PixelProgramAddressResult
 resolve_pixel_program_address(
+    const ShaderRegisterState& state) noexcept;
+
+struct GeometryEsProgramGpuAddress {
+    std::uint64_t value = 0;
+
+    auto operator<=>(const GeometryEsProgramGpuAddress&) const = default;
+};
+
+enum class GeometryEsProgramAddressErrorCode {
+    pgm_lo_uninitialized,
+    pgm_hi_uninitialized,
+    unsupported_pgm_hi_bits,
+};
+
+struct GeometryEsProgramAddressError {
+    GeometryEsProgramAddressErrorCode code =
+        GeometryEsProgramAddressErrorCode::pgm_lo_uninitialized;
+    std::uint32_t pgm_lo = 0;
+    std::uint32_t pgm_hi = 0;
+
+    auto operator<=>(const GeometryEsProgramAddressError&) const = default;
+};
+
+using GeometryEsProgramAddressResult =
+    astraea::core::Result<
+        GeometryEsProgramGpuAddress,
+        GeometryEsProgramAddressError>;
+
+// Resolves the exact type-2 Geometry/ES program pair already supported by
+// CreateShader preparation. The encoding matches the verified Pixel program
+// address shape: LO supplies bits 8..39 and the low HI byte supplies 40..47.
+[[nodiscard]] GeometryEsProgramAddressResult
+resolve_geometry_es_program_address(
     const ShaderRegisterState& state) noexcept;
 
 }  // namespace astraea::graphics
