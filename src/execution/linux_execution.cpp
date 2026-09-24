@@ -1281,7 +1281,7 @@ restore_signal_environment(
 [[nodiscard]] LinuxThreadExecutionResult
 run_linux_guest_thread(
     const astraea::loader::GuestImage& image,
-    const SyntheticGateRegion& gate_region,
+    const SyntheticGateRegion* gate_region,
     GuestCpuContext context,
     std::span<const RegisteredSyscallTrapSite>
         registered_syscall_traps,
@@ -1392,10 +1392,15 @@ run_linux_guest_thread(
         seccomp_instruction_ranges.data();
     frame.seccomp_ip_range_count =
         seccomp_instruction_ranges.size();
-    frame.gate_base =
-        gate_region.range().base().value();
-    frame.gate_slot_count =
-        gate_region.slot_count();
+    if (gate_region != nullptr) {
+        frame.gate_base =
+            gate_region->range().base().value();
+        frame.gate_slot_count =
+            gate_region->slot_count();
+    } else {
+        frame.gate_base = 0U;
+        frame.gate_slot_count = 0U;
+    }
     frame.registered_syscall_traps =
         registered_syscall_traps.data();
     frame.registered_syscall_trap_count =
@@ -1488,7 +1493,7 @@ linux_guest_syscall_seccomp_available() noexcept {
 enter_linux_guest_internal(
     const astraea::loader::GuestImage& image,
     const LinuxPreparedMemory& prepared_memory,
-    const SyntheticGateRegion& gate_region,
+    const SyntheticGateRegion* gate_region,
     GuestCpuContext context,
     std::span<const RegisteredSyscallTrapSite>
         registered_syscall_traps,
@@ -1533,13 +1538,18 @@ enter_linux_guest_internal(
                     nested_execution_unsupported));
     }
 
-    auto gate_mapping =
-        GateMapping::prepare(
-            prepared_memory,
-            gate_region);
-    if (!gate_mapping.has_value()) {
-        return LinuxThreadExecutionResult::failure(
-            gate_mapping.error());
+    std::optional<GateMapping> gate_mapping;
+    if (gate_region != nullptr) {
+        auto prepared_gate =
+            GateMapping::prepare(
+                prepared_memory,
+                *gate_region);
+        if (!prepared_gate.has_value()) {
+            return LinuxThreadExecutionResult::failure(
+                prepared_gate.error());
+        }
+        gate_mapping.emplace(
+            std::move(prepared_gate.value()));
     }
 
     try {
@@ -1602,7 +1612,7 @@ enter_linux_guest_internal(
 LinuxExecutionResult enter_linux_guest(
     const astraea::loader::GuestImage& image,
     const LinuxPreparedMemory& prepared_memory,
-    const SyntheticGateRegion& gate_region,
+    const SyntheticGateRegion* gate_region,
     GuestCpuContext context,
     std::span<const RegisteredSyscallTrapSite>
         registered_syscall_traps) {
@@ -1610,7 +1620,7 @@ LinuxExecutionResult enter_linux_guest(
         enter_linux_guest_internal(
             image,
             prepared_memory,
-            gate_region,
+            &gate_region,
             context,
             registered_syscall_traps,
             false);
@@ -1640,7 +1650,7 @@ enter_linux_guest_with_seccomp_syscall_trap(
         enter_linux_guest_internal(
             image,
             prepared_memory,
-            gate_region,
+            &gate_region,
             context,
             {},
             true);
@@ -1659,5 +1669,35 @@ enter_linux_guest_with_seccomp_syscall_trap(
         LinuxSeccompExecutionEvent{
             result->stop});
 }
+
+LinuxSeccompExecutionResult
+enter_linux_guest_with_seccomp_syscall_trap(
+    const astraea::loader::GuestImage& image,
+    const LinuxPreparedMemory& prepared_memory,
+    GuestCpuContext context) {
+    auto result =
+        enter_linux_guest_internal(
+            image,
+            prepared_memory,
+            nullptr,
+            context,
+            {},
+            true);
+    if (!result.has_value()) {
+        return LinuxSeccompExecutionResult::failure(
+            result.error());
+    }
+
+    if (result->has_seccomp_syscall_trap) {
+        return LinuxSeccompExecutionResult::success(
+            LinuxSeccompExecutionEvent{
+                result->seccomp_syscall_trap});
+    }
+
+    return LinuxSeccompExecutionResult::success(
+        LinuxSeccompExecutionEvent{
+            result->stop});
+}
+
 
 }  // namespace astraea::execution
