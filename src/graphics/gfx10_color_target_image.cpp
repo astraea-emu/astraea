@@ -7,11 +7,13 @@
 namespace astraea::graphics {
 namespace {
 
+constexpr std::uint32_t kEndianMask = 0x3U;
 constexpr std::uint32_t kLinearGeneralBit = 1U << 7U;
 constexpr std::uint32_t kFastClearBit = 1U << 13U;
 constexpr std::uint32_t kCompressionBit = 1U << 14U;
 constexpr std::uint32_t kFmaskCompressionDisableBit = 1U << 26U;
 constexpr std::uint32_t kFmaskCompressOneFragmentBit = 1U << 27U;
+constexpr std::uint32_t kCmaskIsLinearBit = 1U << 19U;
 constexpr std::uint32_t kCmaskAddressTypeMask = 0x3U << 29U;
 constexpr std::uint32_t kNbcTilingBit = 1U << 31U;
 
@@ -46,6 +48,14 @@ constexpr std::uint32_t kNbcTilingBit = 1U << 31U;
 Gfx10ColorTargetImageResult
 plan_gfx10_linear_rgba8_unorm_color_target_image(
     const ColorTarget0ContextState& target) noexcept {
+    if ((target.raw_info & kEndianMask) != 0U) {
+        return Gfx10ColorTargetImageResult::failure(
+            error(
+                Gfx10ColorTargetImageErrorCode::
+                    unsupported_endian,
+                target.raw_info & kEndianMask));
+    }
+
     if (target.format != kGfx10ColorFormatR8G8B8A8) {
         return Gfx10ColorTargetImageResult::failure(
             error(
@@ -112,7 +122,9 @@ plan_gfx10_linear_rgba8_unorm_color_target_image(
                 target.raw_info));
     }
 
-    if ((target.raw_info & kCmaskAddressTypeMask) != 0U) {
+    if ((target.raw_info &
+         (kCmaskIsLinearBit |
+          kCmaskAddressTypeMask)) != 0U) {
         return Gfx10ColorTargetImageResult::failure(
             error(
                 Gfx10ColorTargetImageErrorCode::
