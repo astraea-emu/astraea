@@ -636,6 +636,166 @@ wait_for_child(
     }
 }
 
+using ResourcePolicyApplyResult =
+    astraea::core::Result<
+        bool,
+        GuestWorkerProcessSessionError>;
+
+[[nodiscard]] ResourcePolicyApplyResult
+apply_linux_resource_limit(
+    pid_t pid,
+    int resource,
+    std::uint64_t requested) noexcept {
+    if constexpr (
+        sizeof(rlim_t) <
+        sizeof(std::uint64_t)) {
+        if (requested >
+            static_cast<std::uint64_t>(
+                std::numeric_limits<rlim_t>::max())) {
+            return ResourcePolicyApplyResult::failure(
+                error(
+                    GuestWorkerProcessSessionErrorCode::
+                        resource_policy_failure,
+                    EOVERFLOW));
+        }
+    }
+
+    rlimit current{};
+    if (::prlimit(
+            pid,
+            resource,
+            nullptr,
+            &current) != 0) {
+        return ResourcePolicyApplyResult::failure(
+            error(
+                GuestWorkerProcessSessionErrorCode::
+                    resource_policy_failure,
+                errno));
+    }
+
+    const auto requested_limit =
+        static_cast<rlim_t>(requested);
+
+    rlimit target{
+        .rlim_cur =
+            std::min(
+                current.rlim_cur,
+                requested_limit),
+        .rlim_max =
+            std::min(
+                current.rlim_max,
+                requested_limit),
+    };
+    if (target.rlim_cur > target.rlim_max) {
+        target.rlim_cur = target.rlim_max;
+    }
+
+    if (::prlimit(
+            pid,
+            resource,
+            &target,
+            nullptr) != 0) {
+        return ResourcePolicyApplyResult::failure(
+            error(
+                GuestWorkerProcessSessionErrorCode::
+                    resource_policy_failure,
+                errno));
+    }
+
+    rlimit actual{};
+    if (::prlimit(
+            pid,
+            resource,
+            nullptr,
+            &actual) != 0) {
+        return ResourcePolicyApplyResult::failure(
+            error(
+                GuestWorkerProcessSessionErrorCode::
+                    resource_policy_failure,
+                errno));
+    }
+
+    if (actual.rlim_cur != target.rlim_cur ||
+        actual.rlim_max != target.rlim_max) {
+        return ResourcePolicyApplyResult::failure(
+            error(
+                GuestWorkerProcessSessionErrorCode::
+                    resource_policy_failure,
+                EIO));
+    }
+
+    return ResourcePolicyApplyResult::success(true);
+}
+
+[[nodiscard]] ResourcePolicyApplyResult
+apply_linux_resource_policy(
+    pid_t pid,
+    const std::optional<GuestWorkerResourcePolicy>&
+        policy) noexcept {
+    if (!policy.has_value()) {
+        return ResourcePolicyApplyResult::success(true);
+    }
+
+    const auto& value = policy.value();
+
+    if (value.process_memory_limit_bytes.has_value()) {
+        const auto applied =
+            apply_linux_resource_limit(
+                pid,
+                RLIMIT_AS,
+                value.process_memory_limit_bytes.value());
+        if (!applied.has_value()) {
+            return applied;
+        }
+    }
+
+    if (value.process_cpu_time_seconds.has_value()) {
+        const auto applied =
+            apply_linux_resource_limit(
+                pid,
+                RLIMIT_CPU,
+                value.process_cpu_time_seconds.value());
+        if (!applied.has_value()) {
+            return applied;
+        }
+    }
+
+    if (value.linux_max_open_files.has_value()) {
+        const auto applied =
+            apply_linux_resource_limit(
+                pid,
+                RLIMIT_NOFILE,
+                value.linux_max_open_files.value());
+        if (!applied.has_value()) {
+            return applied;
+        }
+    }
+
+    if (value.linux_disable_core_dumps) {
+        const auto applied =
+            apply_linux_resource_limit(
+                pid,
+                RLIMIT_CORE,
+                0U);
+        if (!applied.has_value()) {
+            return applied;
+        }
+    }
+
+    if (value.linux_disable_file_growth) {
+        const auto applied =
+            apply_linux_resource_limit(
+                pid,
+                RLIMIT_FSIZE,
+                0U);
+        if (!applied.has_value()) {
+            return applied;
+        }
+    }
+
+    return ResourcePolicyApplyResult::success(true);
+}
+
 [[nodiscard]] astraea::core::Result<
     std::pair<UniqueFd, ChildGuard>,
     GuestWorkerProcessSessionError>
@@ -772,13 +932,26 @@ spawn_worker(
 
     worker_fd.reset();
 
+    ChildGuard child{child_pid};
+    const auto policy_applied =
+        apply_linux_resource_policy(
+            child_pid,
+            config.resource_policy);
+    if (!policy_applied.has_value()) {
+        return astraea::core::Result<
+            std::pair<UniqueFd, ChildGuard>,
+            GuestWorkerProcessSessionError>::
+            failure(
+                policy_applied.error());
+    }
+
     return astraea::core::Result<
         std::pair<UniqueFd, ChildGuard>,
         GuestWorkerProcessSessionError>::
         success(
             std::pair<UniqueFd, ChildGuard>{
                 std::move(controller_fd),
-                ChildGuard{child_pid}});
+                std::move(child)});
 }
 
 #elif defined(_WIN32)
