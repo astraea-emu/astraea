@@ -21,6 +21,7 @@ inline constexpr std::uint8_t kGfx10ResourceType2d = 1U;
 inline constexpr std::uint32_t kGfx10R8G8B8A8BytesPerPixel = 4U;
 
 enum class Gfx10ColorTargetImageErrorCode {
+    unsupported_endian,
     unsupported_format,
     unsupported_number_type,
     unsupported_component_swap,
@@ -58,6 +59,7 @@ using Gfx10ColorTargetImageResult =
 // Maps the public GFX10 color-target subset currently supported by Astraea's
 // guest image model into a backend-neutral typed image descriptor:
 //
+// - ENDIAN_NONE;
 // - COLOR_8_8_8_8;
 // - UNORM;
 // - standard component swap;
