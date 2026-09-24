@@ -22,6 +22,7 @@ enum class NativeBackendErrorCode {
     nested_execution_unsupported,
     recovery_setup_failure,
     invalid_guest_context,
+    invalid_registered_syscall_trap,
     internal_transition_failure,
 };
 
