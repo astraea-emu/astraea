@@ -125,7 +125,7 @@ struct SignalFrame {
     sigjmp_buf jump_buffer;
     const SignalRange* executable_ranges = nullptr;
     std::size_t executable_range_count = 0;
-    const SignalRange* seccomp_ip_ranges = nullptr;
+    const SignalRange* seccomp_instruction_ranges = nullptr;
     std::size_t seccomp_ip_range_count = 0;
     std::uint64_t gate_base = 0;
     std::uint32_t gate_slot_count = 0;
@@ -167,7 +167,7 @@ std::array<struct sigaction, kGuestSignals.size()> g_previous_actions{};
          i < frame.seccomp_ip_range_count;
          ++i) {
         if (range_contains(
-                frame.seccomp_ip_ranges[i],
+                frame.seccomp_instruction_ranges[i],
                 instruction_pointer)) {
             return true;
         }
@@ -812,81 +812,6 @@ build_executable_ranges(
     return ranges;
 }
 
-using SignalRangeBuildResult =
-    astraea::core::Result<
-        std::vector<SignalRange>,
-        NativeBackendError>;
-
-[[nodiscard]] SignalRangeBuildResult
-build_seccomp_post_instruction_ranges(
-    std::span<const SignalRange> executable_ranges) {
-    try {
-        std::vector<SignalRange> ranges;
-        ranges.reserve(executable_ranges.size());
-
-        constexpr std::uint64_t kX86SyscallInstructionLength = 2U;
-
-        for (const auto& executable : executable_ranges) {
-            // A complete x86 SYSCALL / INT 0x80 / SYSENTER instruction is two
-            // bytes. If fewer than two executable bytes exist, no supported
-            // syscall entry can originate from this exact mapping.
-            if (executable.size <
-                kX86SyscallInstructionLength) {
-                continue;
-            }
-
-            // Linux x86 exposes the saved post-instruction IP to seccomp.
-            // For an exact executable mapping [base, base + size), a complete
-            // two-byte syscall can start through base + size - 2, so the
-            // kernel-reported post IP spans [base + 2, base + size].
-            if (executable.base >
-                    std::numeric_limits<std::uint64_t>::max() -
-                        executable.size ||
-                executable.base >
-                    std::numeric_limits<std::uint64_t>::max() -
-                        kX86SyscallInstructionLength) {
-                return SignalRangeBuildResult::failure(
-                    backend_error(
-                        NativeBackendErrorCode::
-                            syscall_interception_setup_failure,
-                        true,
-                        executable.base));
-            }
-
-            ranges.push_back(
-                SignalRange{
-                    .base =
-                        executable.base +
-                        kX86SyscallInstructionLength,
-                    .size =
-                        executable.size -
-                        kX86SyscallInstructionLength +
-                        1U,
-                });
-        }
-
-        if (ranges.empty()) {
-            return SignalRangeBuildResult::failure(
-                backend_error(
-                    NativeBackendErrorCode::
-                        syscall_interception_setup_failure));
-        }
-
-        return SignalRangeBuildResult::success(
-            std::move(ranges));
-    } catch (const std::bad_alloc&) {
-        return SignalRangeBuildResult::failure(
-            backend_error(
-                NativeBackendErrorCode::
-                    syscall_interception_setup_failure));
-    } catch (const std::length_error&) {
-        return SignalRangeBuildResult::failure(
-            backend_error(
-                NativeBackendErrorCode::
-                    syscall_interception_setup_failure));
-    }
-}
-
 using SeccompTrapNormalizeResult =
     astraea::core::Result<
         LinuxSeccompSyscallTrap,
@@ -1005,8 +930,8 @@ using SeccompInstallResult =
 
 [[nodiscard]] SeccompInstallResult
 install_guest_executable_syscall_filter(
-    std::span<const SignalRange> seccomp_ip_ranges) {
-    if (seccomp_ip_ranges.empty()) {
+    std::span<const SignalRange> seccomp_instruction_ranges) {
+    if (seccomp_instruction_ranges.empty()) {
         return SeccompInstallResult::failure(
             backend_error(
                 NativeBackendErrorCode::
@@ -1024,7 +949,7 @@ install_guest_executable_syscall_filter(
             std::numeric_limits<
                 unsigned short>::max());
 
-    if (seccomp_ip_ranges.size() >
+    if (seccomp_instruction_ranges.size() >
         (kMaxProgramLength -
          kTrailingInstructions) /
             kInstructionsPerRange) {
@@ -1041,7 +966,7 @@ install_guest_executable_syscall_filter(
     try {
         std::vector<sock_filter> program;
         program.reserve(
-            seccomp_ip_ranges.size() *
+            seccomp_instruction_ranges.size() *
                 kInstructionsPerRange +
             kTrailingInstructions);
 
@@ -1072,7 +997,7 @@ install_guest_executable_syscall_filter(
                 sizeof(std::uint32_t));
 
         for (const auto& range :
-             seccomp_ip_ranges) {
+             seccomp_instruction_ranges) {
             if (range.size == 0U ||
                 range.base >
                     std::numeric_limits<
@@ -1105,7 +1030,7 @@ install_guest_executable_syscall_filter(
 
             // 64-bit lexicographic check:
             //
-            //   range.base <= instruction_pointer <= last
+            //   exact guest executable range contains instruction_pointer
             //
             // A failed bound jumps to the next 11-instruction range block.
             // A successful match returns TRAP immediately.
@@ -1280,7 +1205,6 @@ run_linux_guest_thread(
         registered_syscall_traps,
     bool enable_seccomp_syscall_trap) {
     std::vector<SignalRange> executable_ranges;
-    std::vector<SignalRange> seccomp_ip_ranges;
     std::vector<std::byte> alternate_stack;
     try {
         executable_ranges =
@@ -1301,18 +1225,6 @@ run_linux_guest_thread(
             backend_error(
                 NativeBackendErrorCode::
                     recovery_setup_failure));
-    }
-
-    if (enable_seccomp_syscall_trap) {
-        auto ranges =
-            build_seccomp_post_instruction_ranges(
-                executable_ranges);
-        if (!ranges.has_value()) {
-            return LinuxThreadExecutionResult::failure(
-                ranges.error());
-        }
-        seccomp_ip_ranges =
-            std::move(ranges.value());
     }
 
     stack_t previous_stack{};
@@ -1381,10 +1293,10 @@ run_linux_guest_thread(
         executable_ranges.data();
     frame.executable_range_count =
         executable_ranges.size();
-    frame.seccomp_ip_ranges =
-        seccomp_ip_ranges.data();
+    frame.seccomp_instruction_ranges =
+        executable_ranges.data();
     frame.seccomp_ip_range_count =
-        seccomp_ip_ranges.size();
+        executable_ranges.size();
     frame.gate_base =
         gate_region.range().base().value();
     frame.gate_slot_count =
@@ -1403,7 +1315,7 @@ run_linux_guest_thread(
         enable_seccomp_syscall_trap) {
         const auto installed =
             install_guest_executable_syscall_filter(
-                seccomp_ip_ranges);
+                executable_ranges);
         if (!installed.has_value()) {
             interception_setup_error =
                 installed.error();
