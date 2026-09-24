@@ -134,6 +134,8 @@ add_library(astraea_core STATIC
     src/graphics/pm4_set_context_reg_ir.cpp
     src/graphics/pm4_write_data_ir.cpp
     src/graphics/gpu_buffer_address_space.cpp
+    src/graphics/gpu_allocation_address_space.cpp
+    src/graphics/gpu_image.cpp
     src/graphics/graphics_ir.cpp
     src/graphics/shader_register_state.cpp
     src/graphics/context_register_state.cpp

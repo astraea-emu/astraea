@@ -65,6 +65,8 @@ add_executable(astraea_core_tests
     graphics/pm4_set_context_reg_ir_tests.cpp
     graphics/pm4_write_data_ir_tests.cpp
     graphics/gpu_buffer_address_space_tests.cpp
+    graphics/gpu_allocation_address_space_tests.cpp
+    graphics/gpu_image_tests.cpp
     graphics/graphics_ir_tests.cpp
     graphics/shader_register_state_tests.cpp
     graphics/context_register_state_tests.cpp
