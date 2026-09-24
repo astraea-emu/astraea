@@ -254,6 +254,8 @@ template <typename RegisterWriteRange>
         return "vop1";
     case astraea::graphics::Rdna2InstructionFormat::vop2:
         return "vop2";
+    case astraea::graphics::Rdna2InstructionFormat::exp:
+        return "exp";
     case astraea::graphics::
         Rdna2InstructionFormat::unsupported:
         return "unsupported";
@@ -309,6 +311,9 @@ template <typename RegisterWriteRange>
     case astraea::graphics::
         Rdna2InstructionKind::v_add_f32:
         return "v_add_f32";
+    case astraea::graphics::
+        Rdna2InstructionKind::exp:
+        return "exp";
     case astraea::graphics::
         Rdna2InstructionKind::unknown_sopp_opcode:
         return "unknown_sopp_opcode";
@@ -392,6 +397,10 @@ template <typename RegisterWriteRange>
         ShaderIrUnsupportedReason::
             unknown_vop2_opcode:
         return "unknown_vop2_opcode";
+    case astraea::graphics::
+        ShaderIrUnsupportedReason::
+            unknown_export_target:
+        return "unknown_export_target";
     case astraea::graphics::
         ShaderIrUnsupportedReason::
             unsupported_scalar_operand:
