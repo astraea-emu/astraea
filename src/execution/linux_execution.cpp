@@ -826,6 +826,175 @@ build_executable_ranges(
     return ranges;
 }
 
+using SignalRangeBuildResult =
+    astraea::core::Result<
+        std::vector<SignalRange>,
+        NativeBackendError>;
+
+[[nodiscard]] SignalRangeBuildResult
+build_seccomp_post_instruction_ranges(
+    std::span<const SignalRange> executable_ranges) {
+    try {
+        std::vector<SignalRange> ranges;
+        ranges.reserve(executable_ranges.size());
+
+        constexpr std::uint64_t kX86SyscallInstructionLength = 2U;
+
+        for (const auto& executable : executable_ranges) {
+            // A complete x86 SYSCALL / INT 0x80 / SYSENTER instruction is two
+            // bytes. If fewer than two executable bytes exist, no supported
+            // syscall entry can originate from this exact mapping.
+            if (executable.size <
+                kX86SyscallInstructionLength) {
+                continue;
+            }
+
+            // Linux x86 exposes the saved post-instruction IP to seccomp.
+            // For an exact executable mapping [base, base + size), a complete
+            // two-byte syscall can start through base + size - 2, so the
+            // kernel-reported post IP spans [base + 2, base + size].
+            if (executable.base >
+                    std::numeric_limits<std::uint64_t>::max() -
+                        executable.size ||
+                executable.base >
+                    std::numeric_limits<std::uint64_t>::max() -
+                        kX86SyscallInstructionLength) {
+                return SignalRangeBuildResult::failure(
+                    backend_error(
+                        NativeBackendErrorCode::
+                            syscall_interception_setup_failure,
+                        true,
+                        executable.base));
+            }
+
+            ranges.push_back(
+                SignalRange{
+                    .base =
+                        executable.base +
+                        kX86SyscallInstructionLength,
+                    .size =
+                        executable.size -
+                        kX86SyscallInstructionLength +
+                        1U,
+                });
+        }
+
+        if (ranges.empty()) {
+            return SignalRangeBuildResult::failure(
+                backend_error(
+                    NativeBackendErrorCode::
+                        syscall_interception_setup_failure));
+        }
+
+        return SignalRangeBuildResult::success(
+            std::move(ranges));
+    } catch (const std::bad_alloc&) {
+        return SignalRangeBuildResult::failure(
+            backend_error(
+                NativeBackendErrorCode::
+                    syscall_interception_setup_failure));
+    } catch (const std::length_error&) {
+        return SignalRangeBuildResult::failure(
+            backend_error(
+                NativeBackendErrorCode::
+                    syscall_interception_setup_failure));
+    }
+}
+
+using SeccompTrapNormalizeResult =
+    astraea::core::Result<
+        LinuxSeccompSyscallTrap,
+        NativeBackendError>;
+
+[[nodiscard]] SeccompTrapNormalizeResult
+normalize_seccomp_syscall_trap(
+    const astraea::loader::GuestImage& image,
+    const RawLinuxSeccompSyscallTrap& raw) noexcept {
+    constexpr std::uint64_t kX86SyscallInstructionLength = 2U;
+    constexpr std::array<std::byte, 2> kX86Int80Bytes{
+        std::byte{0xcd},
+        std::byte{0x80},
+    };
+
+    if (raw.kernel_instruction_pointer !=
+            raw.context.rip ||
+        raw.kernel_instruction_pointer <
+            kX86SyscallInstructionLength) {
+        return SeccompTrapNormalizeResult::failure(
+            backend_error(
+                NativeBackendErrorCode::
+                    syscall_interception_metadata_failure,
+                true,
+                raw.kernel_instruction_pointer));
+    }
+
+    const auto guest_rip =
+        raw.kernel_instruction_pointer -
+        kX86SyscallInstructionLength;
+
+    if (!exact_executable_contains(
+            image,
+            guest_rip) ||
+        !exact_executable_contains(
+            image,
+            guest_rip + 1U) ||
+        guest_rip >
+            static_cast<std::uint64_t>(
+                std::numeric_limits<std::uintptr_t>::max())) {
+        return SeccompTrapNormalizeResult::failure(
+            backend_error(
+                NativeBackendErrorCode::
+                    syscall_interception_metadata_failure,
+                true,
+                guest_rip));
+    }
+
+    std::array<std::byte, 2> mapped_bytes{};
+    std::memcpy(
+        mapped_bytes.data(),
+        reinterpret_cast<const void*>(
+            static_cast<std::uintptr_t>(
+                guest_rip)),
+        mapped_bytes.size());
+
+    bool recognized = false;
+    switch (raw.audit_arch) {
+    case AUDIT_ARCH_X86_64:
+        recognized =
+            mapped_bytes ==
+            kX86SyscallBytes;
+        break;
+    case AUDIT_ARCH_I386:
+        recognized =
+            mapped_bytes ==
+            kX86Int80Bytes;
+        break;
+    default:
+        break;
+    }
+
+    if (!recognized) {
+        return SeccompTrapNormalizeResult::failure(
+            backend_error(
+                NativeBackendErrorCode::
+                    syscall_interception_metadata_failure,
+                true,
+                guest_rip));
+    }
+
+    return SeccompTrapNormalizeResult::success(
+        LinuxSeccompSyscallTrap{
+            .context = raw.context,
+            .guest_rip =
+                astraea::memory::GuestAddress{
+                    guest_rip},
+            .syscall_number =
+                raw.syscall_number,
+            .audit_arch =
+                raw.audit_arch,
+        });
+}
+
 [[nodiscard]] sock_filter bpf_statement(
     std::uint16_t code,
     std::uint32_t value) noexcept {
@@ -857,8 +1026,8 @@ using SeccompInstallResult =
 
 [[nodiscard]] SeccompInstallResult
 install_guest_executable_syscall_filter(
-    std::span<const SignalRange> executable_ranges) {
-    if (executable_ranges.empty()) {
+    std::span<const SignalRange> seccomp_ip_ranges) {
+    if (seccomp_ip_ranges.empty()) {
         return SeccompInstallResult::failure(
             backend_error(
                 NativeBackendErrorCode::
@@ -876,7 +1045,7 @@ install_guest_executable_syscall_filter(
             std::numeric_limits<
                 unsigned short>::max());
 
-    if (executable_ranges.size() >
+    if (seccomp_ip_ranges.size() >
         (kMaxProgramLength -
          kTrailingInstructions) /
             kInstructionsPerRange) {
@@ -893,7 +1062,7 @@ install_guest_executable_syscall_filter(
     try {
         std::vector<sock_filter> program;
         program.reserve(
-            executable_ranges.size() *
+            seccomp_ip_ranges.size() *
                 kInstructionsPerRange +
             kTrailingInstructions);
 
@@ -924,7 +1093,7 @@ install_guest_executable_syscall_filter(
                 sizeof(std::uint32_t));
 
         for (const auto& range :
-             executable_ranges) {
+             seccomp_ip_ranges) {
             if (range.size == 0U ||
                 range.base >
                     std::numeric_limits<
@@ -957,7 +1126,7 @@ install_guest_executable_syscall_filter(
 
             // 64-bit lexicographic check:
             //
-            //   range.base <= instruction_pointer <= last
+            //   range.base <= post_instruction_pointer <= last
             //
             // A failed bound jumps to the next 11-instruction range block.
             // A successful match returns TRAP immediately.
