@@ -125,6 +125,7 @@ add_library(astraea_core STATIC
     src/execution/sce_agc_create_shader.cpp
     src/execution/sce_agc_link_shaders.cpp
     src/execution/sce_agc_driver_submit_dcb.cpp
+    src/execution/sce_agc_first_raster_submission.cpp
     src/execution/sce_agc_shader_preparation.cpp
     src/execution/sce_agc_shader_registry.cpp
     src/execution/sce_agc_submission_shader_binding.cpp
@@ -149,6 +150,7 @@ add_library(astraea_core STATIC
     src/graphics/context_register_state.cpp
     src/graphics/color_target_state.cpp
     src/graphics/gfx10_color_target_image.cpp
+    src/graphics/first_raster_draw_plan.cpp
     src/graphics/user_config_register_state.cpp
     src/graphics/rdna2_decoder.cpp
     src/graphics/shader_ir.cpp
