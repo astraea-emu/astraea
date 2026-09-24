@@ -315,6 +315,80 @@ void append_payload(
 
 }  // namespace
 
+GuestWorkerWireHeaderResult
+decode_guest_worker_wire_header(
+    std::span<const std::byte> header) noexcept {
+    if (header.size() != kGuestWorkerWireHeaderSize) {
+        return GuestWorkerWireHeaderResult::failure(
+            error(
+                GuestWorkerWireErrorCode::
+                    frame_too_short,
+                header.size()));
+    }
+
+    const auto magic = read_u32(header, 0U);
+    if (magic != kGuestWorkerWireMagic) {
+        return GuestWorkerWireHeaderResult::failure(
+            error(
+                GuestWorkerWireErrorCode::
+                    invalid_magic,
+                0U,
+                magic));
+    }
+
+    const auto version = read_u16(header, 4U);
+    if (version != kGuestWorkerWireVersion) {
+        return GuestWorkerWireHeaderResult::failure(
+            error(
+                GuestWorkerWireErrorCode::
+                    unsupported_wire_version,
+                4U,
+                version));
+    }
+
+    GuestWorkerWireMessageKind kind{};
+    const auto raw_kind = read_u16(header, 6U);
+    if (!decode_kind(raw_kind, kind)) {
+        return GuestWorkerWireHeaderResult::failure(
+            error(
+                GuestWorkerWireErrorCode::
+                    unknown_message_kind,
+                6U,
+                raw_kind));
+    }
+
+    const auto declared_size =
+        static_cast<std::size_t>(
+            read_u32(header, 8U));
+    if (declared_size > kGuestWorkerWireMaxPayloadSize) {
+        return GuestWorkerWireHeaderResult::failure(
+            error(
+                GuestWorkerWireErrorCode::
+                    payload_too_large,
+                8U,
+                declared_size));
+    }
+
+    const auto expected_size = payload_size(kind);
+    if (declared_size != expected_size) {
+        return GuestWorkerWireHeaderResult::failure(
+            error(
+                GuestWorkerWireErrorCode::
+                    payload_size_mismatch,
+                8U,
+                declared_size));
+    }
+
+    return GuestWorkerWireHeaderResult::success(
+        GuestWorkerWireHeader{
+            .kind = kind,
+            .payload_size = declared_size,
+            .frame_size =
+                kGuestWorkerWireHeaderSize +
+                declared_size,
+        });
+}
+
 GuestWorkerWireEncodeResult
 encode_guest_worker_wire_message(
     const GuestWorkerWireMessage& message) {
@@ -375,61 +449,15 @@ decode_guest_worker_wire_message(
                 frame.size()));
     }
 
-    const auto magic = read_u32(frame, 0U);
-    if (magic != kGuestWorkerWireMagic) {
+    const auto header =
+        decode_guest_worker_wire_header(
+            frame.first(kGuestWorkerWireHeaderSize));
+    if (!header.has_value()) {
         return GuestWorkerWireDecodeResult::failure(
-            error(
-                GuestWorkerWireErrorCode::
-                    invalid_magic,
-                0U,
-                magic));
+            header.error());
     }
 
-    const auto version = read_u16(frame, 4U);
-    if (version != kGuestWorkerWireVersion) {
-        return GuestWorkerWireDecodeResult::failure(
-            error(
-                GuestWorkerWireErrorCode::
-                    unsupported_wire_version,
-                4U,
-                version));
-    }
-
-    GuestWorkerWireMessageKind kind{};
-    const auto raw_kind = read_u16(frame, 6U);
-    if (!decode_kind(raw_kind, kind)) {
-        return GuestWorkerWireDecodeResult::failure(
-            error(
-                GuestWorkerWireErrorCode::
-                    unknown_message_kind,
-                6U,
-                raw_kind));
-    }
-
-    const auto declared_size =
-        static_cast<std::size_t>(
-            read_u32(frame, 8U));
-    if (declared_size > kGuestWorkerWireMaxPayloadSize) {
-        return GuestWorkerWireDecodeResult::failure(
-            error(
-                GuestWorkerWireErrorCode::
-                    payload_too_large,
-                8U,
-                declared_size));
-    }
-
-    const auto expected_size = payload_size(kind);
-    if (declared_size != expected_size) {
-        return GuestWorkerWireDecodeResult::failure(
-            error(
-                GuestWorkerWireErrorCode::
-                    payload_size_mismatch,
-                8U,
-                declared_size));
-    }
-
-    if (frame.size() !=
-        kGuestWorkerWireHeaderSize + declared_size) {
+    if (frame.size() != header->frame_size) {
         return GuestWorkerWireDecodeResult::failure(
             error(
                 GuestWorkerWireErrorCode::
@@ -438,6 +466,7 @@ decode_guest_worker_wire_message(
                 frame.size()));
     }
 
+    const auto kind = header->kind;
     const std::size_t p = kGuestWorkerWireHeaderSize;
     GuestWorkerWireMessage message =
         GuestWorkerHello{};

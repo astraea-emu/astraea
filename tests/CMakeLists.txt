@@ -8,6 +8,15 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(Catch2)
 
+add_executable(astraea_guest_worker_probe
+    execution/guest_worker_probe_main.cpp
+)
+target_link_libraries(astraea_guest_worker_probe PRIVATE
+    Astraea::core
+)
+astraea_set_project_warnings(astraea_guest_worker_probe)
+astraea_enable_sanitizers(astraea_guest_worker_probe)
+
 add_executable(astraea_core_tests
     core/version_tests.cpp
     core/result_tests.cpp
@@ -48,6 +57,7 @@ add_executable(astraea_core_tests
     execution/hle_runtime_tests.cpp
     execution/guest_worker_protocol_tests.cpp
     execution/guest_worker_wire_tests.cpp
+    execution/guest_worker_process_session_tests.cpp
     execution/registered_syscall_trap_tests.cpp
     execution/sce_agc_create_shader_tests.cpp
     execution/sce_agc_link_shaders_tests.cpp
@@ -112,12 +122,23 @@ target_link_libraries(astraea_core_tests PRIVATE
     Catch2::Catch2WithMain
     SPIRV-Tools
 )
+add_dependencies(
+    astraea_core_tests
+    astraea_guest_worker_probe
+)
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    target_compile_definitions(astraea_core_tests PRIVATE
+        ASTRAEA_GUEST_WORKER_PROBE_PATH="$<TARGET_FILE:astraea_guest_worker_probe>"
+    )
+endif()
 astraea_set_project_warnings(astraea_core_tests)
 astraea_enable_sanitizers(astraea_core_tests)
 
 astraea_verify_explicit_cpp_sources(
     ROOT .
-    TARGETS astraea_core_tests
+    TARGETS
+        astraea_core_tests
+        astraea_guest_worker_probe
 )
 
 list(APPEND CMAKE_MODULE_PATH "${catch2_SOURCE_DIR}/extras")
