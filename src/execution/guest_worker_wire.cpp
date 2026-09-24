@@ -111,6 +111,8 @@ void append_u64(
     case GuestWorkerDiagnosticKind::unsupported_relocations:
     case GuestWorkerDiagnosticKind::unsupported_tls:
     case GuestWorkerDiagnosticKind::native_backend_error:
+    case GuestWorkerDiagnosticKind::unsupported_initial_process_abi:
+    case GuestWorkerDiagnosticKind::unsupported_syscall:
         return true;
     }
     return false;
