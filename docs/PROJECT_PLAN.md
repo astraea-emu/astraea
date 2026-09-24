@@ -344,25 +344,32 @@ independently of the window/presentation layer.
 
 ### C0 — Supervised retail execution
 
-Before arbitrary retail game code is admitted as a diagnostic workload,
-Astraea must satisfy ADR 0010:
+ADR 0010's Linux x86-64 **diagnostic admission boundary is established**:
 
 ```text
-retail guest image
-    -> supervised native worker
-    -> intercepted guest syscall/HLE boundary
-    -> controlled fault/stop/reporting
+user-selected retail artifact
+    -> controller-owned bounded read
+    -> sealed immutable worker handoff
+    -> supervised worker / finite resources
+    -> deterministic preflight
+    -> typed diagnostic/fault/stop
+    -> seccomp-protected native entry only when prerequisites are verified
 ```
 
-The current in-process native backend remains appropriate for trusted
-Astraea-owned probes; it is not the retail sandbox.
+The in-process native backend remains appropriate for trusted Astraea-owned
+probes; it is not the retail sandbox.
 
-Commercial-title experiments become increasingly useful only after the
-relevant execution paths exist and C0 is active.
+The first production diagnostic intentionally stops an otherwise-ready PS5/SCE
+image at `unsupported_initial_process_abi`. This is a successful diagnostic
+boundary, not a boot claim. Retail native instruction entry must not begin
+until the selected PS5 process-entry contract is independently justified.
+
+Windows retains the owned-probe worker/runtime path but is not currently an
+admitted retail-diagnostic host.
 
 Compatibility categories must distinguish at least:
 
-- load
+- load / structural admission
 - boot
 - menu
 - in-game
@@ -372,8 +379,10 @@ Compatibility categories must distinguish at least:
 A title reaching one category is integration evidence, not proof that the
 underlying implementation is semantically correct.
 
-Arbitrary retail guest execution remains disabled until the project
-explicitly defines the required safety, provenance, and execution gates.
+After C0 admission, compatibility work follows the same dependency-driven rule:
+run a bounded diagnostic, identify the first unsupported requirement, implement
+or research exactly that dependency, and repeat without title-specific
+success hacks.
 
 ## 9. Dependency-driven issue selection
 
@@ -480,8 +489,8 @@ The normal public merge gate remains:
 Parser work must ensure the relevant fuzz target is actually executed by the
 fuzz-smoke job, not merely compiled. The newer PM4 Type-3 stream framer and
 bounded RDNA2 stream decoder/lowerer should receive dedicated fuzz-smoke
-coverage as a hardening follow-up; that work is independent of the active V3
-critical path.
+coverage as a hardening follow-up; that work is independent of the completed
+bounded V3 raster gate.
 
 ## 14. Efficiency rules
 
@@ -502,7 +511,8 @@ critical path.
   can merge without the unresolved hypothesis.
 - Keep logical image content, guest physical surface extent, and host-resource
   layout separate.
-- Do not begin arbitrary retail execution until C0/ADR 0010 is satisfied.
+- Do not bypass the ADR 0010 supervisor for retail diagnostics or native
+  retail entry; post-C0 compatibility work remains bounded and typed.
 
 ## 15. Current critical path
 
@@ -521,12 +531,14 @@ V1  owned guest -> persistent AGC shader identity            COMPLETE
 V2  supported semantic Shader IR -> validated SPIR-V         COMPLETE
     |
     v
-V3  submitted guest state/resources -> Vulkan -> result      ACTIVE
-    |   verified LinkShaders ceiling: #189; #191 needs native evidence
-    |   parallel generic path: guest image/surface layout -> raster proof
-    v
-C0  supervised retail execution/syscall boundary              REQUIRED BEFORE GAMES
+V3  submitted guest state/resources -> Vulkan -> result      COMPLETE
     |
+    v
+C0  supervised Linux retail diagnostic admission              ESTABLISHED
+    |   current truthful stop: unsupported PS5 initial-process ABI
+    v
+compatibility dependency loop
+    |   process ABI -> modules/relocations/TLS -> HLE/syscalls -> wider GPU state
     v
 V4  controlled PS5 differential when evidence requires it
     |
