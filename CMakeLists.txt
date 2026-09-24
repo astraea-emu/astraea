@@ -159,6 +159,7 @@ add_library(astraea_core STATIC
     src/graphics/vulkan_vector_probe_execution.cpp
     src/graphics/vulkan_gpu_buffer_write_execution.cpp
     src/graphics/vulkan_offscreen_image_execution.cpp
+    src/graphics/vulkan_raster_probe_execution.cpp
     src/trace/v0.cpp
     src/trace/diff_v0.cpp
     src/trace/graphics_v0.cpp
