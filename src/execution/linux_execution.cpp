@@ -23,6 +23,7 @@
 #if defined(__linux__) && defined(__x86_64__)
 #include <cerrno>
 #include <csignal>
+#include <linux/audit.h>
 #include <linux/filter.h>
 #include <linux/seccomp.h>
 #include <setjmp.h>
@@ -113,17 +114,26 @@ struct SignalRange {
     std::uint64_t size = 0;
 };
 
+struct RawLinuxSeccompSyscallTrap {
+    GuestCpuContext context;
+    std::uint64_t kernel_instruction_pointer = 0;
+    std::int32_t syscall_number = 0;
+    std::uint32_t audit_arch = 0;
+};
+
 struct SignalFrame {
     sigjmp_buf jump_buffer;
     const SignalRange* executable_ranges = nullptr;
     std::size_t executable_range_count = 0;
+    const SignalRange* seccomp_ip_ranges = nullptr;
+    std::size_t seccomp_ip_range_count = 0;
     std::uint64_t gate_base = 0;
     std::uint32_t gate_slot_count = 0;
     const RegisteredSyscallTrapSite*
         registered_syscall_traps = nullptr;
     std::size_t registered_syscall_trap_count = 0;
     bool has_seccomp_syscall_trap = false;
-    LinuxSeccompSyscallTrap seccomp_syscall_trap;
+    RawLinuxSeccompSyscallTrap raw_seccomp_syscall_trap;
     ExecutionStop stop;
 };
 
