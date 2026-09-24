@@ -73,8 +73,6 @@ read_linux_sealed_worker_artifact(
             LinuxWorkerArtifactErrorCode::
                 unsupported_platform));
 #else
-    ArtifactFdGuard fd_guard;
-
     errno = 0;
     const auto descriptor_flags =
         ::fcntl(
@@ -87,6 +85,12 @@ read_linux_sealed_worker_artifact(
                     descriptor_unavailable,
                 errno));
     }
+
+    // Only claim ownership after proving the fixed descriptor exists. This
+    // avoids closing an unrelated descriptor that could otherwise reuse fd 3
+    // between a failed availability check and cleanup in a multithreaded
+    // caller.
+    ArtifactFdGuard fd_guard;
 
     constexpr int kRequiredSeals =
         F_SEAL_WRITE |
