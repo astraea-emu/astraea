@@ -71,6 +71,9 @@ enum class ProbeMode {
     artifact_probe,
     artifact_limit_probe,
     no_artifact_fd_probe,
+    diagnostic_event,
+    diagnostic_then_syscall,
+    diagnostic_stop_only,
 };
 
 [[nodiscard]] bool configure_binary_stdio() noexcept {
@@ -257,6 +260,18 @@ using ReadResult =
         if (argument ==
             "--artifact-limit-probe") {
             return ProbeMode::artifact_limit_probe;
+        }
+        if (argument ==
+            "--diagnostic-event") {
+            return ProbeMode::diagnostic_event;
+        }
+        if (argument ==
+            "--diagnostic-then-syscall") {
+            return ProbeMode::diagnostic_then_syscall;
+        }
+        if (argument ==
+            "--diagnostic-stop-only") {
+            return ProbeMode::diagnostic_stop_only;
         }
         if (argument ==
             "--no-artifact-fd") {
@@ -1680,6 +1695,92 @@ int main(int argc, char** argv) {
         std::this_thread::sleep_for(
             std::chrono::hours{1});
         return 37;
+    }
+
+    if (mode == ProbeMode::diagnostic_event ||
+        mode ==
+            ProbeMode::diagnostic_then_syscall ||
+        mode ==
+            ProbeMode::diagnostic_stop_only) {
+        constexpr astraea::memory::GuestAddress
+            kDiagnosticRip{0x400200U};
+
+        if (mode !=
+            ProbeMode::diagnostic_stop_only) {
+            if (!write_message(
+                    GuestWorkerWireMessage{
+                        GuestWorkerDiagnostic{
+                            .worker_id = kWorkerId,
+                            .thread_id = kThreadId,
+                            .kind =
+                                GuestWorkerDiagnosticKind::
+                                    unsupported_tls,
+                            .guest_rip = kDiagnosticRip,
+                            .detail0 = 8U,
+                            .detail1 = 1U,
+                        }})) {
+                return 43;
+            }
+        }
+
+        if (mode ==
+            ProbeMode::diagnostic_then_syscall) {
+            if (!write_message(
+                    GuestWorkerWireMessage{
+                        GuestWorkerSyscallRequest{
+                            .request_id =
+                                GuestRequestId{
+                                    .value = 88U},
+                            .worker_id = kWorkerId,
+                            .thread_id = kThreadId,
+                            .guest_syscall_number =
+                                0x8182838485868788ULL,
+                            .arguments = {},
+                            .guest_rip = kDiagnosticRip,
+                        }})) {
+                return 44;
+            }
+
+            std::this_thread::sleep_for(
+                std::chrono::hours{1});
+            return 45;
+        }
+
+        if (!write_message(
+                GuestWorkerWireMessage{
+                    GuestWorkerStop{
+                        .worker_id = kWorkerId,
+                        .thread_id = kThreadId,
+                        .reason =
+                            GuestWorkerStopReason::
+                                diagnostic_boundary,
+                        .guest_rip = kDiagnosticRip,
+                    }})) {
+            return 46;
+        }
+
+        if (mode ==
+            ProbeMode::diagnostic_stop_only) {
+            std::this_thread::sleep_for(
+                std::chrono::hours{1});
+            return 47;
+        }
+
+        const auto terminate_message =
+            read_message();
+        if (!terminate_message.has_value()) {
+            return 48;
+        }
+        const auto* terminate =
+            std::get_if<GuestWorkerTerminate>(
+                &terminate_message.value());
+        if (terminate == nullptr ||
+            terminate->reason !=
+                GuestWorkerTerminationReason::
+                    unsupported_guest_behavior) {
+            return 49;
+        }
+        return 0;
     }
 
     if (mode ==
