@@ -78,6 +78,31 @@ enum class GuestWorkerFaultKind {
     protocol_failure,
 };
 
+enum class GuestWorkerDiagnosticKind : std::uint32_t {
+    loader_rejected = 1U,
+    entry_not_executable = 2U,
+    sce_dynamic_metadata_rejected = 3U,
+    unsupported_dynamic_dependencies = 4U,
+    unsupported_relocations = 5U,
+    unsupported_tls = 6U,
+    native_backend_error = 7U,
+};
+
+struct GuestWorkerDiagnostic {
+    GuestWorkerId worker_id;
+    GuestThreadId thread_id;
+    GuestWorkerDiagnosticKind kind =
+        GuestWorkerDiagnosticKind::loader_rejected;
+    astraea::memory::GuestAddress guest_rip;
+
+    // Kind-specific bounded numeric evidence only. The control protocol
+    // deliberately carries no arbitrary strings or host paths.
+    std::uint64_t detail0 = 0;
+    std::uint64_t detail1 = 0;
+
+    auto operator<=>(const GuestWorkerDiagnostic&) const = default;
+};
+
 struct GuestWorkerFault {
     GuestWorkerId worker_id;
     GuestThreadId thread_id;
@@ -97,6 +122,7 @@ enum class GuestWorkerStopReason {
     execution_budget_exhausted,
     controller_termination,
     protocol_failure,
+    diagnostic_boundary,
 };
 
 struct GuestWorkerStop {
