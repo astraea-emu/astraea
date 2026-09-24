@@ -61,13 +61,16 @@ add_executable(astraea_core_tests
     graphics/agc_shader_container_tests.cpp
     graphics/packet_tests.cpp
     graphics/pm4_type3_framing_tests.cpp
+    graphics/pm4_draw_control_ir_tests.cpp
     graphics/pm4_set_sh_reg_ir_tests.cpp
     graphics/pm4_set_context_reg_ir_tests.cpp
+    graphics/pm4_set_uconfig_reg_ir_tests.cpp
     graphics/pm4_write_data_ir_tests.cpp
     graphics/gpu_buffer_address_space_tests.cpp
     graphics/graphics_ir_tests.cpp
     graphics/shader_register_state_tests.cpp
     graphics/context_register_state_tests.cpp
+    graphics/user_config_register_state_tests.cpp
     graphics/rdna2_decoder_tests.cpp
     graphics/shader_ir_tests.cpp
     graphics/shader_program_tests.cpp
