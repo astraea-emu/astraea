@@ -107,8 +107,8 @@ verified behavior.
 The current C0 boundary is sufficient for the first bounded diagnostic, but
 Linux defense in depth can improve without changing guest semantics:
 
-- evaluate pidfd-based worker lifetime/signalling to reduce PID-identity races;
-- evaluate Landlock for additional ambient filesystem/network/IPC restriction
+- #297: evaluate pidfd-based worker lifetime/signalling to reduce PID-identity races;
+- #298: evaluate Landlock for additional ambient filesystem/network/IPC restriction
   where the running kernel supports the required ABI;
 - keep these host-containment layers separate from the portable guest syscall
   contract.
