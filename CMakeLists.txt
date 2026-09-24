@@ -106,6 +106,7 @@ add_library(astraea_core STATIC
     src/execution/memory_plan.cpp
     src/execution/linux_memory.cpp
     src/execution/linux_execution.cpp
+    src/execution/linux_seccomp_syscall_context.cpp
     src/execution/hle.cpp
     src/execution/sce_import_binding.cpp
     src/execution/sce_import_resolution.cpp
