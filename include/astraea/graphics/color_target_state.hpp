@@ -29,10 +29,19 @@ struct ColorTarget0ContextState {
     std::uint8_t write_mask = 0;
 
     std::uint32_t raw_info = 0;
+    std::uint8_t endian = 0;
     std::uint8_t format = 0;
+    bool linear_general = false;
     std::uint8_t number_type = 0;
     std::uint8_t component_swap = 0;
+    bool fast_clear = false;
+    bool compression = false;
+    bool cmask_is_linear = false;
+    bool fmask_compression_disable = false;
+    bool fmask_compress_one_fragment = false;
     bool dcc_enabled = false;
+    std::uint8_t cmask_address_type = 0;
+    bool nbc_tiling = false;
 
     std::uint32_t raw_attrib2 = 0;
     std::uint32_t width = 0;

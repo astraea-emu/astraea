@@ -61,10 +61,19 @@ TEST_CASE(
     constexpr std::uint64_t kAddress =
         0x0000123456789a00ULL;
     constexpr std::uint32_t kInfo =
+        1U |
         (10U << 2U) |
+        (1U << 7U) |
         (3U << 8U) |
         (2U << 11U) |
-        (1U << 28U);
+        (1U << 13U) |
+        (1U << 14U) |
+        (1U << 19U) |
+        (1U << 26U) |
+        (1U << 27U) |
+        (1U << 28U) |
+        (2U << 29U) |
+        (1U << 31U);
 
     const auto result =
         astraea::graphics::resolve_color_target0_context_state(
@@ -79,10 +88,19 @@ TEST_CASE(
     REQUIRE(result->base_address.value == kAddress);
     REQUIRE(result->raw_target_mask == 0x000000afU);
     REQUIRE(result->write_mask == 0x0fU);
+    REQUIRE(result->endian == 1U);
     REQUIRE(result->format == 10U);
+    REQUIRE(result->linear_general);
     REQUIRE(result->number_type == 3U);
     REQUIRE(result->component_swap == 2U);
+    REQUIRE(result->fast_clear);
+    REQUIRE(result->compression);
+    REQUIRE(result->cmask_is_linear);
+    REQUIRE(result->fmask_compression_disable);
+    REQUIRE(result->fmask_compress_one_fragment);
     REQUIRE(result->dcc_enabled);
+    REQUIRE(result->cmask_address_type == 2U);
+    REQUIRE(result->nbc_tiling);
     REQUIRE(result->width == 4U);
     REQUIRE(result->height == 4U);
     REQUIRE(result->color_sw_mode == 7U);
@@ -156,8 +174,17 @@ TEST_CASE(
 
     REQUIRE(result.has_value());
     REQUIRE(result->write_mask == 0U);
+    REQUIRE(result->endian == 0U);
     REQUIRE(result->format == 0U);
+    REQUIRE_FALSE(result->linear_general);
+    REQUIRE_FALSE(result->fast_clear);
+    REQUIRE_FALSE(result->compression);
+    REQUIRE_FALSE(result->cmask_is_linear);
+    REQUIRE_FALSE(result->fmask_compression_disable);
+    REQUIRE_FALSE(result->fmask_compress_one_fragment);
     REQUIRE_FALSE(result->dcc_enabled);
+    REQUIRE(result->cmask_address_type == 0U);
+    REQUIRE_FALSE(result->nbc_tiling);
     REQUIRE(result->width == 4U);
     REQUIRE(result->height == 4U);
     REQUIRE(result->raw_attrib3 == 0U);
