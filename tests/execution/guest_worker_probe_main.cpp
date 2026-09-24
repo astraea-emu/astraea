@@ -4,6 +4,7 @@
 #include <astraea/execution/guest_worker_wire.hpp>
 #include <astraea/execution/hle.hpp>
 #include <astraea/execution/linux_execution.hpp>
+#include <astraea/execution/linux_seccomp_syscall_context.hpp>
 #include <astraea/execution/linux_memory.hpp>
 #include <astraea/execution/windows_execution.hpp>
 #include <astraea/execution/windows_memory.hpp>
@@ -58,6 +59,7 @@ enum class ProbeMode {
     bad_frame_after_hello,
     syscall_roundtrip,
     native_syscall_roundtrip,
+    native_seccomp_syscall_roundtrip,
     native_access_fault,
     native_illegal_instruction_fault,
     fault_then_syscall,
@@ -219,6 +221,11 @@ using ReadResult =
         if (argument ==
             "--native-syscall-roundtrip") {
             return ProbeMode::native_syscall_roundtrip;
+        }
+        if (argument ==
+            "--native-seccomp-syscall-roundtrip") {
+            return ProbeMode::
+                native_seccomp_syscall_roundtrip;
         }
         if (argument ==
             "--native-access-fault") {
@@ -818,6 +825,235 @@ run_owned_native_fault(
 }
 
 std::optional<astraea::execution::GuestWorkerStop>
+run_owned_linux_seccomp_syscall_roundtrip(
+    astraea::execution::GuestWorkerId worker_id,
+    astraea::execution::GuestThreadId thread_id) {
+#if !(defined(__linux__) && defined(__x86_64__))
+    (void)worker_id;
+    (void)thread_id;
+    return std::nullopt;
+#else
+    using namespace astraea::execution;
+
+    if (!linux_guest_syscall_seccomp_available()) {
+        return std::nullopt;
+    }
+
+    const auto unit =
+        native_mapping_unit();
+    if (!unit.has_value() ||
+        unit.value() >
+            std::numeric_limits<std::size_t>::max() /
+                4U) {
+        return std::nullopt;
+    }
+
+    const auto block =
+        find_native_free_block(
+            static_cast<std::size_t>(
+                unit.value() * 4U));
+    if (!block.has_value()) {
+        return std::nullopt;
+    }
+
+    const auto code_base = block.value();
+    if (unit.value() >
+            std::numeric_limits<std::uint64_t>::max() /
+                3U ||
+        code_base >
+            std::numeric_limits<std::uint64_t>::max() -
+                unit.value() * 3U) {
+        return std::nullopt;
+    }
+
+    const auto stack_base =
+        code_base + unit.value();
+    const auto gate_base =
+        code_base + unit.value() * 3U;
+
+    constexpr std::uint64_t kSyscallNumber = 0x1234U;
+    constexpr std::array<std::uint64_t, 6> kArguments{
+        0x1111111111111111ULL,
+        0x2222222222222222ULL,
+        0x3333333333333333ULL,
+        0x4444444444444444ULL,
+        0x5555555555555555ULL,
+        0x6666666666666666ULL,
+    };
+
+    std::vector<std::byte> code;
+    code.reserve(96U);
+
+    if (!append_mov_imm64(code, 0U, kSyscallNumber) ||
+        !append_mov_imm64(code, 7U, kArguments[0]) ||
+        !append_mov_imm64(code, 6U, kArguments[1]) ||
+        !append_mov_imm64(code, 2U, kArguments[2]) ||
+        !append_mov_imm64(code, 10U, kArguments[3]) ||
+        !append_mov_imm64(code, 8U, kArguments[4]) ||
+        !append_mov_imm64(code, 9U, kArguments[5])) {
+        return std::nullopt;
+    }
+
+    code.push_back(std::byte{0x0f});
+    code.push_back(std::byte{0x05});
+
+    // Resume must begin here. Consume the controller-supplied result so a
+    // false-positive "resume" cannot reach the gate with an untouched RAX.
+    code.push_back(std::byte{0x48});
+    code.push_back(std::byte{0x83});
+    code.push_back(std::byte{0xc0});
+    code.push_back(std::byte{0x01});
+
+    if (!append_call_gate(
+            code,
+            code_base,
+            gate_base)) {
+        return std::nullopt;
+    }
+    code.push_back(std::byte{0x0f});
+    code.push_back(std::byte{0x0b});
+
+    auto image =
+        make_native_guest_image(
+            code_base,
+            stack_base,
+            unit.value() * 2U,
+            std::move(code));
+    if (!image.has_value()) {
+        return std::nullopt;
+    }
+
+    auto gate =
+        make_native_gate_region(
+            image.value(),
+            gate_base);
+    if (!gate.has_value()) {
+        return std::nullopt;
+    }
+
+    auto prepared =
+        prepare_linux_guest_memory(
+            image.value());
+    if (!prepared.has_value()) {
+        return std::nullopt;
+    }
+
+    const auto enter =
+        [&](GuestCpuContext context) {
+            return
+                enter_linux_guest_with_seccomp_syscall_trap(
+                    image.value(),
+                    prepared.value(),
+                    gate.value(),
+                    context);
+        };
+
+    const auto first_event =
+        enter(
+            make_synthetic_initial_context(
+                image.value()));
+    if (!first_event.has_value()) {
+        return std::nullopt;
+    }
+
+    const auto* trapped =
+        std::get_if<LinuxSeccompSyscallTrap>(
+            &first_event.value());
+    if (trapped == nullptr) {
+        return std::nullopt;
+    }
+
+    const auto request =
+        project_linux_seccomp_syscall_request(
+            *trapped,
+            GuestRequestId{.value = 61U},
+            worker_id,
+            thread_id);
+    if (!request.has_value()) {
+        return std::nullopt;
+    }
+
+    if (!write_message(
+            GuestWorkerWireMessage{
+                request.value()})) {
+        return std::nullopt;
+    }
+
+    const auto result_message =
+        read_message();
+    if (!result_message.has_value()) {
+        return std::nullopt;
+    }
+
+    const auto* syscall_result =
+        std::get_if<GuestWorkerSyscallResult>(
+            &result_message.value());
+    if (syscall_result == nullptr) {
+        return GuestWorkerStop{
+            .worker_id = worker_id,
+            .thread_id = thread_id,
+            .reason =
+                GuestWorkerStopReason::
+                    protocol_failure,
+            .guest_rip = request->guest_rip,
+        };
+    }
+
+    const auto resumed =
+        apply_linux_seccomp_syscall_result_to_context(
+            *trapped,
+            request.value(),
+            *syscall_result);
+    if (!resumed.has_value()) {
+        return GuestWorkerStop{
+            .worker_id = worker_id,
+            .thread_id = thread_id,
+            .reason =
+                GuestWorkerStopReason::
+                    protocol_failure,
+            .guest_rip = request->guest_rip,
+        };
+    }
+
+    const auto second_event =
+        enter(resumed.value());
+    if (!second_event.has_value()) {
+        return std::nullopt;
+    }
+
+    const auto* stopped =
+        std::get_if<ExecutionStop>(
+            &second_event.value());
+    if (stopped == nullptr ||
+        stopped->reason !=
+            ExecutionStopReason::host_gate ||
+        !stopped->has_gate_slot ||
+        stopped->gate_slot != 0U) {
+        return std::nullopt;
+    }
+
+    const auto expected_rax =
+        std::bit_cast<std::uint64_t>(
+            syscall_result->return_value) +
+        1U;
+    if (stopped->context.rax != expected_rax) {
+        return std::nullopt;
+    }
+
+    return GuestWorkerStop{
+        .worker_id = worker_id,
+        .thread_id = thread_id,
+        .reason =
+            GuestWorkerStopReason::
+                normal_guest_return,
+        .guest_rip =
+            astraea::memory::GuestAddress{
+                stopped->context.rip},
+    };
+#endif
+}
+
+std::optional<astraea::execution::GuestWorkerStop>
 run_owned_native_syscall_roundtrip(
     astraea::execution::GuestWorkerId worker_id,
     astraea::execution::GuestThreadId thread_id) {
@@ -1285,6 +1521,33 @@ int main(int argc, char** argv) {
         std::this_thread::sleep_for(
             std::chrono::hours{1});
         return 37;
+    }
+
+    if (mode ==
+        ProbeMode::native_seccomp_syscall_roundtrip) {
+        const auto native_stop =
+            run_owned_linux_seccomp_syscall_roundtrip(
+                kWorkerId,
+                kThreadId);
+        if (!native_stop.has_value()) {
+            return 38;
+        }
+
+        if (!write_message(
+                GuestWorkerWireMessage{
+                    native_stop.value()})) {
+            return 39;
+        }
+
+        const auto terminate_message =
+            read_message();
+        if (!terminate_message.has_value() ||
+            std::get_if<GuestWorkerTerminate>(
+                &terminate_message.value()) ==
+                nullptr) {
+            return 40;
+        }
+        return 0;
     }
 
     if (mode ==

@@ -691,6 +691,168 @@ TEST_CASE(
                 invalid_config);
 }
 
+#if defined(__linux__) && defined(__x86_64__)
+
+TEST_CASE(
+    "Linux supervised worker round-trips one unmodified seccomp-trapped syscall",
+    "[execution][c0][process][seccomp][syscall][native]") {
+    std::optional<
+        astraea::execution::GuestWorkerSyscallRequest>
+        observed;
+
+    auto syscall_config =
+        config({
+            "--native-seccomp-syscall-roundtrip"});
+    syscall_config.max_syscall_requests = 1U;
+    syscall_config.syscall_service =
+        [&observed](
+            const astraea::execution::
+                GuestWorkerSyscallRequest& request)
+            -> std::optional<
+                astraea::execution::
+                    GuestWorkerSyscallResult> {
+            observed = request;
+            return astraea::execution::
+                GuestWorkerSyscallResult{
+                    .request_id =
+                        request.request_id,
+                    .worker_id =
+                        request.worker_id,
+                    .thread_id =
+                        request.thread_id,
+                    .return_value = -77,
+                    .guest_errno = 0,
+                };
+        };
+
+    const auto result =
+        astraea::execution::
+            run_guest_worker_process_session(
+                syscall_config);
+
+    REQUIRE(result.has_value());
+    REQUIRE(result->syscall_request_count == 1U);
+    REQUIRE(
+        result->stop.reason ==
+        astraea::execution::
+            GuestWorkerStopReason::
+                normal_guest_return);
+    REQUIRE_FALSE(result->terminal_fault.has_value());
+    REQUIRE(observed.has_value());
+    REQUIRE(observed->request_id.value == 61U);
+    REQUIRE(observed->worker_id.value == 1U);
+    REQUIRE(observed->thread_id.value == 1U);
+    REQUIRE(observed->guest_syscall_number == 0x1234U);
+    REQUIRE(
+        observed->arguments[0] ==
+        0x1111111111111111ULL);
+    REQUIRE(
+        observed->arguments[1] ==
+        0x2222222222222222ULL);
+    REQUIRE(
+        observed->arguments[2] ==
+        0x3333333333333333ULL);
+    REQUIRE(
+        observed->arguments[3] ==
+        0x4444444444444444ULL);
+    REQUIRE(
+        observed->arguments[4] ==
+        0x5555555555555555ULL);
+    REQUIRE(
+        observed->arguments[5] ==
+        0x6666666666666666ULL);
+    REQUIRE(observed->guest_rip.value() != 0U);
+}
+
+TEST_CASE(
+    "Linux seccomp worker refuses mismatched controller identity before resume",
+    "[execution][c0][process][seccomp][negative][identity]") {
+    auto syscall_config =
+        config({
+            "--native-seccomp-syscall-roundtrip"});
+    syscall_config.max_syscall_requests = 1U;
+    syscall_config.syscall_service =
+        [](
+            const astraea::execution::
+                GuestWorkerSyscallRequest& request)
+            -> std::optional<
+                astraea::execution::
+                    GuestWorkerSyscallResult> {
+            return astraea::execution::
+                GuestWorkerSyscallResult{
+                    .request_id =
+                        request.request_id,
+                    .worker_id =
+                        request.worker_id,
+                    .thread_id =
+                        astraea::execution::
+                            GuestThreadId{
+                                .value =
+                                    request.thread_id.value +
+                                    1U,
+                            },
+                    .return_value = -77,
+                    .guest_errno = 0,
+                };
+        };
+
+    const auto result =
+        astraea::execution::
+            run_guest_worker_process_session(
+                syscall_config);
+
+    REQUIRE(result.has_value());
+    REQUIRE(result->syscall_request_count == 1U);
+    REQUIRE(
+        result->stop.reason ==
+        astraea::execution::
+            GuestWorkerStopReason::
+                protocol_failure);
+}
+
+TEST_CASE(
+    "Linux seccomp worker refuses nonzero guest errno semantics before resume",
+    "[execution][c0][process][seccomp][negative][errno]") {
+    auto syscall_config =
+        config({
+            "--native-seccomp-syscall-roundtrip"});
+    syscall_config.max_syscall_requests = 1U;
+    syscall_config.syscall_service =
+        [](
+            const astraea::execution::
+                GuestWorkerSyscallRequest& request)
+            -> std::optional<
+                astraea::execution::
+                    GuestWorkerSyscallResult> {
+            return astraea::execution::
+                GuestWorkerSyscallResult{
+                    .request_id =
+                        request.request_id,
+                    .worker_id =
+                        request.worker_id,
+                    .thread_id =
+                        request.thread_id,
+                    .return_value = -1,
+                    .guest_errno = 5,
+                };
+        };
+
+    const auto result =
+        astraea::execution::
+            run_guest_worker_process_session(
+                syscall_config);
+
+    REQUIRE(result.has_value());
+    REQUIRE(result->syscall_request_count == 1U);
+    REQUIRE(
+        result->stop.reason ==
+        astraea::execution::
+            GuestWorkerStopReason::
+                protocol_failure);
+}
+
+#endif
+
 #if defined(_WIN32)
 
 TEST_CASE(
