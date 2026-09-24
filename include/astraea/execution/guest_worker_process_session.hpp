@@ -31,7 +31,7 @@ struct GuestWorkerProcessSessionResult {
 enum class GuestWorkerProcessSessionErrorCode {
     unsupported_platform,
     invalid_config,
-    pipe_creation_failed,
+    channel_creation_failed,
     spawn_failed,
     io_failure,
     timeout,
