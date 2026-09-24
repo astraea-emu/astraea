@@ -840,4 +840,144 @@ TEST_CASE(
         second.value());
 }
 
+TEST_CASE(
+    "Windows registered syscall patch becomes typed native stop",
+    "[execution][windows-transition][c0][syscall-trap]") {
+    const auto granularity =
+        geometry().granularity;
+    REQUIRE(
+        granularity * 3U <=
+        std::numeric_limits<std::size_t>::max());
+
+    const auto base =
+        find_free_block(
+            static_cast<std::size_t>(
+                granularity * 3U));
+    const auto stack_base =
+        base + granularity;
+    const auto gate_base =
+        base + 2U * granularity;
+
+    std::vector<std::byte> code{
+        std::byte{0x0f},
+        std::byte{0x05},
+    };
+
+    const auto trap =
+        astraea::execution::
+            plan_registered_syscall_trap(
+                GuestAddress{base},
+                code,
+                GuestAddress{base});
+    REQUIRE(trap.has_value());
+    REQUIRE(
+        astraea::execution::
+            apply_registered_syscall_trap(
+                std::span<std::byte>{code},
+                trap.value())
+            .has_value());
+
+    auto image =
+        make_guest_image(
+            base,
+            stack_base,
+            granularity,
+            std::move(code));
+    auto prepared =
+        astraea::execution::
+            prepare_windows_guest_memory(image);
+    REQUIRE(prepared.has_value());
+    auto gate =
+        make_gate_region(
+            image,
+            gate_base);
+
+    const std::array traps{
+        trap.value(),
+    };
+    auto stopped =
+        astraea::execution::enter_windows_guest(
+            image,
+            prepared.value(),
+            gate,
+            astraea::execution::
+                make_synthetic_initial_context(image),
+            traps);
+
+    REQUIRE(stopped.has_value());
+    REQUIRE(
+        stopped->reason ==
+        ExecutionStopReason::
+            registered_syscall_trap);
+    REQUIRE_FALSE(stopped->has_gate_slot);
+    REQUIRE_FALSE(stopped->has_fault);
+    REQUIRE(stopped->context.rip == base);
+}
+
+TEST_CASE(
+    "Windows refuses registered syscall site until mapped bytes are UD2",
+    "[execution][windows-transition][c0][syscall-trap][negative]") {
+    const auto granularity =
+        geometry().granularity;
+    REQUIRE(
+        granularity * 3U <=
+        std::numeric_limits<std::size_t>::max());
+
+    const auto base =
+        find_free_block(
+            static_cast<std::size_t>(
+                granularity * 3U));
+    const auto stack_base =
+        base + granularity;
+    const auto gate_base =
+        base + 2U * granularity;
+
+    const std::vector<std::byte> original_code{
+        std::byte{0x0f},
+        std::byte{0x05},
+    };
+    const auto trap =
+        astraea::execution::
+            plan_registered_syscall_trap(
+                GuestAddress{base},
+                original_code,
+                GuestAddress{base});
+    REQUIRE(trap.has_value());
+
+    auto image =
+        make_guest_image(
+            base,
+            stack_base,
+            granularity,
+            original_code);
+    auto prepared =
+        astraea::execution::
+            prepare_windows_guest_memory(image);
+    REQUIRE(prepared.has_value());
+    auto gate =
+        make_gate_region(
+            image,
+            gate_base);
+
+    const std::array traps{
+        trap.value(),
+    };
+    const auto entered =
+        astraea::execution::enter_windows_guest(
+            image,
+            prepared.value(),
+            gate,
+            astraea::execution::
+                make_synthetic_initial_context(image),
+            traps);
+
+    REQUIRE_FALSE(entered.has_value());
+    REQUIRE(
+        entered.error().code ==
+        astraea::execution::
+            NativeBackendErrorCode::
+                invalid_registered_syscall_trap);
+}
+
+
 #endif
