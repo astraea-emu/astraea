@@ -37,6 +37,30 @@ struct GraphicsIrContextRegisterWriteRange {
         default;
 };
 
+struct GraphicsIrUserConfigRegisterWriteRange {
+    std::uint16_t start_offset = 0;
+    std::vector<std::uint32_t> values;
+
+    auto operator<=>(const GraphicsIrUserConfigRegisterWriteRange&) const =
+        default;
+};
+
+struct GraphicsIrSetInstanceCount {
+    std::uint32_t instance_count = 0;
+
+    auto operator<=>(const GraphicsIrSetInstanceCount&) const = default;
+};
+
+struct GraphicsIrDrawIndexAuto {
+    std::uint32_t index_count = 0;
+
+    // Preserved exactly from the packet. Later bounded consumers may
+    // interpret only evidenced fields; generic lowering keeps it opaque.
+    std::uint32_t initiator = 0;
+
+    auto operator<=>(const GraphicsIrDrawIndexAuto&) const = default;
+};
+
 struct GraphicsIrGpuMemoryWrite {
     GpuVirtualAddress destination;
     std::vector<std::uint32_t> values;
@@ -49,6 +73,9 @@ using GraphicsIrOperation =
         GraphicsIrUnsupported,
         GraphicsIrShaderRegisterWriteRange,
         GraphicsIrContextRegisterWriteRange,
+        GraphicsIrUserConfigRegisterWriteRange,
+        GraphicsIrSetInstanceCount,
+        GraphicsIrDrawIndexAuto,
         GraphicsIrGpuMemoryWrite>;
 
 struct GraphicsIrProvenance {
