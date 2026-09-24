@@ -21,7 +21,8 @@ namespace {
            instruction.sopp.has_value() &&
            !instruction.sop1.has_value() &&
            !instruction.vop1.has_value() &&
-           !instruction.vop2.has_value();
+           !instruction.vop2.has_value() &&
+           !instruction.exp.has_value();
 }
 
 [[nodiscard]] bool valid_vop1_source(
@@ -31,7 +32,8 @@ namespace {
            instruction.vop1.has_value() &&
            !instruction.sopp.has_value() &&
            !instruction.sop1.has_value() &&
-           !instruction.vop2.has_value();
+           !instruction.vop2.has_value() &&
+           !instruction.exp.has_value();
 }
 
 [[nodiscard]] bool valid_vop2_source(
@@ -41,7 +43,8 @@ namespace {
            instruction.vop2.has_value() &&
            !instruction.sopp.has_value() &&
            !instruction.sop1.has_value() &&
-           !instruction.vop1.has_value();
+           !instruction.vop1.has_value() &&
+           !instruction.exp.has_value();
 }
 
 [[nodiscard]] bool valid_sop1_source(
@@ -51,7 +54,71 @@ namespace {
            instruction.sop1.has_value() &&
            !instruction.sopp.has_value() &&
            !instruction.vop1.has_value() &&
-           !instruction.vop2.has_value();
+           !instruction.vop2.has_value() &&
+           !instruction.exp.has_value();
+}
+
+[[nodiscard]] bool valid_exp_source(
+    const Rdna2Instruction& instruction) noexcept {
+    return instruction.format ==
+               Rdna2InstructionFormat::exp &&
+           instruction.exp.has_value() &&
+           !instruction.sopp.has_value() &&
+           !instruction.sop1.has_value() &&
+           !instruction.vop1.has_value() &&
+           !instruction.vop2.has_value() &&
+           instruction.word_count == 2U;
+}
+
+struct ExportTarget {
+    ShaderIrExportTargetKind kind =
+        ShaderIrExportTargetKind::mrt;
+    std::uint8_t index = 0;
+};
+
+[[nodiscard]] std::optional<ExportTarget>
+export_target(std::uint8_t target) noexcept {
+    if (target <= 0x07U) {
+        return ExportTarget{
+            .kind = ShaderIrExportTargetKind::mrt,
+            .index = target,
+        };
+    }
+    if (target == 0x08U) {
+        return ExportTarget{
+            .kind = ShaderIrExportTargetKind::mrt_z,
+            .index = 0U,
+        };
+    }
+    if (target == 0x09U) {
+        return ExportTarget{
+            .kind = ShaderIrExportTargetKind::null_target,
+            .index = 0U,
+        };
+    }
+    if (target >= 0x0cU && target <= 0x0fU) {
+        return ExportTarget{
+            .kind = ShaderIrExportTargetKind::position,
+            .index =
+                static_cast<std::uint8_t>(
+                    target - 0x0cU),
+        };
+    }
+    if (target == 0x14U) {
+        return ExportTarget{
+            .kind = ShaderIrExportTargetKind::primitive,
+            .index = 0U,
+        };
+    }
+    if (target >= 0x20U && target <= 0x3fU) {
+        return ExportTarget{
+            .kind = ShaderIrExportTargetKind::parameter,
+            .index =
+                static_cast<std::uint8_t>(
+                    target - 0x20U),
+        };
+    }
+    return std::nullopt;
 }
 
 [[nodiscard]] bool plain_sgpr_selector(
@@ -427,6 +494,53 @@ ShaderIrEmission lower_rdna2_to_shader_ir(
         }
         break;
 
+    case Rdna2InstructionKind::exp:
+        if (valid_exp_source(instruction)) {
+            const auto target =
+                export_target(
+                    instruction.exp->target);
+            if (!target.has_value()) {
+                operation =
+                    unsupported(
+                        ShaderIrUnsupportedReason::
+                            unknown_export_target);
+                break;
+            }
+
+            operation =
+                ShaderIrExport{
+                    .target_kind = target->kind,
+                    .target_index = target->index,
+                    .enable_mask =
+                        instruction.exp->enable_mask,
+                    .compressed =
+                        instruction.exp->compressed,
+                    .done =
+                        instruction.exp->done,
+                    .valid_mask =
+                        instruction.exp->valid_mask,
+                    .sources = {
+                        ShaderIrVgpr{
+                            .index =
+                                instruction.exp->
+                                    source_vgprs[0]},
+                        ShaderIrVgpr{
+                            .index =
+                                instruction.exp->
+                                    source_vgprs[1]},
+                        ShaderIrVgpr{
+                            .index =
+                                instruction.exp->
+                                    source_vgprs[2]},
+                        ShaderIrVgpr{
+                            .index =
+                                instruction.exp->
+                                    source_vgprs[3]},
+                    },
+                };
+        }
+        break;
+
     case Rdna2InstructionKind::unknown_sopp_opcode:
         if (valid_sopp_source(instruction)) {
             operation =
@@ -469,7 +583,8 @@ ShaderIrEmission lower_rdna2_to_shader_ir(
             !instruction.sopp.has_value() &&
             !instruction.sop1.has_value() &&
             !instruction.vop1.has_value() &&
-            !instruction.vop2.has_value()) {
+            !instruction.vop2.has_value() &&
+            !instruction.exp.has_value()) {
             operation =
                 unsupported(
                     ShaderIrUnsupportedReason::
