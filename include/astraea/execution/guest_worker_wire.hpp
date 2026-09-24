@@ -3,6 +3,7 @@
 #include <compare>
 #include <cstddef>
 #include <cstdint>
+#include <span>
 #include <variant>
 #include <vector>
 
@@ -79,6 +80,6 @@ encode_guest_worker_wire_message(
 // before a trusted typed message is returned.
 [[nodiscard]] GuestWorkerWireDecodeResult
 decode_guest_worker_wire_message(
-    const std::vector<std::byte>& frame);
+    std::span<const std::byte> frame);
 
 }  // namespace astraea::execution
