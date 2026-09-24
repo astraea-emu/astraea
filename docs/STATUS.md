@@ -1,7 +1,7 @@
 # Project Status
 
 **Integration gate:** V3 — submitted guest GPU state/resources -> Vulkan -> deterministic result  
-**State:** V0/V1/V2 complete; V3 active; verified LinkShaders behavior remains capped at #189 while #191 is evidence-blocked on four native tail records; bounded provisional V3 research may continue under ADR 0008 without creating guest-visible success  
+**State:** V0/V1/V2 complete; V3 active; verified generic raster substrate now reaches real Vulkan graphics-pipeline draw/readback; guest-visible LinkShaders remains capped at #189 while #191 is evidence-blocked on four native tail records; C0 retail-execution design is specified but retail execution remains disabled  
 **Repository:** astraea-emu/astraea  
 **In-flight work:** inspect live open GitHub PRs/issues; this file describes the expected merged frontier on `main`.
 
@@ -90,6 +90,17 @@
 - Bounded `sceAgcLinkShaders` request validation is complete (#188): the pure planner accepts only the evidenced null-hull, type-2 Geometry + Pixel, primitive-4 profile; validates exact context/UC extents and non-overlap; and copies stable shader identities without mutating guest memory.
 - Measured-partial LinkShaders output materialization is complete (#189): 32 measured interpolant records plus measured `{0x29b, 2}` routing output are preflighted and written exactly, while context `+0x100` and all three UC records remain intentionally untouched and runtime success remains unwired.
 - Transport-neutral LinkShaders tail observation validation is complete (#193): AstraeaProbe v0 validates known native output, extracts the four unknown tail records opaquely, reports sentinel equality without inferring write provenance, and requires byte-identical complete CX/UC output across repeated runs before promotion into #191.
+- Architecture review ADRs 0008-0010 are merged (#204): verified/provisional research tracks, explicit guest GPU image/surface identity, and a mandatory supervised retail-execution boundary.
+- Backend-neutral guest GPU allocation identity plus typed image views/surface-layout validation are merged (#209), keeping guest storage independent from Vulkan objects.
+- Generic PM4 SET_UCONFIG_REG transport/state plus NUM_INSTANCES and DRAW_INDEX_AUTO lowering are merged (#211), with raw initiator semantics preserved rather than guessed.
+- Raw GFX10 Color Target 0 context-state decoding is merged (#210), including BASE/BASE_EXT, INFO, ATTRIB2/3, write mask, dimensions, DCC bit, swizzle mode, and resource type without host-format or usability assumptions.
+- Submitted type-2 Geometry/ES program-address reconstruction plus stage-qualified created-shader lookup are merged (#212).
+- Generic GFX10 ordinary aligned-linear 2D surface-layout calculation is merged (#213): for 4x4 RGBA8 the logical image is 64 bytes while the verified aligned-linear guest surface is 64 pixels/256 bytes per row and 1024 bytes total with 256-byte base alignment.
+- Typed offscreen image Vulkan materialization, GPU clear, transfer/readback, and deterministic logical-pixel verification are merged (#216).
+- Generic RDNA2 EXP decode/lowering is merged (#217), preserving MRT/MRTZ/null/Position/Primitive/Parameter target classes, enable mask, COMPR/DONE/VM, and source VGPR identities without stage-ABI assumptions.
+- Generic Shader IR export capture is merged (#221): bounded wave execution records raw source-VGPR export effects under explicit EXEC/wave state without mutating registers or assigning PS5 linkage semantics.
+- A real headless Vulkan graphics-pipeline raster oracle is merged (#219): owned vertex/fragment SPIR-V -> VkGraphicsPipeline -> exactly one vkCmdDraw(3,1,0,0) -> 4x4 RGBA8 target -> deterministic opaque-magenta readback on Lavapipe.
+- The C0 supervised retail-execution research design is merged (#222), specifying controller/worker separation, syscall-before-host interception, typed IPC/fault semantics, and the first owned registered SYSCALL->UD2 proof without enabling retail execution.
 - Public five-gate CI remains the merge requirement:
   - Linux x64
   - Windows x64
@@ -99,34 +110,20 @@
 
 ## Current frontier
 
-1. V1 guest execution is proven through #148/#149 and persistent created-shader identity/transactional publication is complete through #162-#165.
-2. V2's first deterministic SPIR-V backend is complete through #150/#151.
-3. V3's first actual host-GPU proof is complete through #152/#153.
-4. #154/#155 capture a real SubmitDcb descriptor/stream.
-5. #156/#157 frame that stream as generic AMD PM4 Type-3 packets.
-6. #158/#159 lower SET_SH_REG to typed shader-register Graphics IR.
-7. #160/#161 persist shader-register state and reconstruct the existing pixel program GPU address.
-8. #162/#163 materialize validated created pixel shaders and provide duplicate-safe lookup by that address.
-9. #164/#165 register those created shaders transactionally in the real `sceAgcCreateShader` HLE path.
-10. #166/#167 reconcile durable V1/V2/V3 documentation and record the semantic-IR/compiler-IR boundary after the rapid proof-chain merges.
-11. #169 composes the captured DCB/state path through final pixel-program address resolution and unique created-shader selection with exact PGM source provenance.
-12. #172 selects the first resource-backed V3 workload: a tiny owned offscreen uniform-color graphics proof, deliberately excluding presentation.
-13. #173 adds generic PM4 SET_CONTEXT_REG lowering plus a separate persistent initialized-vs-zero ContextRegisterState without assigning PS5 meanings.
-14. #175 inserts a bounded WRITE_DATA guest-buffer micro-gate before further raster orchestration so Astraea can establish guest GPU address/resource resolution independently of shader linkage, draw, export, and render-target semantics.
-15. #177 completes #175 W0: ordinary AMD PM4 WRITE_DATA (0x37) direct-memory profile -> typed guest-GPU memory-write Graphics IR, preserving destination/payload semantics and packet provenance without resolving or mutating memory.
-16. #179 completes #175 W1: non-overlapping predeclared guest GPU buffer regions resolve checked W0 write ranges to stable guest buffer IDs plus byte offsets/counts without backing-memory mutation or backend identity.
-17. #181 completes #175 W2: raw bounded WRITE_DATA -> typed W0 operation -> W1 guest-buffer resolution -> real queued Vulkan transfer -> deterministic full-buffer Lavapipe readback, without exposing Vulkan handles as guest identity.
-18. #175 is therefore complete as a resource-substrate micro-gate. Planning now returns to #172's offscreen raster workload; the next raster dependency must be selected from the expanded verified state rather than assumed from the pre-W0 ordering.
-19. #184 prepares the exact evidenced v0x18 type-2 Geometry/fused-pre-raster ES program pair needed by the selected workload.
-20. #186 makes created AGC shader identity stage-aware and adds duplicate-safe handle lookup while preserving the existing real `sceAgcCreateShader` transaction.
-21. #188 validates the bounded six-argument LinkShaders request for the owned null-hull Geometry + Pixel triangle-list profile without mutating guest memory.
-22. #189 materializes only the native LinkShaders bytes supported by measurement: CX[0..31] and CX[33]; CX[32] and UC[0..2] remain preserved/unknown and guest-visible LinkShaders success remains deliberately unwired.
-23. #193/#194 make the remaining evidence gap reproducibly measurable: two valid runs must reproduce the known CX records and have byte-identical complete CX/UC outputs before the four tail records can be promoted.
-24. #191 remains the verified guest-visible LinkShaders critical path and is evidence-blocked, not implementation-blocked.
-25. ADR 0008 permits bounded provisional downstream research and independently evidenced generic work while #191 is blocked, provided no candidate tail values are promoted into guest-visible LinkShaders success.
-26. The provisional #196-#203 stack explores UCONFIG/draw/submission/Color Target dependencies; every current immutable PR head passed the five-gate CI matrix, but the stack is not merged project behavior.
-27. ADR 0009 corrects the first raster-target resource model: 4x4 RGBA8 is 64 logical pixel bytes, while ordinary GFX10 aligned-linear backing has independent pitch/alignment/physical extent. #203 must be corrected before further image-resource work is stacked on it.
-28. ADR 0010 adds C0: arbitrary retail game execution remains disabled until a supervised worker + guest syscall/HLE interception boundary exists.
+1. The verified loader/HLE/native owned-probe path remains complete through V1.
+2. The semantic RDNA2 -> Shader IR -> interpreter/Trace foundation remains the correctness oracle.
+3. The verified compute/SPIR-V/Vulkan proof remains complete.
+4. The submitted GPU frontend now includes Type-3 framing, SET_SH_REG, SET_CONTEXT_REG, SET_UCONFIG_REG, WRITE_DATA, NUM_INSTANCES, and DRAW_INDEX_AUTO transport/state required by the first workload.
+5. Guest GPU storage now has backend-neutral allocation identity, typed image views, and explicit GFX10 surface-layout semantics.
+6. The selected 4x4 RGBA8 workload now has raw Color Target 0 decoding and a verified ordinary aligned-linear physical layout distinct from its 64 logical pixel bytes.
+7. Created shader identity covers Pixel and the verified type-2 Geometry/ES profile, including submitted program-address resolution and stage-qualified lookup.
+8. Generic RDNA2 EXP semantics and interpreter export capture are verified for the target classes needed to begin graphics-stage output work.
+9. The Vulkan backend has crossed the raster boundary: a real graphics pipeline executes exactly one 3-vertex fullscreen draw and returns deterministic 4x4 pixels (#219).
+10. The active software-side V3 compiler checkpoint is #223/#224: owned RDNA2 Position0/MRT0 export probes -> minimum compiler/value IR -> Vulkan-valid graphics SPIR-V under an explicit synthetic probe launch ABI.
+11. Parameter/varying linkage remains deliberately unsupported until actual linkage state such as SPI_PS_INPUT_CNTL_* and SPI_PS_INPUT_ENA/ADDR can be modeled without inventing PS5 ABI behavior.
+12. #191 remains the separate verified guest-visible LinkShaders blocker: CX[32] and UC[0..2] still require two reproducible native observations.
+13. C0 is now specified (#222). Portable worker protocol (#225/#226) and the registered trap-site model (#227/#228) are implementation slices; arbitrary retail execution remains disabled.
+14. Draft #215 remains a provisional exact-workload raster binding adapter. Generic pieces should continue to land independently on main under ADR 0008 rather than turning the draft stack into a shadow implementation.
 
 ## SCE metadata boundary
 
@@ -192,49 +189,51 @@ PS5-specific assumptions require documented evidence.
 
 ## Next action
 
-Two coordinated paths are active.
+Three coordinated paths are active.
 
-### Verified evidence path
+### 1. First owned guest-shader raster proof
 
-Use **#193**'s `astraea.ps5.agc.link-shaders-tail/v0` observation validator to
-obtain the controlled reference-hardware evidence required by **#191**.
+The immediate software critical path is:
 
-#189 remains the authoritative guest-visible LinkShaders implementation
-ceiling until that evidence exists:
+```text
+owned RDNA2 EXP Position0 / EXP MRT0
+    -> verified Shader IR
+    -> export interpreter oracle
+    -> minimum compiler/value IR
+    -> graphics SPIR-V
+    -> verified VkGraphicsPipeline draw path
+    -> deterministic 4x4 pixels
+```
 
-- complete `0x110` CX and `0x18` UC raw blocks are the source of truth;
+Issue #223 / PR #224 is the current compiler slice. It uses an explicitly synthetic probe launch ABI only to bind the source VGPR values required by the owned export programs. It must not be described as the PS5 stage-entry ABI.
+
+After that compiler slice is verified, integrate its generated modules into the already-merged #219 Vulkan raster oracle and require identical deterministic pixels. Do not add PARAM/interpolation linkage merely to make the probe pass.
+
+### 2. Verified LinkShaders evidence path
+
+#189 remains the authoritative guest-visible LinkShaders implementation ceiling until #191's four native tail records are measured.
+
+Use #193/#194's transport-neutral validator when reference hardware becomes the shortest critical path:
+
+- complete 0x110 CX and 0x18 UC raw blocks;
 - measured CX[0..31] and CX[33] must reproduce;
 - CX[32] and UC[0..2] remain unknown;
-- two consecutive same-case observations must have byte-identical complete raw
-  outputs before promotion.
+- two consecutive same-case runs must have byte-identical complete raw output before promotion.
 
-Do not infer those records from generic AMD defaults, compiler candidate
-values, shader-header specials, or the provisional research stack.
+Do not infer those records from generic AMD defaults, compiler metadata, shader-header specials, or another emulator.
 
-### Independent V3 architecture path
+No console action is required yet while the software-side owned raster proof can still advance independently.
 
-Under ADR 0008, continue only work whose correctness does not require claiming
-the unknown LinkShaders records are known.
+### 3. C0 retail-execution boundary
 
-Immediate order:
+ADR 0010 and #222 define the pre-retail architecture. Continue in bounded layers:
 
-1. correct provisional **#203** so 64 logical pixel bytes are separated from
-   the ordinary GFX10 aligned-linear guest surface pitch/backing extent;
-2. introduce the smallest guest GPU allocation + typed image/surface-layout
-   model required by the owned 4x4 target (ADR 0009);
-3. re-cut independently evidenced generic layers from the #196-#203 stack onto
-   the verified frontier when they can stand without the LinkShaders
-   hypothesis;
-4. continue vertically toward stage I/O, pixel export, SPIR-V graphics stages,
-   Vulkan graphics pipeline execution, and deterministic 4x4 readback, keeping
-   any hypothesis mechanically provisional.
+1. portable worker protocol (#225/#226);
+2. one exact registered owned SYSCALL->UD2 trap-site model (#227/#228);
+3. separate worker process + deterministic controller teardown;
+4. one owned syscall round-trip through an OS-specific trap handler;
+5. only then expand threads/TLS/syscall/HLE coverage as demanded by a lawful diagnostic workload.
 
-The reference-hardware adapter remains outside Astraea core. Targeted hardware
-probes may resolve a bounded evidence blocker before V4; whole-workload
-hardware differential remains V4.
+Arbitrary retail execution remains disabled until the C0 gate is satisfied.
 
-Do not add console transport, firmware/keys, proprietary SDK material, retail
-assets, proprietary shader binaries, or exploit/circumvention tooling to the
-repository.
-
-Before commercial-title execution, satisfy C0 / ADR 0010.
+The reference-hardware adapter remains outside Astraea core. Do not add console transport, firmware/keys, proprietary SDK material, retail assets, proprietary shader binaries, or exploit/circumvention tooling to the repository.
