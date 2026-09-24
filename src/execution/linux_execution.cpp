@@ -311,6 +311,43 @@ void guest_signal_handler(
         static_cast<std::uint64_t>(
             host_context->uc_mcontext.gregs[REG_RIP]);
 
+    if (signal_number == SIGSYS &&
+        info != nullptr &&
+        info->si_code == SYS_SECCOMP) {
+        const auto call_address =
+            static_cast<std::uint64_t>(
+                reinterpret_cast<std::uintptr_t>(
+                    info->si_call_addr));
+
+        if (!frame_owns_guest_executable_rip(
+                *frame,
+                call_address)) {
+            chain_previous_signal(
+                signal_number,
+                info,
+                opaque_context);
+            return;
+        }
+
+        capture_guest_context(
+            *host_context,
+            frame->seccomp_syscall_trap.context);
+        frame->seccomp_syscall_trap.guest_rip =
+            astraea::memory::GuestAddress{
+                call_address};
+        frame->seccomp_syscall_trap.syscall_number =
+            static_cast<std::int32_t>(
+                info->si_syscall);
+        frame->seccomp_syscall_trap.audit_arch =
+            static_cast<std::uint32_t>(
+                info->si_arch);
+        frame->has_seccomp_syscall_trap = true;
+
+        siglongjmp(
+            frame->jump_buffer,
+            1);
+    }
+
     if (!frame_owns_guest_rip(*frame, rip)) {
         chain_previous_signal(
             signal_number,
