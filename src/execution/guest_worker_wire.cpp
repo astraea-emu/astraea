@@ -29,10 +29,12 @@ namespace {
 void append_u16(
     std::vector<std::byte>& bytes,
     std::uint16_t value) {
+    const auto widened =
+        static_cast<std::uint32_t>(value);
     for (unsigned shift = 0U; shift < 16U; shift += 8U) {
         bytes.push_back(
             static_cast<std::byte>(
-                (value >> shift) & 0xffU));
+                (widened >> shift) & 0xffU));
     }
 }
 
