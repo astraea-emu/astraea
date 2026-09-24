@@ -461,7 +461,7 @@ decode_guest_worker_wire_message(
     GuestWorkerWireMessage message =
         GuestWorkerHello{};
 
-    switch (kind) {
+    switch (header->kind) {
     case GuestWorkerWireMessageKind::hello:
         message =
             GuestWorkerHello{
