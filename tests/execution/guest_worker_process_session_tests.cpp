@@ -128,6 +128,40 @@ TEST_CASE(
 }
 
 TEST_CASE(
+    "Linux sealed artifact consumer rejects bytes above explicit worker limit",
+    "[execution][c0][process][artifact][linux][bound]") {
+#if defined(__linux__)
+    auto artifact_config =
+        config({"--artifact-limit-probe"});
+    artifact_config.linux_artifact_bytes =
+        std::vector<std::byte>{
+            std::byte{0x00},
+            std::byte{0x41},
+            std::byte{0xff},
+            std::byte{0x7f},
+            std::byte{0x10},
+            std::byte{0x20},
+            std::byte{0x30},
+            std::byte{0x40},
+            std::byte{0xaa},
+            std::byte{0x55},
+            std::byte{0x00},
+            std::byte{0xee},
+        };
+
+    const auto result =
+        astraea::execution::
+            run_guest_worker_process_session(
+                artifact_config);
+
+    REQUIRE(result.has_value());
+    REQUIRE(result->child_exit_code == 0);
+#else
+    SUCCEED();
+#endif
+}
+
+TEST_CASE(
     "session without artifact leaves child fd 3 closed",
     "[execution][c0][process][artifact][negative]") {
 #if defined(__linux__)
