@@ -86,6 +86,8 @@ enum class GuestWorkerDiagnosticKind : std::uint32_t {
     unsupported_relocations = 5U,
     unsupported_tls = 6U,
     native_backend_error = 7U,
+    unsupported_initial_process_abi = 8U,
+    unsupported_syscall = 9U,
 };
 
 struct GuestWorkerDiagnostic {
