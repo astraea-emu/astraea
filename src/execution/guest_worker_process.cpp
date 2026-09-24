@@ -24,6 +24,7 @@
 #include <fcntl.h>
 #include <poll.h>
 #include <spawn.h>
+#include <sys/socket.h>
 #include <sys/types.h>
 #include <sys/wait.h>
 #include <unistd.h>
@@ -73,18 +74,15 @@ using Deadline = Clock::time_point;
 
 struct NativeWorker {
     pid_t pid = -1;
-    int input_fd = -1;
-    int output_fd = -1;
+    int channel_fd = -1;
     bool active = false;
 
     NativeWorker() = default;
     NativeWorker(
         pid_t child_pid,
-        int child_input_fd,
-        int child_output_fd) noexcept
+        int controller_channel_fd) noexcept
         : pid(child_pid),
-          input_fd(child_input_fd),
-          output_fd(child_output_fd),
+          channel_fd(controller_channel_fd),
           active(true) {}
 
     NativeWorker(const NativeWorker&) = delete;
@@ -92,8 +90,10 @@ struct NativeWorker {
 
     NativeWorker(NativeWorker&& other) noexcept
         : pid(std::exchange(other.pid, -1)),
-          input_fd(std::exchange(other.input_fd, -1)),
-          output_fd(std::exchange(other.output_fd, -1)),
+          channel_fd(
+              std::exchange(
+                  other.channel_fd,
+                  -1)),
           active(std::exchange(other.active, false)) {}
 
     NativeWorker& operator=(NativeWorker&& other) noexcept {
@@ -105,11 +105,8 @@ struct NativeWorker {
     }
 
     ~NativeWorker() {
-        if (input_fd >= 0) {
-            ::close(input_fd);
-        }
-        if (output_fd >= 0) {
-            ::close(output_fd);
+        if (channel_fd >= 0) {
+            ::close(channel_fd);
         }
         if (active && pid > 0) {
             ::kill(pid, SIGKILL);
@@ -134,22 +131,12 @@ struct NativeWorker {
 spawn_worker(
     const std::filesystem::path& worker_executable,
     GuestWorkerOwnedFixtureMode mode) {
-    int to_worker[2]{-1, -1};
-    int from_worker[2]{-1, -1};
-
-    if (::pipe2(to_worker, O_CLOEXEC) != 0) {
-        return astraea::core::Result<
-            NativeWorker,
-            GuestWorkerProcessError>::failure(
-                native_error(
-                    GuestWorkerProcessErrorCode::
-                        pipe_creation_failure));
-    }
-    if (::pipe2(from_worker, O_CLOEXEC) != 0) {
-        const auto saved = errno;
-        ::close(to_worker[0]);
-        ::close(to_worker[1]);
-        errno = saved;
+    int channel[2]{-1, -1};
+    if (::socketpair(
+            AF_UNIX,
+            SOCK_STREAM | SOCK_CLOEXEC,
+            0,
+            channel) != 0) {
         return astraea::core::Result<
             NativeWorker,
             GuestWorkerProcessError>::failure(
@@ -167,14 +154,14 @@ spawn_worker(
         spawn_error =
             posix_spawn_file_actions_adddup2(
                 &actions,
-                to_worker[0],
+                channel[1],
                 STDIN_FILENO);
     }
     if (spawn_error == 0) {
         spawn_error =
             posix_spawn_file_actions_adddup2(
                 &actions,
-                from_worker[1],
+                channel[1],
                 STDOUT_FILENO);
     }
     if (spawn_error == 0) {
@@ -200,10 +187,8 @@ spawn_worker(
         if (actions_initialized) {
             posix_spawn_file_actions_destroy(&actions);
         }
-        ::close(to_worker[0]);
-        ::close(to_worker[1]);
-        ::close(from_worker[0]);
-        ::close(from_worker[1]);
+        ::close(channel[0]);
+        ::close(channel[1]);
         return astraea::core::Result<
             NativeWorker,
             GuestWorkerProcessError>::failure(
@@ -248,12 +233,10 @@ spawn_worker(
     if (actions_initialized) {
         posix_spawn_file_actions_destroy(&actions);
     }
-    ::close(to_worker[0]);
-    ::close(from_worker[1]);
+    ::close(channel[1]);
 
     if (spawn_error != 0) {
-        ::close(to_worker[1]);
-        ::close(from_worker[0]);
+        ::close(channel[0]);
         return astraea::core::Result<
             NativeWorker,
             GuestWorkerProcessError>::failure(
@@ -268,8 +251,7 @@ spawn_worker(
         GuestWorkerProcessError>::success(
             NativeWorker{
                 pid,
-                to_worker[1],
-                from_worker[0]});
+                channel[0]});
 }
 
 [[nodiscard]] bool write_all(
@@ -279,10 +261,11 @@ spawn_worker(
     std::size_t offset = 0U;
     while (offset < bytes.size()) {
         const auto count =
-            ::write(
-                worker.input_fd,
+            ::send(
+                worker.channel_fd,
                 bytes.data() + offset,
-                bytes.size() - offset);
+                bytes.size() - offset,
+                MSG_NOSIGNAL);
         if (count < 0) {
             if (errno == EINTR) {
                 continue;
@@ -335,7 +318,7 @@ spawn_worker(
                         std::numeric_limits<int>::max())));
 
         pollfd descriptor{
-            .fd = worker.output_fd,
+            .fd = worker.channel_fd,
             .events =
                 static_cast<short>(
                     POLLIN | POLLHUP),
@@ -365,10 +348,11 @@ spawn_worker(
         }
 
         const auto count =
-            ::read(
-                worker.output_fd,
+            ::recv(
+                worker.channel_fd,
                 bytes.data() + offset,
-                bytes.size() - offset);
+                bytes.size() - offset,
+                0);
         if (count < 0) {
             if (errno == EINTR) {
                 continue;
@@ -393,9 +377,10 @@ spawn_worker(
 }
 
 void close_input(NativeWorker& worker) noexcept {
-    if (worker.input_fd >= 0) {
-        ::close(worker.input_fd);
-        worker.input_fd = -1;
+    if (worker.channel_fd >= 0) {
+        ::shutdown(
+            worker.channel_fd,
+            SHUT_WR);
     }
 }
 
