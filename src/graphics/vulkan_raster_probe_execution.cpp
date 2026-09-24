@@ -459,8 +459,10 @@ struct Resources {
 }  // namespace
 
 VulkanRasterProbeExecutionResult
-execute_vulkan_fullscreen_triangle_probe(
-    const GuestGpuImageView& image) {
+execute_vulkan_fullscreen_triangle_spirv(
+    const GuestGpuImageView& image,
+    std::span<const std::uint32_t> vertex_words,
+    std::span<const std::uint32_t> fragment_words) {
     const auto plan =
         plan_vulkan_offscreen_image(image);
     if (!plan.has_value()) {
@@ -854,12 +856,10 @@ execute_vulkan_fullscreen_triangle_probe(
                 result));
     }
 
-    const auto modules =
-        build_spirv_raster_probe_modules();
     result =
         create_shader_module(
             resources.device,
-            modules.vertex_words,
+            vertex_words,
             &resources.vertex_shader);
     if (result != VK_SUCCESS) {
         return VulkanRasterProbeExecutionResult::failure(
@@ -871,7 +871,7 @@ execute_vulkan_fullscreen_triangle_probe(
     result =
         create_shader_module(
             resources.device,
-            modules.fragment_words,
+            fragment_words,
             &resources.fragment_shader);
     if (result != VK_SUCCESS) {
         return VulkanRasterProbeExecutionResult::failure(
@@ -1503,6 +1503,17 @@ execute_vulkan_fullscreen_triangle_probe(
                 VulkanRasterProbeErrorCode::
                     host_allocation_failure));
     }
+}
+
+VulkanRasterProbeExecutionResult
+execute_vulkan_fullscreen_triangle_probe(
+    const GuestGpuImageView& image) {
+    const auto modules =
+        build_spirv_raster_probe_modules();
+    return execute_vulkan_fullscreen_triangle_spirv(
+        image,
+        modules.vertex_words,
+        modules.fragment_words);
 }
 
 }  // namespace astraea::graphics
