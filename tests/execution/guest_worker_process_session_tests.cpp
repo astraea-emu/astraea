@@ -726,6 +726,91 @@ TEST_CASE(
 }
 
 TEST_CASE(
+    "supervisor propagates terminal diagnostic with matching stop",
+    "[execution][c0][process][diagnostic]") {
+    const auto result =
+        astraea::execution::
+            run_guest_worker_process_session(
+                config({"--diagnostic-event"}));
+
+    REQUIRE(result.has_value());
+    REQUIRE(result->terminal_diagnostic.has_value());
+    REQUIRE_FALSE(result->terminal_fault.has_value());
+    REQUIRE(
+        result->terminal_diagnostic->kind ==
+        astraea::execution::
+            GuestWorkerDiagnosticKind::
+                unsupported_tls);
+    REQUIRE(
+        result->terminal_diagnostic->detail0 ==
+        8U);
+    REQUIRE(
+        result->terminal_diagnostic->detail1 ==
+        1U);
+    REQUIRE(
+        result->stop.reason ==
+        astraea::execution::
+            GuestWorkerStopReason::
+                diagnostic_boundary);
+    REQUIRE(
+        result->stop.thread_id ==
+        result->terminal_diagnostic->thread_id);
+    REQUIRE(
+        result->stop.guest_rip ==
+        result->terminal_diagnostic->guest_rip);
+    REQUIRE(result->syscall_request_count == 0U);
+    REQUIRE(result->child_exit_code == 0);
+}
+
+TEST_CASE(
+    "terminal diagnostic cannot be followed by resumable syscall event",
+    "[execution][c0][process][diagnostic][negative][ordering]") {
+    bool service_called = false;
+    auto invalid =
+        config({"--diagnostic-then-syscall"});
+    invalid.max_syscall_requests = 1U;
+    invalid.syscall_service =
+        [&service_called](
+            const astraea::execution::
+                GuestWorkerSyscallRequest&)
+            -> std::optional<
+                astraea::execution::
+                    GuestWorkerSyscallResult> {
+            service_called = true;
+            return std::nullopt;
+        };
+
+    const auto result =
+        astraea::execution::
+            run_guest_worker_process_session(
+                invalid);
+
+    REQUIRE_FALSE(result.has_value());
+    REQUIRE(
+        result.error().code ==
+        astraea::execution::
+            GuestWorkerProcessSessionErrorCode::
+                protocol_failure);
+    REQUIRE_FALSE(service_called);
+}
+
+TEST_CASE(
+    "diagnostic boundary stop requires preceding typed diagnostic",
+    "[execution][c0][process][diagnostic][negative][stop]") {
+    const auto result =
+        astraea::execution::
+            run_guest_worker_process_session(
+                config({"--diagnostic-stop-only"}));
+
+    REQUIRE_FALSE(result.has_value());
+    REQUIRE(
+        result.error().code ==
+        astraea::execution::
+            GuestWorkerProcessSessionErrorCode::
+                protocol_failure);
+}
+
+TEST_CASE(
     "worker runs under explicit kernel resource ceilings",
     "[execution][c0][process][resource-policy]") {
     auto limited = config();
