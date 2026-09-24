@@ -847,17 +847,17 @@ TEST_CASE(
     const auto granularity =
         geometry().granularity;
     REQUIRE(
-        granularity * 3U <=
+        granularity * 4U <=
         std::numeric_limits<std::size_t>::max());
 
     const auto base =
         find_free_block(
             static_cast<std::size_t>(
-                granularity * 3U));
+                granularity * 4U));
     const auto stack_base =
         base + granularity;
     const auto gate_base =
-        base + 2U * granularity;
+        base + 3U * granularity;
 
     std::vector<std::byte> code{
         std::byte{0x0f},
@@ -882,7 +882,7 @@ TEST_CASE(
         make_guest_image(
             base,
             stack_base,
-            granularity,
+            granularity * 2U,
             std::move(code));
     auto prepared =
         astraea::execution::
@@ -921,17 +921,17 @@ TEST_CASE(
     const auto granularity =
         geometry().granularity;
     REQUIRE(
-        granularity * 3U <=
+        granularity * 4U <=
         std::numeric_limits<std::size_t>::max());
 
     const auto base =
         find_free_block(
             static_cast<std::size_t>(
-                granularity * 3U));
+                granularity * 4U));
     const auto stack_base =
         base + granularity;
     const auto gate_base =
-        base + 2U * granularity;
+        base + 3U * granularity;
 
     const std::vector<std::byte> original_code{
         std::byte{0x0f},
@@ -949,7 +949,7 @@ TEST_CASE(
         make_guest_image(
             base,
             stack_base,
-            granularity,
+            granularity * 2U,
             original_code);
     auto prepared =
         astraea::execution::
