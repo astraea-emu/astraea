@@ -1,4 +1,6 @@
 # ADR 0005: Guarded native x86-64 execution boundary
+**Implementation status (2026-09-24):** This ADR remains the contract for trusted Astraea-owned native probes. Retail diagnostics now use ADR 0010's separate supervised worker; the historical statements below that retail execution was not yet eligible describe the pre-C0 state and are retained as decision context.
+
 
 **Status:** Proposed  
 **Date:** 2026-09-21
