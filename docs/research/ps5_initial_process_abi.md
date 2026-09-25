@@ -212,6 +212,59 @@ primary-thread TLS, module linking, and process initialization become major
 runtime subsystems under real games; their PS4 constants/ABI must not be copied
 into Astraea.
 
+## 2026-09-25 public-source sweep
+
+A follow-up review after C0 completion re-checked the normal-title startup
+evidence and current public emulator/toolchain projects.
+
+### Re-verified primary lineage
+
+The pinned `Rufidj/ps5link-sdk@ea771e5` startup source still directly
+implements the observed C1A roles used above:
+
+- `(%rdi)` is consumed as an argc-like 32-bit value;
+- `rdi + 8` is used as the argv-like vector;
+- `rsi` is preserved as the loader-provided teardown routine;
+- the original `rdi` is passed unchanged to `_init_env`.
+
+The repository also explicitly states that this startup sequence is ported from
+SharpProspero. Treat those two projects as one lineage for this behavior, not
+as independent corroboration.
+
+Sources:
+
+- https://github.com/Rufidj/ps5link-sdk/blob/ea771e535378740b6a058b8e5419eb8a0e0e0ec8/linker/crt1.S
+- https://github.com/Rufidj/ps5link-sdk/tree/ea771e535378740b6a058b8e5419eb8a0e0e0ec8
+
+### Independent-source result
+
+The reviewed public sources did not identify a second independent
+**normal-title loader-entry observation** that establishes the same RDI/RSI,
+stack, parameter-block, and TLS state.
+
+Payload/ELF-loader SDK entry contracts were deliberately excluded because they
+describe a different loader contract. PS4 emulator startup/TLS behavior and
+other PS5 emulator implementations remain useful comparative questions, but
+they are not evidence for the PS5 retail loader's initial register values.
+
+Therefore this sweep does **not** change the promotion threshold: do not enable
+retail native entry from the single ps5link/SharpProspero lineage.
+
+### Architecture cross-check
+
+Current public emulator/compiler work continues to support the *shape* of
+Astraea's roadmap without establishing C1 values:
+
+- mature direct-title emulators encounter runtime linking, TLS, threading,
+  synchronization, HLE, and resource-tracking pressure;
+- current PS5 emulator projects separate guest GPU semantics from host Vulkan
+  resource management and shader recompilation;
+- Mesa RADV separates semantic/compiler IR lowering and optimization from the
+  AMD machine-code backend.
+
+These comparisons justify expecting later dependency classes, but none are a
+substitute for PS5 process-entry evidence.
+
 ## Next research action
 
 Obtain a second independent public or controlled observation for C1A.
