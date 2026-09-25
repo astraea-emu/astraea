@@ -40,3 +40,5 @@ Use `0000-template.md` for new decisions.
   image interpretation, surface layout, and host materialization.
 - `0010-supervised-retail-execution.md` — require a supervised syscall/isolation
   boundary before arbitrary retail execution.
+
+- [ADR 0011](0011-orthogonal-graphics-and-compatibility-gates.md) — track graphics integration and retail compatibility as orthogonal gates; direct-title compatibility ladder C0-C6.
