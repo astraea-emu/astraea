@@ -58,6 +58,24 @@ A structurally ready PS5/SCE image still stops at
 `unsupported_initial_process_abi`. No retail instruction is executed merely
 to make progress.
 
+## What can be tested now
+
+On Linux x86-64, a user may run the production diagnostic against a legally
+obtained executable artifact:
+
+```text
+astraea diagnose <artifact>
+```
+
+This is now an intentional project milestone, not an unsafe prototype launch.
+The expected result is a deterministic typed **first boundary**. For an image
+that passes the current structural/dynamic/relocation/TLS preflight, Astraea
+currently reports `unsupported_initial_process_abi` and does not execute the
+retail entry point.
+
+That result is useful: it confirms the production artifact/supervisor path and
+identifies C1 as the next dependency. It is not a boot/playability result.
+
 ## Current critical path: C1
 
 Issue #300 asks for the smallest evidenced PS5 initial-process contract needed
