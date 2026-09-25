@@ -81,6 +81,55 @@ Direct-title diagnostics expose missing title dependencies with much less
 unrelated system surface. A firmware track can be added later if a concrete
 goal requires it.
 
+### KytyPS5
+
+Repository: https://github.com/KytyPS5/KytyPS5  
+Pinned commit: `5a705dd15f9312f7db29baa91dfd93a2c895cb53`
+
+This active PS5-focused Kyty lineage is a more relevant current architecture
+comparator than the original 2022 tree. At the pinned revision its source tree
+contains explicit:
+
+- Prospero guest-GPU command processing and PM4 dispatch;
+- separate guest-GPU and host-GPU layers;
+- host memory/page tracking;
+- buffer, texture, sampler, and pipeline caches;
+- renderer command scheduling and synchronization;
+- render-target/tiling infrastructure;
+- shader decode/CFG/IR/translation and SPIR-V emission.
+
+**Lesson for Astraea:** these are credible eventual dependency classes once
+real titles create repeated resource lifetimes and synchronization pressure.
+They reinforce Astraea's existing guest/host GPU separation and the plan to add
+page tracking/caches/scheduling only when C4 workloads require them.
+
+Compatibility claims from another emulator are not evidence for Astraea's PS5
+semantics and are not used to promote register/API behavior.
+
+### SharpEmu
+
+Repository: https://github.com/sharpemu/sharpemu  
+Pinned commit: `d4ff32a1d27d33afe7b7fb640b9d7567f16fea89`
+
+SharpEmu is an active PS5-only experimental project. At the pinned revision its
+source tree includes:
+
+- native direct-execution profiles and guest-thread flow;
+- PS5/SCE loading and imported-symbol relocation;
+- guest memory/page protection and page tracking;
+- guest TLS templates and module management;
+- kernel/HLE synchronization, memory, file, socket, semaphore, and pthread
+  surfaces;
+- guest GPU buffer/image caches;
+- shader and pipeline caches;
+- GPU scheduling/timeline abstractions;
+- Vulkan host GPU and VideoOut/presentation infrastructure.
+
+**Lesson for Astraea:** independent PS5 work converges on the same broad
+post-entry subsystems predicted by C2-C5. This strengthens the roadmap but does
+not justify copying C# implementation details, PS5 constants, syscall behavior,
+or compatibility assumptions.
+
 ### Kyty
 
 Repository: https://github.com/InoriRus/Kyty  
