@@ -1,13 +1,19 @@
 #include <astraea/execution/linux_retail_diagnostic.hpp>
+#include <astraea/execution/guest_worker_process_session.hpp>
 
 #include <bit>
 #include <cstddef>
 #include <cstdint>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <vector>
 
 #include <catch2/catch_test_macros.hpp>
+
+#ifndef ASTRAEA_APP_PATH
+#define ASTRAEA_APP_PATH ""
+#endif
 
 namespace {
 
@@ -336,6 +342,86 @@ preflight(std::vector<std::byte> bytes) {
                 });
 }
 
+#if defined(__linux__) && defined(__x86_64__)
+
+astraea::execution::
+    GuestWorkerProcessSessionRunResult
+run_production_worker(
+    std::vector<std::byte> artifact) {
+    astraea::execution::GuestWorkerResourcePolicy
+        policy{};
+    policy.process_cpu_time_seconds = 10U;
+    policy.linux_max_open_files = 32U;
+    policy.linux_disable_core_dumps = true;
+    policy.linux_disable_file_growth = true;
+
+    return astraea::execution::
+        run_guest_worker_process_session(
+            astraea::execution::
+                GuestWorkerProcessSessionConfig{
+                    .worker_executable =
+                        ASTRAEA_APP_PATH,
+                    .worker_arguments = {
+                        "--linux-retail-diagnostic-worker",
+                    },
+                    .run_budget_microseconds =
+                        1'000'000U,
+                    .timeout_milliseconds =
+                        15'000U,
+                    .syscall_service = {},
+                    .max_syscall_requests = 0U,
+                    .resource_policy = policy,
+                    .linux_artifact_bytes =
+                        std::move(artifact),
+                });
+}
+
+void require_production_boundary(
+    std::vector<std::byte> artifact,
+    astraea::execution::GuestWorkerDiagnosticKind
+        expected_kind,
+    std::optional<std::uint64_t> detail0 =
+        std::nullopt,
+    std::optional<std::uint64_t> detail1 =
+        std::nullopt) {
+    const auto result =
+        run_production_worker(
+            std::move(artifact));
+
+    REQUIRE(result.has_value());
+    REQUIRE(result->terminal_diagnostic.has_value());
+    REQUIRE_FALSE(result->terminal_fault.has_value());
+    REQUIRE(result->syscall_request_count == 0U);
+    REQUIRE(result->child_exit_code == 0);
+    REQUIRE(
+        result->stop.reason ==
+        astraea::execution::
+            GuestWorkerStopReason::
+                diagnostic_boundary);
+    REQUIRE(
+        result->stop.thread_id ==
+        result->terminal_diagnostic->thread_id);
+    REQUIRE(
+        result->stop.guest_rip ==
+        result->terminal_diagnostic->guest_rip);
+    REQUIRE(
+        result->terminal_diagnostic->kind ==
+        expected_kind);
+
+    if (detail0.has_value()) {
+        REQUIRE(
+            result->terminal_diagnostic->detail0 ==
+            detail0.value());
+    }
+    if (detail1.has_value()) {
+        REQUIRE(
+            result->terminal_diagnostic->detail1 ==
+            detail1.value());
+    }
+}
+
+#endif
+
 }  // namespace
 
 TEST_CASE(
@@ -521,4 +607,58 @@ TEST_CASE(
     REQUIRE(
         result.image->elf.header.entry ==
         kEntry);
+}
+
+
+TEST_CASE(
+    "production retail worker preserves dependency relocation TLS and initial-ABI boundaries",
+    "[execution][c0][retail][production][boundaries]") {
+#if defined(__linux__) && defined(__x86_64__)
+    SECTION("dynamic dependency") {
+        require_production_boundary(
+            make_sce_fixture(
+                FixtureOptions{
+                    .generic_needed = true,
+                }),
+            astraea::execution::
+                GuestWorkerDiagnosticKind::
+                    unsupported_dynamic_dependencies,
+            1U);
+    }
+
+    SECTION("relocation") {
+        require_production_boundary(
+            make_sce_fixture(
+                FixtureOptions{
+                    .relocation = true,
+                }),
+            astraea::execution::
+                GuestWorkerDiagnosticKind::
+                    unsupported_relocations,
+            1U);
+    }
+
+    SECTION("TLS") {
+        require_production_boundary(
+            make_sce_fixture(
+                FixtureOptions{
+                    .tls = true,
+                }),
+            astraea::execution::
+                GuestWorkerDiagnosticKind::
+                    unsupported_tls,
+            8U,
+            1U);
+    }
+
+    SECTION("otherwise ready image still stops before native entry") {
+        require_production_boundary(
+            make_sce_fixture(),
+            astraea::execution::
+                GuestWorkerDiagnosticKind::
+                    unsupported_initial_process_abi);
+    }
+#else
+    SUCCEED();
+#endif
 }
