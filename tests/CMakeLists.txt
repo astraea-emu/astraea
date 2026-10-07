@@ -80,6 +80,7 @@ add_executable(astraea_core_tests
     probe/agc_link_shaders_tail_tests.cpp
     probe/ps5_process_entry_tests.cpp
     probe/ps5_process_entry_observer_tests.cpp
+    probe/ps5_process_entry_observer_source_tests.cpp
     graphics/agc_shader_binary_tests.cpp
     graphics/agc_shader_container_tests.cpp
     graphics/packet_tests.cpp
@@ -135,6 +136,10 @@ target_link_libraries(astraea_core_tests PRIVATE
 
 target_include_directories(astraea_core_tests PRIVATE
     "${CMAKE_SOURCE_DIR}/tools/reference/ps5_process_entry_observer"
+)
+
+target_compile_definitions(astraea_core_tests PRIVATE
+    ASTRAEA_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
 )
 
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND
