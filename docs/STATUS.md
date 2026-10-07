@@ -91,9 +91,15 @@ Promote it in layers rather than as one guessed ABI:
 2. **C1B — process metadata**
    - establish relationship to process/procparam metadata and ownership.
 3. **C1C — primary-thread TLS/TCB**
-   - establish required TLS allocation and initial FS/GS state.
-4. **C1D — bootstrap ordering**
-   - establish which module/import/runtime initialization must precede entry.
+   - establish only the TLS/TCB/FS-GS state required before the first title
+     instruction.
+4. **C1D — pre-entry bootstrap effects**
+   - establish only the module/import/runtime effects that must precede title
+     entry.
+
+Dynamic TLS, additional guest threads, runtime module loads and continuing
+initialization after the first admitted instruction belong to C2 unless a
+selected workload proves they are pre-entry requirements.
 
 Only the subset required by the selected diagnostic workload should be
 implemented. Unknown fields remain unsupported.
@@ -159,7 +165,7 @@ dependency:
 The durable compatibility ladder is:
 
 ```text
-C0 diagnostic -> C1 first retail instruction -> C2 bootstrap/HLE closure
+C0 diagnostic -> C1 first retail instruction -> C2 post-entry runtime closure
  -> C3 boot -> C4 first headless title GPU/frame evidence
  -> C5 visible presentation/menu -> C6 in-game/playable/accuracy
 ```
