@@ -21,7 +21,10 @@ project.
 - Guest semantics before host mapping: SCE/AGC/RDNA2 behavior remains separate
   from Vulkan and other host APIs.
 - Native x86-64 execution where host architecture permits it; portable
-  subsystems remain host-independent.
+  subsystems remain host-independent. Native execution does not assume every
+  host implements the PS5 Zen 2 instruction surface identically—unsupported
+  host instructions are a separate patch/trap/emulation boundary when a real
+  workload requires it.
 - Verification-first development: structured traces, differential tests,
   regression localization, fuzzing, sanitizers, and reproducible experiments.
 - Dependency-driven vertical integration: build the smallest real dependency
