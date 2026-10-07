@@ -43,3 +43,4 @@ Use `0000-template.md` for new decisions.
 - `0011-orthogonal-graphics-and-compatibility-gates.md` — track graphics
   integration and retail compatibility as orthogonal gates with a
   direct-title C0-C6 compatibility ladder.
+- `0012-scalability-and-release-readiness-gates.md` — add S0-S5 scalability/readiness gates for coverage, cross-title regression, architecture ratchets, performance and release quality.
