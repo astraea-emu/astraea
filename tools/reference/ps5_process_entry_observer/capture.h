@@ -49,3 +49,13 @@ ASTRAEA_PS5_ENTRY_STATIC_ASSERT(offsetof(AstraeaPs5EntryCaptureV0, process_prefi
 ASTRAEA_PS5_ENTRY_STATIC_ASSERT(sizeof(AstraeaPs5EntryCaptureV0) == 0xa0);
 
 #undef ASTRAEA_PS5_ENTRY_STATIC_ASSERT
+
+#if defined(__cplusplus)
+extern "C" {
+#endif
+
+extern AstraeaPs5EntryCaptureV0 astraea_ps5_entry_capture_v0;
+
+#if defined(__cplusplus)
+}
+#endif
