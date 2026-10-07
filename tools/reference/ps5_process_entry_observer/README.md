@@ -161,6 +161,11 @@ normal runtime initialization. Manual `--capture-runtime`,
 `--api-procparam-runtime`, and `--api-procparam-prefix` arguments remain
 available for independent adapters, but must not be mixed with `--log-file`.
 
+A null `sceKernelGetProcParam()` return is valid evidence. In that case the
+emitter records `procparam_runtime=0` and `procparam_prefix=unavailable`;
+the analyzer preserves the null result and reports both identity checks false
+rather than treating the run as malformed.
+
 The analyzer reports, separately:
 
 - derived load bias;
