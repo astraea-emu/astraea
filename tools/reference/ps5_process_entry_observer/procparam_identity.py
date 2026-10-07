@@ -604,7 +604,7 @@ class SelfTests(unittest.TestCase):
 
     def test_observation_log_parses_machine_record(self) -> None:
         observed = parse_observation_log(
-            "noise before\\n"
+            "noise before\n"
             "ASTRAEA_ENTRY_V0 status=complete "
             "capture_runtime=0x0000000010005000 "
             "rdi=0x0000000000001111 "
@@ -613,7 +613,7 @@ class SelfTests(unittest.TestCase):
             "rsp=0x0000000000004448 "
             "process_prefix=000102030405060708090a0b0c0d0e0f "
             "procparam_runtime=0x0000000010007000 "
-            "procparam_prefix=60000000000000004f52424900000000\\n"
+            "procparam_prefix=60000000000000004f52424900000000\n"
         )
         self.assertEqual(observed["capture_runtime"], 0x10005000)
         self.assertEqual(observed["rsi"], 0x2222)
@@ -630,7 +630,7 @@ class SelfTests(unittest.TestCase):
             "rsp=0x0000000000004448 "
             "process_prefix=000102030405060708090a0b0c0d0e0f "
             "procparam_runtime=0x0000000010007000 "
-            "procparam_prefix=60000000000000004f52424900000000\\n"
+            "procparam_prefix=60000000000000004f52424900000000\n"
         )
         result = analyze(
             _synthetic_intermediate(),
@@ -717,7 +717,7 @@ class SelfTests(unittest.TestCase):
             "procparam_prefix=60000000000000004f52424900000000"
         )
         with self.assertRaisesRegex(AnalysisError, "multiple"):
-            parse_observation_log(line + "\\n" + line + "\\n")
+            parse_observation_log(line + "\n" + line + "\n")
 
     def test_malformed_elf_is_rejected(self) -> None:
         with self.assertRaisesRegex(AnalysisError, "bad ELF magic"):
