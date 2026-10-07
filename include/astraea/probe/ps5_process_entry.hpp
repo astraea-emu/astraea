@@ -17,8 +17,8 @@ struct Ps5ProcessEntryObservation {
     std::uint64_t rsi = 0;
     std::uint64_t rbp = 0;
     std::uint64_t rsp = 0;
-    std::uint64_t fs_base = 0;
-    std::uint64_t gs_base = 0;
+    std::optional<std::uint64_t> fs_base;
+    std::optional<std::uint64_t> gs_base;
 
     astraea::memory::GuestAddress process_window_base;
     std::span<const std::byte> process_window;
@@ -48,8 +48,8 @@ struct Ps5ProcessEntryStructuralProjection {
     bool rsi_nonzero = false;
     bool rbp_zero = true;
     std::uint8_t rsp_mod16 = 0;
-    bool fs_base_nonzero = false;
-    bool gs_base_nonzero = false;
+    std::optional<bool> fs_base_nonzero;
+    std::optional<bool> gs_base_nonzero;
 
     auto operator<=>(const Ps5ProcessEntryStructuralProjection&) const =
         default;
@@ -65,8 +65,8 @@ struct Ps5ProcessEntryValidatedObservation {
     std::uint64_t rsi = 0;
     std::uint64_t rbp = 0;
     std::uint64_t rsp = 0;
-    std::uint64_t fs_base = 0;
-    std::uint64_t gs_base = 0;
+    std::optional<std::uint64_t> fs_base;
+    std::optional<std::uint64_t> gs_base;
 
     Ps5ProcessEntryStructuralProjection projection;
 
