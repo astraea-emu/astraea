@@ -99,9 +99,11 @@ implemented. Unknown fields remain unsupported.
 
 ## 2026-10-07 re-entry review
 
-A fresh comparison against current KytyPS5, Prosperity, SharpEmu and
-ps5link/SharpProspero work did not invalidate Astraea's architecture and did
-not provide enough independent loader evidence to enable retail entry.
+A fresh comparison against current KytyPS5, Prosperity, SharpEmu, prosper,
+ps5rs, PortPS5, ps5link/SharpProspero and current native-title tooling did not
+invalidate Astraea's architecture. It did produce independent hardware-exercised
+corroboration for the direct-title process-block prefix, but still not enough
+evidence to enable retail entry.
 
 The important refinement is that C1 must distinguish **bootstrap entry** from
 the later **title entry**. Current public implementations do not agree on
@@ -111,6 +113,13 @@ initial stack and FS/TCB state. These are comparative implementations, not
 permission to guess either contract.
 
 See `docs/research/scene_review_2026-10-07.md`. The critical path remains #300.
+Two independent hardware-exercised native-title lineages now support a partial
+C1A prefix: RDI/process-parameter block, argc-like field at +0, argv-like
+vector at +8, and the original process pointer passed to runtime environment
+initialization. This prefix may be encoded as typed Astraea state.
+
+Still unresolved and entry-blocking: mandatory RSI teardown semantics, exact
+initial RSP/stack state, primary-thread TLS/TCB/FS-GS, and bootstrap ordering.
 
 ## After C1
 
@@ -174,8 +183,9 @@ Astraea does **not** currently claim:
 
 ## Next action
 
-Work #300. Establish and document the smallest corroborated PS5
-initial-process ABI subset. Do not bypass the current
-`unsupported_initial_process_abi` stop with Astraea's synthetic probe stack.
+Work #300. Encode the now-corroborated partial C1A direct-title prefix while
+keeping the current `unsupported_initial_process_abi` production stop. Then
+resolve RSI teardown, initial RSP, TLS/TCB and bootstrap ordering before any
+retail instruction is admitted.
 
 Use `docs/research/ps5_initial_process_abi.md` as the durable evidence record.
