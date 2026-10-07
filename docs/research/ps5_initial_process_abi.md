@@ -1,7 +1,7 @@
 # PS5 initial-process ABI research
 
 **Status:** active evidence record for #300  
-**Last reviewed:** 2026-09-24
+**Last reviewed:** 2026-10-07
 
 ## Question
 
@@ -264,6 +264,32 @@ Astraea's roadmap without establishing C1 values:
 
 These comparisons justify expecting later dependency classes, but none are a
 substitute for PS5 process-entry evidence.
+
+## 2026-10-07 bootstrap-boundary refinement
+
+The October scene review adds an important distinction without promoting any
+new PS5 constant or register value.
+
+- Current KytyPS5 independently synthesizes an argc/argv-like title-entry
+  block, teardown callback, and guest stack before calling a title entry.
+  This converges on the broad ps5link RDI/RSI shape but is implementation
+  behavior, not a real-loader observation.
+- Current Force67/prosperity instead models PS5 startup by entering libkernel
+  first with a FreeBSD-like initial stack and a non-zero initial FS/TCB.
+  Its firmware-derived TCB details are research clues, not Astraea constants.
+
+Therefore C1 must distinguish two boundaries:
+
+- **C1-pre:** state/effects required at the first guest bootstrap instruction
+  Astraea chooses to model or replace through HLE;
+- **C1-title:** state required when the title's own entry is finally invoked.
+
+Astraea may clean-room reproduce required bootstrap effects without executing
+proprietary system modules, but only after those effects are evidenced. The
+October review found no second independent controlled observation sufficient
+to enable retail native entry.
+
+See `docs/research/scene_review_2026-10-07.md`.
 
 ## Next research action
 
