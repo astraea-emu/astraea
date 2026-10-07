@@ -25,6 +25,12 @@ astraea_test_invoke_entry_observer:
     movabsq $0xeeeeeeeeeeeeeeee, %r14
     movabsq $0xffffffffffffffff, %r15
 
+    /*
+     * Establish a known arithmetic-flags pattern immediately before entry.
+     * CMP x,x yields ZF=1 and PF=1 while clearing CF/AF/SF/OF. CALL, MOV and
+     * JMP preserve those arithmetic flags.
+     */
+    cmpq %rax, %rax
     call astraea_ps5_entry_observer_start
 
     popq %r15
@@ -56,6 +62,10 @@ astraea_reference_crt_start:
     movq %r13, astraea_test_target_capture + 0x78(%rip)
     movq %r14, astraea_test_target_capture + 0x80(%rip)
     movq %r15, astraea_test_target_capture + 0x88(%rip)
+
+    pushfq
+    popq %r10
+    movq %r10, astraea_test_target_rflags(%rip)
     ret
 
 .size astraea_reference_crt_start, .-astraea_reference_crt_start
@@ -67,5 +77,11 @@ astraea_reference_crt_start:
 astraea_test_target_capture:
     .zero 0xa0
 .size astraea_test_target_capture, 0xa0
+
+.globl astraea_test_target_rflags
+.type astraea_test_target_rflags, @object
+astraea_test_target_rflags:
+    .zero 8
+.size astraea_test_target_rflags, 8
 
 .section .note.GNU-stack,"",@progbits
