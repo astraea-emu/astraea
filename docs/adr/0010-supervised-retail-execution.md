@@ -2,6 +2,8 @@
 
 **Status:** Accepted  
 **Date:** 2026-09-24
+**Implementation status (2026-09-24):** The C0 production diagnostic boundary is complete on Linux x86-64: separate worker, sealed artifact handoff, finite resource policy, typed syscall/fault/diagnostic protocol, and pre-kernel guest-syscall containment are merged. Windows retains the owned synthetic supervision/syscall/fault proofs but arbitrary retail admission remains disabled. Retail native entry on Linux is separately blocked at C1 until the PS5 initial-process ABI is established (#300).
+
 
 ## Context
 

@@ -7,469 +7,532 @@ and emulation project whose correctness is driven by public specifications,
 controlled experiments, deterministic tests, and regression localization
 rather than title-specific hacks.
 
-Astraea is a long-horizon systems project. Efficiency means reaching real
-end-to-end emulator behavior with the fewest unsupported assumptions—not
-maximizing raw commit count, opcode count, or HLE surface area.
-
-ADR 0006 defines the current planning model: **dependency-driven vertical
-integration**. ADR 0008 defines verified vs provisional research integration,
-ADR 0009 defines guest GPU image/surface identity, and ADR 0010 defines the
-pre-retail supervised execution boundary.
+Efficiency means removing the **first real dependency** on the shortest
+end-to-end path, not maximizing opcode count, HLE surface area, or visible
+compatibility claims.
 
 ## 2. Source of truth
 
 GitHub is authoritative.
 
-- `docs/PROJECT_PLAN.md` — durable strategy, architectural workstreams, and
-  vertical integration gate definitions.
-- `docs/STATUS.md` — the canonical **merged frontier**: completed state,
-  blockers, and exact next dependency/action expected on `main`.
-- Open GitHub issues / pull requests — authoritative in-flight work and branch
-  state. Unmerged PR behavior is not completed project behavior.
-- `docs/CHAT_HANDOFF.md` — procedure for moving to a fresh AI conversation.
-- `docs/adr/` — durable architecture decisions and their evidence.
-- `docs/research/` — evidence notes and bounded format/behavior research.
-- GitHub issues — executable work units.
-- Pull requests — review and integration history.
+- `docs/PROJECT_PLAN.md` — durable architecture and gate definitions.
+- `docs/STATUS.md` — concise merged frontier and exact next action.
+- Open issues / pull requests — in-flight work.
+- `docs/adr/` — durable architecture decisions.
+- `docs/research/` — evidence and unresolved questions.
+- `docs/specs/` — narrow behavioral/data contracts.
 - CI — mechanical acceptance gate.
+- Chats — working sessions only.
 
-Chats are working sessions, not project memory.
+A merged implementation outranks a stale document. When a discrepancy is
+found, fix the document rather than preserving obsolete status language.
 
-## 3. Core engineering principles
+## 3. Core principles
 
-1. **Evidence before behavior.** PS5-specific behavior must cite public
-   documentation, controlled lawful observations, or an explicitly labeled
-   hypothesis.
-2. **Clean-room provenance.** Never commit Sony firmware, keys, proprietary SDK
-   files, decrypted retail content, proprietary system modules, or material
-   whose redistribution is not authorized.
-3. **Guest semantics before host mapping.** Model SCE/AGC/RDNA2 behavior in the
-   guest domain before translating it to Vulkan or another host API.
-4. **Portable core, specialized execution.** Parsers, state models, HLE
-   contracts, traces, and IRs remain host-portable. Native x86-64 guest
-   execution is enabled only where the host architecture permits it.
-5. **Verification-first.** Every subsystem should expose structured state that
-   can be tested, traced, diffed, fuzzed, and minimized.
-6. **Small, vertical PRs.** A change should remove one real dependency on the
-   next integration path and include tests. Large speculative rewrites require
-   an ADR first.
-7. **No compatibility hacks without explanation.** Title-specific workarounds
-   require a documented root cause or an explicit temporary quarantine.
-8. **Reproducibility.** Toolchain versions, evidence, fixtures, experiments,
-   and expected outputs are recorded.
-9. **Security posture.** Treat guest binaries and captured inputs as untrusted.
-   Binary parsers and loaders are fuzz targets from the beginning.
-10. **Unknown means unknown.** Undocumented Sony-specific behavior is a named
-    evidence blocker, not an invitation to invent a plausible constant.
-11. **Verified and provisional work are distinct.** Only verified behavior
-    becomes authoritative guest-visible behavior on `main`; bounded research
-    may cross an evidence blocker only under ADR 0008.
-12. **Guest storage is not host storage.** Guest GPU allocations, image views,
-    surface layouts, and Vulkan resources remain distinct identities under
-    ADR 0009.
-13. **Retail code is untrusted.** Arbitrary retail execution requires the
-    supervised syscall/isolation boundary in ADR 0010.
+1. **Evidence before PS5-specific behavior.**
+2. **Clean-room provenance.** No Sony firmware, keys, proprietary SDK files,
+   decrypted retail content, proprietary system modules, or unauthorized
+   redistribution.
+3. **Guest semantics before host mapping.**
+4. **Unknown means unknown.** Unsupported behavior is typed and observable.
+5. **Portable core, specialized runtime.**
+6. **Verification first.** Parsers, state, IR, runtime boundaries, and
+   experiments must be testable and traceable.
+7. **Dependency-driven vertical integration.**
+8. **Small reviewed PRs with explicit acceptance and forbidden scope.**
+9. **Separate verified implementation from provisional research** (ADR 0008).
+10. **Keep guest GPU identity/layout separate from host resources** (ADR 0009).
+11. **Treat retail code as untrusted** (ADR 0010).
+12. **Do not confuse compatibility progress with semantic correctness.**
+13. **Direct-title first.** Full firmware/VSH boot is not a prerequisite unless
+    a real dependency proves otherwise.
+14. **Expand breadth on demand.** HLE, shader ISA, resource caches, scheduler,
+    services, and UI grow when an owned or retail workload requires them.
 
-## 4. Host strategy
+## 4. Architectural layers
 
-### Development hosts
+### A. Loader / process image
 
-macOS, Linux, and Windows are first-class development environments for
-portable repository work.
+- ELF/SCE structural validation
+- program mappings and permissions
+- dynamic metadata
+- relocations
+- module/library/import/export identity
+- process parameters
+- initial stack
+- TLS/TCB metadata and runtime placement
 
-### CPU runtime truth
+### B. Guest process / CPU runtime
 
-PS5 software executes x86-64 CPU code. Astraea's native guest-execution path
-therefore targets:
+- guest address space
+- guest CPU context
+- native x86-64 transition where appropriate
+- guest process/thread/handle identity
+- fault capture
+- HLE/syscall dispatch
+- controlled stop/resume
 
-- Linux x86-64
-- Windows x86-64
+### C. Supervised retail runtime
 
-Apple Silicon macOS is ARM64. It remains useful for portable analysis,
-parsers, IRs, compiler work, and tests, but it is not equivalent to an x86-64
-native execution host.
+- controller/worker isolation
+- sealed artifact authority
+- bounded protocol
+- syscall interception before host-kernel fallthrough
+- host-resource policy
+- finite execution/resource budgets
+- deterministic diagnostic/fault reporting
 
-### Graphics host strategy
+### D. PS5 platform services
 
-Vulkan is the first host graphics API.
+- exact import identity
+- module/runtime-linker policy
+- memory/process/thread services
+- synchronization/events/time
+- filesystem/input/audio/video
+- other services pulled by real workloads
 
-The guest model is not Vulkan-shaped. PS5 AGC state, guest resources,
-synchronization, and RDNA2 shader semantics remain represented independently
-of the backend. MoltenVK may provide portability coverage on macOS, but native
-Vulkan behavior on Linux/Windows remains the primary backend target.
+HLE is not a finish-all phase. Implement only services needed by the next
+verified workload.
 
-SPIR-V is the first host shader IR because Vulkan consumes SPIR-V shader
-modules. Astraea's existing Shader IR remains the guest-semantic/oracle layer
-and stays independent of SPIR-V so guest semantics can be tested without a
-Vulkan device. When a concrete workload first requires SSA/value dataflow,
-structured control flow, resource operations, or stage I/O, Astraea introduces
-the smallest separate compiler/value IR required by that workload. That layer
-also remains free of Vulkan handles and preserves provenance back to semantic
-Shader IR/RDNA2. See ADR 0007.
+### E. PS5 GPU frontend
 
-## 5. Stable architectural workstreams
+- AGC shader containers/objects
+- submitted PM4/command streams
+- register/state model
+- guest GPU allocations/resources/views
+- surface layouts
+- descriptors
+- synchronization
+- presentation state
 
-These workstreams are **not** a waterfall. They advance when required by the
-next vertical gate.
+Raw provenance remains available alongside typed semantics.
 
-### A. Foundation and quality
+### F. Shader semantics
 
-Repository policy, C++23/CMake, CI, sanitizers, fuzzing, dependency policy,
-review conventions, and reproducibility.
+```text
+RDNA2 bytes
+ -> decoded instructions
+ -> semantic Shader IR
+ -> semantic/oracle execution where useful
+```
 
-### B. Loader and modules
+The semantic layer represents guest behavior, not Vulkan convenience.
 
-ELF/SCE validation, mappings, relocations, dynamic metadata, import/export
-identity, module graph, stack/TLS preparation, and later module lifecycle.
+### G. Shader compiler
 
-### C. Guest memory and CPU execution
+```text
+semantic Shader IR
+ -> workload-driven compiler/value IR
+ -> structured/lowered compiler form
+ -> SPIR-V
+```
 
-Guest address-space model, permissions/faults, x86-64 guest context,
-guest/host transitions, native execution, controlled exits, and later
-exception/instrumentation needs.
+The compiler IR grows only when real shaders require SSA/value flow, phis,
+structured control flow, resource discovery/lowering, stage I/O, or
+optimization passes. Do not turn semantic Shader IR into a host compiler IR.
 
-### D. Platform HLE
+### H. Host GPU backend
 
-Exact import identity, ABI contracts, memory/process/module services, threads,
-synchronization, events, time, filesystem, input, audio, video, and other
-system interfaces.
+- Vulkan resource materialization
+- pipeline/shader module creation
+- synchronization mapping
+- headless execution/readback
+- eventually presentation
 
-HLE is expanded **on demand by an owned probe or integration gate**, not by
-trying to clone the entire platform API up front.
+Vulkan is a backend, not Astraea's guest specification.
 
-### E. Astraea Lab / Trace
+### I. Verification infrastructure
 
-Stable traces, normalization, deterministic serialization, first-divergence
-diffing, snapshots, minimization, regression corpora, and controlled hardware
-comparison.
+- Trace v0 and first-divergence diffing
+- AstraeaProbe v0
+- deterministic fixtures
+- fuzzing and sanitizers
+- controlled reference-hardware evidence
+- compatibility/diagnostic reports without proprietary bytes
 
-### F. Astraea Probe
+## 5. Host strategy
 
-Owned synthetic programs and reproducible experiments that isolate one
-platform behavior at a time. Hardware-side observation is used when legally
-and technically appropriate. Targeted hardware evidence probes may occur at
-any vertical gate when they answer one bounded blocker; they are distinct from
-V4 whole-workload differential testing.
+### Development
 
-### G. PS5 GPU frontend
+macOS, Linux, and Windows remain first-class for portable code and CI.
 
-AGC shader containers/objects, command buffers, register/state decoding,
-submission semantics, resource descriptors, guest GPU allocations, typed
-buffer/image views, explicit surface layouts, synchronization, and
-presentation state. Guest allocation/view/layout identity remains above and
-independent from Vulkan.
+### Native guest execution
 
-### H. RDNA2 shader semantics
+The PS5 CPU is x86-64.
 
-AMD-documented instruction decoding, semantic Shader IR, CFG, state semantics,
-exact oracle execution where useful, floating-point modes,
-memory/image/export semantics, and other instruction families pulled by real
-workloads.
+- Linux x86-64: native owned probes plus production retail diagnostics.
+- Windows x86-64: owned native/supervisor proofs, but arbitrary retail
+  admission remains disabled until equivalent pre-kernel syscall containment
+  exists.
+- Apple Silicon macOS: portable analysis/compiler/test host, not native PS5 CPU
+  execution.
 
-"Generic RDNA2" means AMD-defined guest ISA semantics shared by the hardware
-family. It is required emulator behavior, not placeholder data.
+### Graphics
 
-### I. Shader compiler and host GPU backend
+Vulkan is the first host graphics backend; SPIR-V is the first backend shader
+format.
 
-Semantic Shader IR -> workload-driven compiler/value IR -> SPIR-V lowering and
-validation, followed by Vulkan device/resource/pipeline management,
-synchronization mapping, headless execution, then presentation. The current
-straight-line vector-probe emitter remains a valid narrow proof and does not
-need a speculative rewrite before a workload requires the compiler IR.
+## 6. Foundation milestones
 
-### J. User experience
+### M0 — engineering foundation — complete
 
-Configuration, game/library management, compatibility UI, debugger/trace
-viewer, and other product surfaces. Deferred until core execution paths are
-useful.
+Build system, CI, warnings, sanitizers, fuzzing, provenance, ADR discipline.
 
-## 6. Completed foundation milestones
+### M1 — validated guest image — complete
 
-These milestones established reusable infrastructure. They remain useful
-historical gates but no longer dictate a strict subsystem sequence.
+Strict ELF/SCE parsing, mappings, dynamic/relocation/import foundations,
+bounded untrusted-input handling.
 
-### M0 — Engineering foundation
+### M2 — controlled owned execution — complete
 
-Completed: repository/build/test/CI/provenance/ADR foundations.
+Owned synthetic x86-64 guest entry, HLE boundaries, deterministic exit/fault
+behavior on supported x86-64 hosts.
 
-### M1 — Validated guest image
+### M3 — verification infrastructure — established
 
-Completed: strict owned-fixture ELF parsing, bounds validation, mapping and
-relocation foundations, and fuzzing.
+Trace v0, diffing, AstraeaProbe, evidence maps, reproducible experiments.
 
-### M2 — Controlled execution
+These remain evolving infrastructure, not a waterfall.
 
-Completed for trusted Astraea-owned synthetic probes on supported x86-64
-hosts: guest image -> native guest entry -> HLE -> controlled exit.
+## 7. Graphics vertical gates
 
-### M3 — Verification infrastructure
-
-Core Trace v0, normalization, deterministic serialization, first-divergence
-comparison, AstraeaProbe v0, and evidence maps are established. Verification
-infrastructure continues to evolve alongside later gates.
-
-## 7. Active vertical integration gates
-
-These gates express the shortest meaningful end-to-end proofs. A later gate
-does not imply every earlier subsystem is globally complete.
+Graphics gates measure bounded technical integration. They do not measure game
+compatibility.
 
 ### V0 — PS5 shader ingestion — complete
 
 ```text
-AGC shader container
-    -> validated PS5-specific envelope
-    -> bounded RDNA2 words
-    -> existing RDNA2 decoder
-    -> semantic Shader IR
+AGC container
+ -> validated PS5 envelope
+ -> bounded RDNA2 stream
+ -> semantic Shader IR
 ```
 
-Completed by #134/#135 with owned synthetic fixtures, opaque provenance
-preservation, malformed-input tests, and dedicated fuzz smoke.
-
-### V1 — Guest-created shader object — complete
+### V1 — guest-created shader identity — complete
 
 ```text
-owned SCE guest probe
-    -> exact import/HLE boundary
-    -> sceAgcCreateShader
-    -> validated/prepared guest-domain shader
-    -> persistent created-shader identity
+owned SCE guest
+ -> exact import/HLE
+ -> sceAgcCreateShader
+ -> validated prepared shader
+ -> persistent stage-aware created-shader identity
 ```
 
-Completed through #140/#141, #145/#147, #148/#149, #162/#163, and
-#164/#165. The real owned SCE guest now reaches `sceAgcCreateShader`, prepares
-the evidence-scoped pixel object, materializes/retains its canonical AGC +
-RDNA2 + semantic Shader IR record, and publishes guest state transactionally
-without Vulkan dependency.
-
-Program GPU addresses are treated as typed guest GPU-domain identity and are
-not assumed globally unique.
-
-### V2 — Validated host shader module — complete
+### V2 — validated host shader module — complete
 
 ```text
 supported semantic Shader IR
-    -> deterministic SPIR-V 1.6 module
-    -> Vulkan-environment validation
+ -> compiler/value lowering
+ -> deterministic Vulkan-valid SPIR-V
 ```
 
-Completed through #150/#151 for the bounded straight-line vector probe
-(NOP/V_MOV_B32/V_ADD_F32/END). The generated module is validated with
-SPIRV-Tools for the Vulkan 1.3 environment and remains deterministic.
+### V3 — submitted guest GPU workload -> Vulkan result — complete
 
-This bounded gate does not mean every semantic Shader IR operation is
-compilable. New compiler coverage remains workload-driven, and the existing
-wave interpreter remains the semantic oracle rather than the production
-rendering engine.
-
-### V3 — Headless GPU execution — active
-
-Full gate:
+Bounded completion proof:
 
 ```text
-controlled guest-domain GPU workload
-    -> AGC command/state frontend
-    -> guest resources
-    -> semantic Shader IR / compiler lowering / SPIR-V
-    -> Vulkan
-    -> deterministic host-visible result
+owned submitted PM4/DCB bytes
+ -> draw-time SH/CX/UCONFIG state
+ -> stage-qualified created-shader identity
+ -> stored semantic Shader IR
+ -> compiler/value IR
+ -> generated vertex/fragment SPIR-V
+ -> submitted typed guest color target
+ -> guest allocation/image resolution
+ -> real Vulkan raster
+ -> exact deterministic readback
 ```
 
-The first host-GPU semantic/backend proof is complete through #152/#153:
-Linux CI forces Mesa Lavapipe, executes the V2 module headlessly on Vulkan,
-and requires bit-for-bit state-buffer equality with Astraea's semantic
-interpreter.
+This proves architecture composition. It does **not** prove complete PS5 PM4,
+shader ISA, descriptor, texture, tiling/compression, synchronization, or
+graphics compatibility.
 
-That proof is intentionally narrower than the full V3 gate. The remaining V3
-path is pulled in slices:
+### V4 — controlled PS5 differential — cross-cutting validation gate
 
-1. **Submission-side shader/linkage state** — consume only verified
-   guest-visible LinkShaders behavior; #191 remains blocked until its four
-   native tail records are measured.
-2. **Guest image/resource model** — represent guest GPU allocation identity,
-   typed image interpretation, and surface layout separately from host
-   resources (ADR 0009).
-3. **First guest resource-backed raster workload** — add only the draw,
-   stage-I/O/export, guest image, synchronization, compiler, and Vulkan
-   behavior demanded by the owned deterministic 4x4 workload.
-4. Continue expanding by first missing dependency, never by raw opcode/API
-   coverage.
+When authorized hardware access is available and a specific behavior requires
+it, run the same owned workload on reference hardware and Astraea and compare
+normalized state/output.
 
-ADR 0008 permits provisional downstream research when it does not turn an
-unverified LinkShaders candidate into guest-visible success. Independently
-evidenced generic work discovered in that research should be re-cut onto the
-verified frontier rather than left trapped in a long-lived shadow stack.
+Targeted hardware probes may occur before or after other V-gates if they are
+the shortest way to answer one bounded evidence question.
 
-Guest GPU virtual addresses are guest-domain identifiers. They must resolve
-through Astraea's guest GPU memory/resource model and must not be cast to CPU
-guest pointers, host pointers, Vulkan handles, or `VkDeviceAddress` values.
-
-Submission provenance must remain traceable from raw DCB bytes/word offsets
-through packet/state effects, selected guest shader identity, compiler
-lowering, emitted SPIR-V, and backend-visible evidence. Unknown packet/state
-semantics remain explicit blockers rather than silently ignored behavior.
-
-### V4 — Controlled PS5 differential
-
-Run the same Astraea-owned workload, when authorized hardware access is
-available, through a controlled PS5 observation path and Astraea. Compare
-stable traces/state/output rather than relying on visual intuition.
-
-Hardware access is a **validation accelerator**. It is not a prerequisite for
-V0-V3 work that is already supported by public evidence.
-
-A targeted reference-hardware probe may occur earlier than V4 when it is the
-smallest way to resolve a specific V1-V3 evidence blocker. Such a probe answers
-one bounded semantic question; V4 remains the broader same-workload
-trace/state/output differential gate.
-
-If a V1-V3 behavior cannot be established from public evidence, record a
-specific hardware-evidence blocker rather than guessing.
-
-### V5 — Presentation
-
-Goal:
+### V5 — presentation — future
 
 ```text
-guest draw / flip state
-    -> guest synchronization
-    -> VideoOut model
-    -> host presentation
+guest GPU result
+ -> guest synchronization
+ -> VideoOut / flip model
+ -> host presentation
 ```
 
-No title-specific display path. Headless correctness remains testable
-independently of the window/presentation layer.
+Headless correctness remains independently testable.
 
-## 8. Compatibility phase
+## 8. Retail compatibility ladder
 
-### C0 — Supervised retail execution
+Compatibility gates are orthogonal to V0-V5.
 
-Before arbitrary retail game code is admitted as a diagnostic workload,
-Astraea must satisfy ADR 0010:
+### C0 — production retail diagnostic — complete on Linux x86-64
 
 ```text
-retail guest image
-    -> supervised native worker
-    -> intercepted guest syscall/HLE boundary
-    -> controlled fault/stop/reporting
+user-selected artifact
+ -> controller bounded read
+ -> sealed artifact handoff
+ -> supervised worker
+ -> resource policy
+ -> deterministic PS5/SCE preflight
+ -> typed diagnostic/fault result
 ```
 
-The current in-process native backend remains appropriate for trusted
-Astraea-owned probes; it is not the retail sandbox.
+The Linux runtime also has a verified pre-kernel seccomp boundary for admitted
+guest-originated syscall entry.
 
-Commercial-title experiments become increasingly useful only after the
-relevant execution paths exist and C0 is active.
+C0 permits a legally obtained retail executable to be used as an **untrusted
+diagnostic input**. It does not imply that any retail instruction should be
+executed yet.
 
-Compatibility categories must distinguish at least:
+### C1 — evidenced PS5 process-entry ABI / first retail instruction — active
 
-- load
+C1 is the current critical path (#300).
+
+Promote it in layers:
+
+#### C1A — entry registers and parameter block
+
+Establish the smallest corroborated contract for entry register values,
+parameter-block shape, argc/argv interpretation, teardown callback, and stack
+state.
+
+#### C1B — process metadata
+
+Establish required process/procparam metadata and its relationship to the
+loader-provided entry state.
+
+#### C1C — primary-thread TLS/TCB
+
+Establish TLS allocation, TCB structure requirements, and initial FS/GS bases.
+
+#### C1D — bootstrap ordering
+
+Establish which dynamic/module/runtime initialization must be complete before
+entry for the selected workload.
+
+**C1 completion criterion:** one selected legally obtained or independently
+owned title/profile may execute its first native retail instructions without
+using Astraea's synthetic owned-probe stack and without inventing unknown entry
+state.
+
+### C2 — runtime/bootstrap closure
+
+Advance from first instruction through the first real runtime dependencies:
+
+- module graph / runtime linker
+- relocation/import completion
+- HLE-vs-LLE module policy
+- primary thread/TLS
+- first guest syscall/HLE services
+- process/thread/handle model
+- deterministic first unsupported runtime boundary
+
+C2 is workload-driven. Do not pre-implement an entire OS API catalog.
+
+### C3 — deterministic boot / sustained initialization
+
+A title reaches a stable, reproducible initialization milestone beyond isolated
+startup calls.
+
+Define this per selected workload before implementation. "Boot" must mean more
+than "the executable mapped" or "one instruction ran."
+
+### C4 — first real-title headless GPU/frame evidence
+
+A real title reaches a guest GPU submission that Astraea can interpret through
+the verified frontend/backend and produces deterministic headless evidence.
+
+This is where page tracking, buffer/image caches, pipeline/shader caches,
+descriptor breadth, scheduler/synchronization, and broader shader compiler
+passes are likely to become load-bearing.
+
+### C5 — visible presentation / menu
+
+Real title output reaches VideoOut/presentation and a defined visible
+boot/menu milestone.
+
+### C6 — in-game / playable / accuracy progression
+
+Compatibility reporting must distinguish at least:
+
+- diagnostic
+- native-entry
 - boot
+- first-frame/headless-GPU
 - menu
 - in-game
 - playable
 - accurate
 
-A title reaching one category is integration evidence, not proof that the
-underlying implementation is semantically correct.
+A category is an integration observation, not proof of semantic correctness.
 
-Arbitrary retail guest execution remains disabled until the project
-explicitly defines the required safety, provenance, and execution gates.
+## 9. Direct-title-first strategy
 
-## 9. Dependency-driven issue selection
+Astraea will not make full firmware/VSH boot the default critical path.
+
+Why:
+
+- direct-title diagnostics expose missing loader/runtime/HLE/GPU dependencies
+  sooner;
+- firmware boot introduces a much larger system-service surface before a title
+  can provide useful signal;
+- PS4/PS5 emulator projects demonstrate that VSH/firmware boot is itself a
+  major product-sized track.
+
+Firmware/VSH research remains optional if a selected dependency later
+justifies it.
+
+## 10. Workload-driven expansion after C1
+
+When a real title reaches a missing subsystem, implement the smallest durable
+abstraction rather than a title patch.
+
+Expected later abstractions include:
+
+### Runtime/module layer
+
+A `ModuleGraph` / runtime-linker layer above `GuestImage`:
+
+- loaded module identity/lifetime
+- library/NID resolution
+- HLE/LLE resolution policy
+- dependency ordering
+- relocations across modules
+- unload/reload when later required
+
+Do not turn the structural ELF parser into a runtime linker.
+
+### Guest process/kernel layer
+
+Introduce typed process/thread/handle abstractions when demanded:
+
+- guest PID/TID identity
+- per-thread CPU/TLS state
+- handle/object table
+- waits/events/semaphores/mutexes
+- virtual memory lifecycle
+- clocks/timers
+
+Do not expose unmanaged host thread/process identity as guest semantics.
+
+### GPU residency/cache layer
+
+Once real title GPU workloads require it:
+
+- guest memory page tracking / invalidation
+- buffer and image caches
+- alias tracking
+- pipeline/shader cache
+- descriptor/resource discovery
+- queue/scheduler/synchronization model
+
+These are expected eventual needs, not current speculative tasks.
+
+### Shader compiler maturity
+
+When real shaders exceed the current bounded compiler profile:
+
+- SSA/value flow
+- dominance/phi handling
+- structured control flow
+- resource discovery/lowering
+- stage I/O lowering
+- optimization passes
+- deterministic compiler cache keys
+
+Preserve the semantic Shader IR as the correctness/provenance layer.
+
+## 11. Independent evidence tracks
+
+### LinkShaders (#191 / #207)
+
+Complete guest-visible `sceAgcLinkShaders` only when the unknown returned tail
+records are measured for the exact supported profile. Public compiler inputs
+or plausible register values are not returned-output evidence.
+
+This track advances when it becomes the first dependency of a selected
+workload or authorized hardware capture is available.
+
+### Linux defense in depth (#297 / #298)
+
+pidfd and Landlock are worthwhile post-C0 hardening, not blockers for #300.
+
+### Repository governance (#168)
+
+Protect `main`, enforce required checks mechanically, enable merged-branch
+cleanup, and prune only verified merged branches.
+
+## 12. Compatibility reporting
+
+Once actual title diagnostics are run, record a normalized report without
+retail bytes:
+
+- title/artifact identity by lawful metadata + cryptographic digest
+- Astraea commit
+- host OS/CPU/GPU/driver
+- diagnostic/compatibility category
+- first unsupported boundary
+- normalized trace/log identifiers
+- reproducibility notes
+
+Never commit game data, keys, decrypted system modules, or proprietary
+artifacts merely to reproduce compatibility.
+
+## 13. Issue selection rule
 
 After every meaningful merge:
 
-1. Identify the next incomplete vertical gate.
-2. Trace the shortest path from current state to that gate.
-3. Name the first missing dependency on that path.
-4. Ask whether its behavior is already supported by public evidence.
-5. If yes, create the smallest implementation issue that removes it.
-6. If no, create a bounded research/probe issue and record the evidence blocker.
-7. Decide whether the work belongs on the verified track or a bounded
-   provisional research track under ADR 0008.
-8. Re-cut independently evidenced generic work onto the verified frontier when
-   a provisional stack would otherwise trap it behind an unrelated hypothesis.
+1. Identify the active C- or V-gate.
+2. Trace the shortest path to its completion criterion.
+3. Name the first missing dependency.
+4. Determine whether public/controlled evidence is sufficient.
+5. If yes, implement the smallest reusable slice.
+6. If no, create a bounded research/probe issue.
+7. Keep unknown behavior explicit.
+8. Re-cut generic work onto verified `main` rather than maintaining long
+   speculative stacks.
 9. Reject work that does not remove a dependency, strengthen a required
    invariant, or materially reduce future integration risk.
 
-### Examples
+Competing-emulator features are **inspiration for likely dependency classes**,
+not evidence that Astraea should implement them now.
 
-Good next-task reasons:
+## 14. Definition of ready
 
-- "V1 cannot create a shader object because the guest-memory ABI boundary is
-  not represented."
-- "V2 cannot validate SPIR-V because Shader IR has no stage I/O contract for
-  the selected probe."
-- "V3 cannot bind the probe's buffer because the guest descriptor semantics are
-  unknown."
+An implementation issue must state:
 
-Bad next-task reasons:
+- gate/invariant advanced
+- exact missing dependency
+- evidence/spec references
+- owned scope
+- forbidden scope
+- acceptance tests
+- boundary/failure cases
+- platform/CI expectations
+- provenance/trace impact where relevant
 
-- "This opcode is easy to add."
-- "This API is probably common in games."
-- "A competing emulator has this feature."
-- "This refactor might be useful later."
-- "We can make a game boot by hard-coding this value."
-
-## 10. Parallelization rule
-
-Parallelize across stable interfaces, not across ambiguity.
-
-Good:
-
-- a platform-HLE dependency for an owned probe;
-- SPIR-V backend scaffolding once the Shader IR contract is stable;
-- independent AGC evidence research;
-- parser fuzzing;
-- trace tooling.
-
-Bad:
-
-- two agents inventing different meanings for the same undocumented AGC field;
-- Vulkan resource code before the guest resource contract is known;
-- broad opcode expansion with no target workload;
-- title hacks while foundational semantics are unresolved;
-- allowing a provisional stack to grow indefinitely instead of re-cutting
-  independently evidenced generic layers.
-
-When two tasks touch the same uncertain interface, resolve the evidence and
-contract first. CI success on a provisional branch proves implementation
-consistency, not correctness of the hypothesis that motivated the branch.
-
-## 11. Definition of ready for implementation
-
-An implementation issue is ready only when it states:
-
-- the vertical gate or invariant it advances;
-- the exact missing dependency;
-- evidence/spec references;
-- owned files/directories where practical;
-- interface constraints;
-- explicitly forbidden scope;
-- acceptance tests;
-- failure/boundary cases;
-- platform/CI expectations;
-- dependencies or evidence blockers;
-- expected trace/provenance behavior when relevant.
-
-## 12. Definition of done
+## 15. Definition of done
 
 A code issue is done only when:
 
-- implementation is bounded to scope;
+- implementation is bounded;
 - unit/integration tests pass;
-- malformed/boundary cases exist where applicable;
-- sanitizer jobs pass where applicable;
-- fuzz coverage is added for new untrusted parsers;
-- formatting/warnings checks pass;
-- trace/behavior expectations are updated if semantics changed;
-- documentation/ADR is updated if an architectural contract changed;
+- malformed/boundary cases are covered;
+- sanitizer/fuzz requirements pass;
+- warnings/formatting pass;
 - exact PR head passes the required CI matrix;
-- no undocumented compatibility workaround is introduced.
+- docs/ADR are updated if architecture changed;
+- no undocumented title-specific workaround is introduced.
 
-## 13. CI merge gate
+## 16. CI merge gate
 
-The normal public merge gate remains:
+Normal merge gate:
 
 1. Linux x64
 2. Windows x64
@@ -477,67 +540,38 @@ The normal public merge gate remains:
 4. Linux ASan + UBSan
 5. Linux Clang fuzz smoke
 
-Parser work must ensure the relevant fuzz target is actually executed by the
-fuzz-smoke job, not merely compiled. The newer PM4 Type-3 stream framer and
-bounded RDNA2 stream decoder/lowerer should receive dedicated fuzz-smoke
-coverage as a hardening follow-up; that work is independent of the active V3
-critical path.
+New untrusted parsers require actual fuzz execution, not just build coverage.
 
-## 14. Efficiency rules
-
-- Prefer one end-to-end dependency removed over many disconnected features.
-- Reuse stable IR/state boundaries instead of bypassing them.
-- Preserve raw provenance so new evidence does not require re-capturing inputs.
-- Use owned synthetic fixtures before broad software inputs.
-- Keep unsupported behavior typed and explicit.
-- Do not generalize a field until more than the current gate requires it.
-- Prefer deterministic generators/scripts over manual fixtures.
-- Record failed hypotheses so they are not rediscovered.
-- Keep expensive GPU/runtime jobs out of ordinary CI until their gate needs
-  them; once needed, make them reproducible.
-- Update `docs/STATUS.md` after every meaningful merge.
-- Keep one active critical-path issue per agent unless independent work can
-  merge without competing assumptions.
-- Keep provisional research stacks bounded; re-cut generic layers when they
-  can merge without the unresolved hypothesis.
-- Keep logical image content, guest physical surface extent, and host-resource
-  layout separate.
-- Do not begin arbitrary retail execution until C0/ADR 0010 is satisfied.
-
-## 15. Current critical path
-
-The durable dependency order is:
+## 17. Current critical path
 
 ```text
-completed foundation
-    |
-    v
-V0  AGC container -> RDNA2 -> semantic Shader IR            COMPLETE
-    |
-    v
-V1  owned guest -> persistent AGC shader identity            COMPLETE
-    |
-    v
-V2  supported semantic Shader IR -> validated SPIR-V         COMPLETE
-    |
-    v
-V3  submitted guest state/resources -> Vulkan -> result      ACTIVE
-    |   verified LinkShaders ceiling: #189; #191 needs native evidence
-    |   parallel generic path: guest image/surface layout -> raster proof
-    v
-C0  supervised retail execution/syscall boundary              REQUIRED BEFORE GAMES
-    |
-    v
-V4  controlled PS5 differential when evidence requires it
-    |
-    v
-V5  guest flip/VideoOut -> host presentation
+graphics:
+    V0 -> V1 -> V2 -> V3                         COMPLETE
+                         |
+                         +-> V4 differential      AS NEEDED
+                         `-> V5 presentation      FUTURE
+
+compatibility:
+    C0 production diagnostic                     COMPLETE (Linux x86-64)
+     |
+     v
+    C1 PS5 initial-process ABI / first instruction   ACTIVE (#300)
+     |
+     v
+    C2 bootstrap/modules/TLS/HLE
+     |
+     v
+    C3 deterministic boot
+     |
+     v
+    C4 real-title headless GPU/frame
+     |
+     v
+    C5 presentation/menu
+     |
+     v
+    C6 in-game/playable/accuracy
 ```
 
-Platform HLE, RDNA2 coverage, GPU commands/resources, compiler lowering, and
-verification tooling feed this path only when the next owned workload requires
-them. They are not separate finish-all phases.
-
-The merged next dependency/action is recorded in `docs/STATUS.md`.
-Any in-flight branch/issue is discovered from live open GitHub PRs/issues
-rather than hard-coded into durable roadmap text.
+The exact merged next action belongs in `docs/STATUS.md`. Live open GitHub
+issues/PRs provide in-flight state.
