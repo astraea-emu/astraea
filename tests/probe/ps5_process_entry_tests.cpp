@@ -291,6 +291,20 @@ TEST_CASE(
         astraea::probe::
             Ps5ProcessEntryProjectionField::
                 fs_base_nonzero);
+
+    const auto comparison =
+        astraea::probe::
+            compare_ps5_process_entry_observations(
+                unknown,
+                zero);
+    REQUIRE(comparison.first_difference.has_value());
+    REQUIRE_FALSE(
+        comparison.first_difference->
+            first_value.has_value());
+    REQUIRE(
+        comparison.first_difference->
+            second_value ==
+        std::optional<std::uint64_t>{0U});
 }
 
 TEST_CASE(
@@ -354,12 +368,28 @@ TEST_CASE(
     SECTION("RSP alignment residue") {
         ObservationFixture changed{};
         changed.rsp += 1U;
+        const auto changed_observation =
+            validated(changed);
         require_difference(
             baseline,
-            validated(changed),
+            changed_observation,
             astraea::probe::
                 Ps5ProcessEntryProjectionField::
                     rsp_mod16);
+
+        const auto comparison =
+            astraea::probe::
+                compare_ps5_process_entry_observations(
+                    baseline,
+                    changed_observation);
+        REQUIRE(
+            comparison.first_difference->
+                first_value ==
+            std::optional<std::uint64_t>{8U});
+        REQUIRE(
+            comparison.first_difference->
+                second_value ==
+            std::optional<std::uint64_t>{9U});
     }
 
     SECTION("FS presence") {
