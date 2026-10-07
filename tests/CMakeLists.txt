@@ -189,6 +189,13 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
             "${CMAKE_SOURCE_DIR}/tools/reference/ps5_process_entry_observer/procparam_identity.py"
             --self-test
     )
+    add_test(
+        NAME astraea_ps5_blackbear_observer_prepare_self_test
+        COMMAND
+            "${Python3_EXECUTABLE}"
+            "${CMAKE_SOURCE_DIR}/tools/reference/ps5_process_entry_observer/prepare_blackbear_checkout.py"
+            --self-test
+    )
 endif()
 
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND
