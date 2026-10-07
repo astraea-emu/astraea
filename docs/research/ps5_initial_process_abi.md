@@ -348,6 +348,44 @@ it is not sufficient to enable retail native entry.
 
 See `docs/research/scene_review_2026-10-07.md`.
 
+## 2026-10-07 C1B structural separation
+
+The direct-title startup block observed in RDI must not be aliased to the
+executable's static `PT_SCE_PROCPARAM` object for the reviewed native-title
+profile.
+
+The layouts are incompatible:
+
+- the corroborated startup block consumes a 32-bit argc-like value at byte +0
+  and begins its argv-like pointer vector at byte +8;
+- current native-title generators emit `PT_SCE_PROCPARAM` as a 0x60-byte
+  object whose first 64-bit word is `0x60` and whose bytes at +8 begin the
+  `ORBI` magic.
+
+The independently authored BlackBear native-title/runtime has been
+hardware-validated on PS5 firmware 6.02 and 12.70 while using both shapes. If
+entry RDI pointed at the static procparam, its CRT would interpret the
+procparam size/magic as argc/argv rather than the observed startup envelope.
+
+Therefore Astraea now treats these as separate concepts:
+
+```text
+loader-built direct-title startup vector
+!= static ELF PT_SCE_PROCPARAM metadata object
+```
+
+This is a structural distinction, not yet a full C1B API rule.
+
+Comparative current implementations (SharpProspero, KytyPS5 and prosper)
+converge on `sceKernelGetProcParam()` exposing the mapped main executable
+`PT_SCE_PROCPARAM` object. That convergence is useful experiment design but
+is not promoted as PS5 hardware truth without a controlled observation.
+
+Issue #312 defines the smallest owned-title follow-up: freeze entry state,
+then after safe runtime initialization call `sceKernelGetProcParam()`, compare
+its returned pointer to the title-owned mapped `PT_SCE_PROCPARAM`, and repeat
+the exact case twice.
+
 ## Next research action
 
 Encode the corroborated direct-title prefix as a typed partial C1A contract
