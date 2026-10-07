@@ -64,20 +64,40 @@ retail PS5 processes lack TLS.
 
 ## Current supported claims
 
-### Medium confidence / PS5 real-title toolchain evidence
+### Corroborated partial C1A direct-title prefix
 
-For at least the tested ps5link title profile:
+Two distinct hardware-exercised native-title startup lineages now support this
+subset:
 
-- `RDI` is a loader parameter-block pointer consumed by CRT/libc startup;
-- `RSI` carries a loader-provided teardown routine used by CRT;
-- the parameter block begins with an argc-like 32-bit field;
-- argv-like pointer slots begin at +8 for that CRT;
-- libc environment initialization consumes the original parameter-block
-  pointer.
+- `RDI` / the first SysV argument is a loader-provided process-parameter
+  block;
+- a 32-bit argc-like field is consumed at byte offset 0;
+- the argv-like pointer vector begins at byte offset 8;
+- the original process-block pointer is passed unchanged to runtime environment
+  initialization.
 
-These claims are useful for designing probes and a future typed profile.
+The original lineage is `Rufidj/ps5link-sdk` / SharpProspero.
 
-They are **not yet sufficient** to enable arbitrary retail native entry.
+The second lineage is
+`blackbearreloaded/ps5-native-app-boilerplate`. Its current
+`docs/RUNTIME_SHIM.md` states that startup behavior and the clean-room runtime
+were independently authored, and that the exact generated title/runtime was
+hardware-validated on PS5 firmware 6.02 and 12.70. Its project-owned
+`tooling/native/app_crt.cpp` consumes the same process-block/argc/argv prefix.
+
+This is sufficient to promote the **prefix shape** into a typed partial C1A
+profile. It is still not sufficient to execute arbitrary retail code.
+
+### Still unresolved at C1A
+
+`RSI` remains deliberately unresolved as a required loader contract.
+The ps5link lineage treats it as a loader teardown callback. The independently
+authored BlackBear CRT accepts the same second argument and conditionally
+registers it, but its published hardware-validation record does not establish
+that a non-null callback was supplied or invoked.
+
+Exact initial `RSP` contents/alignment and any additional required register
+values also remain unresolved.
 
 ## Unknown load-bearing fields
 
@@ -265,10 +285,41 @@ Astraea's roadmap without establishing C1 values:
 These comparisons justify expecting later dependency classes, but none are a
 substitute for PS5 process-entry evidence.
 
+## 2026-10-07 independent hardware-exercised corroboration
+
+Repository: `blackbearreloaded/ps5-native-app-boilerplate`.
+
+The current clean-room runtime documentation states that BlackBearReloaded
+designed and implemented the startup behavior independently and that the exact
+generated native title/runtime artifact was hardware-validated on PS5 firmware
+6.02 and 12.70.
+
+The project-owned `_start` consumes:
+
+- `process_parameters` as the first SysV argument;
+- a 32-bit argc-like value at byte +0;
+- argv beginning at byte +8;
+- the original process pointer through `_init_env`.
+
+This is independent hardware-exercised corroboration for the same direct-title
+prefix exposed by the ps5link/SharpProspero lineage, so that prefix is now
+promotable into typed Astraea code.
+
+The source also accepts a second `loader_teardown` argument and conditionally
+registers it, but the published validation does not prove that the loader
+supplied a non-null callback or that it fired. Do not promote a mandatory RSI
+value/role yet.
+
+Provenance nuance: the same repository's executable converter contains
+documented SharpProspero-derived portions. The clean-room runtime/startup
+documentation separately attributes the startup behavior to BlackBearReloaded
+as independently authored. Preserve both facts in provenance.
+
 ## 2026-10-07 bootstrap-boundary refinement
 
-The October scene review adds an important distinction without promoting any
-new PS5 constant or register value.
+The October scene review adds an important bootstrap distinction alongside the
+partial C1A prefix promotion above. It still does not promote any guessed PS5
+constant, mandatory RSI value, stack contract, or TLS/TCB layout.
 
 - Current KytyPS5 independently synthesizes an argc/argv-like title-entry
   block, teardown callback, and guest stack before calling a title entry.
@@ -292,14 +343,26 @@ Therefore C1 must distinguish two boundaries:
 
 Astraea may clean-room reproduce required bootstrap effects without executing
 proprietary system modules, but only after those effects are evidenced. The
-October review found no second independent controlled observation sufficient
-to enable retail native entry.
+new independent title evidence is sufficient only for the direct-title prefix;
+it is not sufficient to enable retail native entry.
 
 See `docs/research/scene_review_2026-10-07.md`.
 
 ## Next research action
 
-Obtain a second independent public or controlled observation for C1A.
+Encode the corroborated direct-title prefix as a typed partial C1A contract
+without connecting it to retail native entry.
 
-Until then, keep production retail diagnostics stopping at
-`unsupported_initial_process_abi`.
+Then resolve the remaining load-bearing evidence in priority order:
+
+1. observe whether RSI is non-null/stable and what teardown ownership it
+   establishes;
+2. capture exact initial RSP/alignment and a bounded stack window before CRT
+   mutation;
+3. capture initial FS/GS and primary-thread TLS/TCB requirements;
+4. establish the minimum bootstrap effects that must exist before the selected
+   title entry.
+
+Production retail diagnostics must continue stopping at
+`unsupported_initial_process_abi` until the selected profile has all required
+contracts.
