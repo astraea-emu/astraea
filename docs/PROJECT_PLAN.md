@@ -307,9 +307,20 @@ Promote it in layers:
 
 #### C1A — entry registers and parameter block
 
-Establish the smallest corroborated contract for entry register values,
-parameter-block shape, argc/argv interpretation, teardown callback, and stack
-state.
+The independently corroborated startup prefix and the transport-neutral
+process-entry observation validator are merged.
+
+Promoted prefix:
+
+- RDI / first SysV argument identifies the loader-built startup block;
+- argc-like 32-bit field at +0;
+- argv-like pointer vector begins at +8;
+- the original startup-block pointer reaches runtime environment
+  initialization.
+
+Remaining C1A evidence is intentionally narrow: establish RSI teardown
+semantics and exact initial RSP/stack state from an owned pre-CRT observation.
+Do not manufacture those fields from comparative emulator behavior.
 
 #### C1B — process metadata
 
@@ -730,7 +741,7 @@ compatibility:
      v
     C1 PS5 initial-process ABI / first instruction   ACTIVE (#300)
        C1A corroborated startup prefix            MERGED
-       C1A observation validator                  IN FLIGHT (#308)
+       C1A observation validator                  MERGED (#308)
        C1B procparam relationship                 RESEARCH (#312)
      |
      v
