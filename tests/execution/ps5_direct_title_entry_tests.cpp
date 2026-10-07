@@ -198,7 +198,7 @@ TEST_CASE(
             assess_ps5_direct_title_entry_readiness({});
 
     REQUIRE_FALSE(partial.ready());
-    REQUIRE(partial.blocker_count == 4U);
+    REQUIRE(partial.blocker_count == 5U);
     REQUIRE(
         partial.blockers[0] ==
         astraea::execution::
@@ -213,9 +213,14 @@ TEST_CASE(
         partial.blockers[2] ==
         astraea::execution::
             Ps5DirectTitleEntryBlocker::
-                primary_thread_tls_contract);
+                process_metadata_contract);
     REQUIRE(
         partial.blockers[3] ==
+        astraea::execution::
+            Ps5DirectTitleEntryBlocker::
+                primary_thread_tls_contract);
+    REQUIRE(
+        partial.blockers[4] ==
         astraea::execution::
             Ps5DirectTitleEntryBlocker::
                 bootstrap_contract);
@@ -228,6 +233,8 @@ TEST_CASE(
                         .loader_teardown_contract_established =
                             true,
                         .initial_rsp_contract_established =
+                            true,
+                        .process_metadata_contract_established =
                             true,
                         .primary_thread_tls_contract_established =
                             true,
