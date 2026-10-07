@@ -199,6 +199,20 @@ updates. That mix is representative of a mature compatibility project: new
 features, performance investigation, governance, and regression evidence all
 advance together.
 
+### Cross-host native CPU compatibility
+
+Current KytyPS5 and SharpEmu work also exposes a separate dependency class
+that the earlier Astraea roadmap under-emphasized: an x86-64 host is not
+guaranteed to expose every instruction a PS5 Zen 2 title uses.
+
+Recent KytyPS5 work extends an AMD guest-instruction patcher on macOS/Rosetta
+and tests trapped/emulated instruction paths; SharpEmu similarly carries
+native-backend compatibility handling for guest SHA and other unsupported host
+instructions.
+
+Astraea should preserve native execution as the fast path while treating
+host-ISA compatibility as its own post-C1 seam. A host #UD must not be
+misdiagnosed as a guest HLE or loader failure.
 ### Strategic consequence for Astraea
 
 The right response is **not** to pre-copy the leaders' HLE/GPU surface.
