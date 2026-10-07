@@ -129,6 +129,48 @@ Record, where lawfully known:
 The two runs must produce matching structural projections before any new ABI
 rule is considered. Exact raw relationships still require review.
 
+## Same-run C1B procparam observation
+
+Do not schedule a second hardware cycle for #312.
+
+After the normal CRT/runtime is initialized, the owned application should
+also record:
+
+- runtime address of `astraea_ps5_entry_capture_v0`;
+- pointer returned by `sceKernelGetProcParam()`;
+- exactly the first 16 bytes at that returned pointer.
+
+The pinned converter preserves allocated input-section virtual addresses when
+building the final PS5 executable and adds the static `PT_SCE_PROCPARAM`
+program header separately. That lets the host derive the title load bias from
+the observed capture-object address and its intermediate-PIE symbol value.
+
+Run:
+
+```sh
+python3 tools/reference/ps5_process_entry_observer/procparam_identity.py \
+  --intermediate /path/to/build/llvm-pie.elf \
+  --final /path/to/build/eboot.elf \
+  --capture-runtime 0x... \
+  --api-procparam-runtime 0x... \
+  --api-procparam-prefix <32 hex digits>
+```
+
+The analyzer reports, separately:
+
+- derived load bias;
+- expected mapped `PT_SCE_PROCPARAM` address;
+- observed API-return address;
+- `pointer_match`;
+- static and observed 16-byte prefixes;
+- `prefix_match`.
+
+A mismatch is a valid experimental result, not an analyzer failure.
+
+The analyzer accepts only ELF64 little-endian x86-64 inputs, requires a unique
+defined observer capture symbol and a unique `PT_SCE_PROCPARAM`, validates the
+owned static procparam size/`ORBI` prefix, and uses checked u64 arithmetic.
+
 ## Relationship to C1B
 
 After the normal runtime initializes, the same owned title may perform the
