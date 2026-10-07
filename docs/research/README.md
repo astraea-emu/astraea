@@ -37,5 +37,6 @@ do not rewrite historical observations merely to make their prose sound current.
 
 - [PS5 initial-process ABI](ps5_initial_process_abi.md) — C1 evidence for retail entry registers, parameter block, TLS/TCB, and bootstrap ordering.
 - [PS5 process-entry reference observation](ps5_process_entry_probe.md) — transport-neutral C1 hardware-observation contract, structural normalization, and repeat-run comparison.
+- [PS5 procparam runtime observation](ps5_procparam_observation.md) — C1B selected-artifact relationship test for `sceKernelGetProcParam()` vs mapped `PT_SCE_PROCPARAM`.
 - [Post-C0 architecture review — 2026-09-24](architecture_review_2026-09-24.md) — pinned comparison with public emulator/toolchain/compiler projects and resulting roadmap decisions.
 - [Retail execution supervisor](retail_execution_supervisor.md) — C0 threat model and supervisor design; Linux production diagnostic gate is now implemented, while Windows retail admission remains disabled.
