@@ -35,6 +35,7 @@
 #include <sys/mman.h>
 #include <sys/resource.h>
 #include <sys/socket.h>
+#include <sys/syscall.h>
 #include <sys/types.h>
 #include <sys/wait.h>
 #include <unistd.h>
@@ -193,6 +194,35 @@ private:
     int fd_ = -1;
 };
 
+[[nodiscard]] int open_process_pidfd(pid_t pid) noexcept {
+#if defined(SYS_pidfd_open)
+    return static_cast<int>(
+        ::syscall(SYS_pidfd_open, pid, 0U));
+#else
+    (void)pid;
+    errno = ENOSYS;
+    return -1;
+#endif
+}
+
+[[nodiscard]] int send_pidfd_signal(
+    int pidfd,
+    int signal_number) noexcept {
+#if defined(SYS_pidfd_send_signal)
+    return static_cast<int>(
+        ::syscall(
+            SYS_pidfd_send_signal,
+            pidfd,
+            signal_number,
+            nullptr,
+            0U));
+#else
+    (void)pidfd;
+    (void)signal_number;
+    errno = ENOSYS;
+    return -1;
+#endif
+}
 class ChildGuard {
 public:
     ChildGuard() = default;
@@ -203,12 +233,14 @@ public:
     ChildGuard& operator=(const ChildGuard&) = delete;
 
     ChildGuard(ChildGuard&& other) noexcept
-        : pid_(std::exchange(other.pid_, -1)) {}
+        : pid_(std::exchange(other.pid_, -1)),
+          pidfd_(std::move(other.pidfd_)) {}
 
     ChildGuard& operator=(ChildGuard&& other) noexcept {
         if (this != &other) {
             terminate_and_reap();
             pid_ = std::exchange(other.pid_, -1);
+            pidfd_ = std::move(other.pidfd_);
         }
         return *this;
     }
@@ -221,6 +253,18 @@ public:
         return pid_;
     }
 
+    [[nodiscard]] bool has_pidfd() const noexcept {
+        return pidfd_.get() >= 0;
+    }
+
+    [[nodiscard]] int pidfd() const noexcept {
+        return pidfd_.get();
+    }
+
+    void set_pidfd(UniqueFd pidfd) noexcept {
+        pidfd_ = std::move(pidfd);
+    }
+
     void mark_reaped() noexcept {
         pid_ = -1;
     }
@@ -230,9 +274,27 @@ public:
             return;
         }
 
-        if (::kill(pid_, SIGKILL) != 0 &&
-            errno != ESRCH) {
-            // Destruction still proceeds to waitpid; no exception may escape.
+        bool signal_complete = false;
+        if (has_pidfd()) {
+            if (send_pidfd_signal(
+                    pidfd_.get(),
+                    SIGKILL) == 0) {
+                signal_complete = true;
+            } else if (errno == ESRCH) {
+                // The stable pidfd target has already terminated.
+                signal_complete = true;
+            }
+        }
+
+        if (!signal_complete) {
+            // pidfd is optional defense in depth. Falling back to kill() is
+            // safe for this owned direct child because it remains unreaped
+            // under this guard, so its numeric PID cannot be recycled.
+            if (::kill(pid_, SIGKILL) != 0 &&
+                errno != ESRCH) {
+                // Destruction still proceeds to waitpid; no exception may
+                // escape.
+            }
         }
 
         int status = 0;
@@ -253,8 +315,8 @@ public:
 
 private:
     pid_t pid_ = -1;
+    UniqueFd pidfd_;
 };
-
 enum class IoStatus {
     ok,
     timeout,
@@ -584,6 +646,33 @@ wait_for_child(
     ChildGuard& child,
     Deadline deadline) noexcept {
     for (;;) {
+        if (child.has_pidfd()) {
+            const auto exited =
+                wait_for_fd(
+                    child.pidfd(),
+                    POLLIN,
+                    deadline);
+            if (exited.status == IoStatus::timeout) {
+                return astraea::core::Result<
+                    std::int32_t,
+                    GuestWorkerProcessSessionError>::
+                    failure(
+                        error(
+                            GuestWorkerProcessSessionErrorCode::
+                                timeout));
+            }
+            if (exited.status != IoStatus::ok) {
+                return astraea::core::Result<
+                    std::int32_t,
+                    GuestWorkerProcessSessionError>::
+                    failure(
+                        error(
+                            GuestWorkerProcessSessionErrorCode::
+                                child_exit_failure,
+                            exited.platform_error));
+            }
+        }
+
         int status = 0;
         const auto waited =
             ::waitpid(
@@ -643,11 +732,17 @@ wait_for_child(
                             timeout));
         }
 
-        std::this_thread::sleep_for(
-            std::chrono::milliseconds{1});
+        // Without pidfd support retain the reviewed 1 ms waitpid fallback.
+        // With a pidfd, poll() above blocks until exit or the same deadline;
+        // a rare waitpid race simply yields before rechecking.
+        if (child.has_pidfd()) {
+            std::this_thread::yield();
+        } else {
+            std::this_thread::sleep_for(
+                std::chrono::milliseconds{1});
+        }
     }
 }
-
 using ResourcePolicyApplyResult =
     astraea::core::Result<
         bool,
@@ -1098,6 +1193,21 @@ spawn_worker(
     worker_fd.reset();
 
     ChildGuard child{child_pid};
+
+    const auto pidfd = open_process_pidfd(child_pid);
+    if (pidfd >= 0) {
+        child.set_pidfd(UniqueFd{pidfd});
+    } else if (errno != ENOSYS) {
+        return astraea::core::Result<
+            std::pair<UniqueFd, ChildGuard>,
+            GuestWorkerProcessSessionError>::
+            failure(
+                error(
+                    GuestWorkerProcessSessionErrorCode::
+                        process_identity_failure,
+                    errno));
+    }
+
     const auto policy_applied =
         apply_linux_resource_policy(
             child_pid,
@@ -2373,6 +2483,17 @@ guest_worker_process_session_available() noexcept {
 #endif
 }
 
+bool
+guest_worker_process_pidfd_available() noexcept {
+#if defined(__linux__)
+    UniqueFd pidfd{
+        open_process_pidfd(::getpid())};
+    return pidfd.get() >= 0;
+#else
+    return false;
+#endif
+}
+
 GuestWorkerProcessSessionRunResult
 run_guest_worker_process_session(
     const GuestWorkerProcessSessionConfig& config) {
@@ -2417,6 +2538,13 @@ run_guest_worker_process_session(
             std::move(spawned->first);
         auto child =
             std::move(spawned->second);
+
+#if defined(__linux__)
+        const bool linux_pidfd_used =
+            child.has_pidfd();
+#else
+        constexpr bool linux_pidfd_used = false;
+#endif
 
         const auto deadline =
             Clock::now() +
@@ -2714,6 +2842,8 @@ run_guest_worker_process_session(
                     terminal_fault,
                 .terminal_diagnostic =
                     terminal_diagnostic,
+                .linux_pidfd_used =
+                    linux_pidfd_used,
             });
 #endif
     } catch (const std::bad_alloc&) {
