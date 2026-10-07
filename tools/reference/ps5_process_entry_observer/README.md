@@ -131,12 +131,24 @@ rule is considered. Exact raw relationships still require review.
 
 ## Relationship to C1B
 
-After the normal runtime initializes, the same owned title may perform the
-separate #312 observation of `sceKernelGetProcParam()` and compare it with the
-mapped title-owned `PT_SCE_PROCPARAM`.
+After the normal runtime initializes, use the same exact artifact to collect
+the #312 observation:
+
+```text
+startup_parameters    = astraea_ps5_entry_capture_v0.rdi
+entry_runtime_address = runtime address of this observer `_start`
+api_return            = sceKernelGetProcParam()
+api_prefix            = first 16 bytes at api_return, only when non-null
+```
+
+The exact final PS5/SCE ELF is analyzed separately by Astraea to obtain its
+`e_entry`, `PT_SCE_PROCPARAM.p_vaddr`, and static 16-byte procparam prefix.
+`validate_ps5_procparam_observation()` then removes ASLR using the runtime entry
+address and compares the API pointer/bytes against the selected artifact.
+
+See `docs/research/ps5_procparam_observation.md`.
 
 Do not merge the startup-vector and static-procparam concepts.
-
 ## Tests
 
 On Linux x86-64, Astraea's host test compiles this exact assembly source under
