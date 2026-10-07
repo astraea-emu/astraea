@@ -93,6 +93,30 @@ TEST_CASE(
 }
 
 TEST_CASE(
+    "guest-worker pidfd capability is explicit and session uses it when available",
+    "[execution][c0][process][pidfd]") {
+#if defined(__linux__)
+    const auto host_has_pidfd =
+        astraea::execution::
+            guest_worker_process_pidfd_available();
+
+    const auto result =
+        astraea::execution::
+            run_guest_worker_process_session(
+                config());
+
+    REQUIRE(result.has_value());
+    REQUIRE(
+        result->linux_pidfd_used ==
+        host_has_pidfd);
+#else
+    REQUIRE_FALSE(
+        astraea::execution::
+            guest_worker_process_pidfd_available());
+#endif
+}
+
+TEST_CASE(
     "production Linux retail worker reports malformed artifact as typed loader boundary",
     "[execution][c0][retail][process][production]") {
 #if defined(__linux__) && defined(__x86_64__)
@@ -321,6 +345,14 @@ TEST_CASE(
                 normal_guest_return);
     REQUIRE(result->stop.guest_rip.value() == 0U);
     REQUIRE(result->child_exit_code == 0);
+#if defined(__linux__)
+    REQUIRE(
+        result->linux_pidfd_used ==
+        astraea::execution::
+            guest_worker_process_pidfd_available());
+#else
+    REQUIRE_FALSE(result->linux_pidfd_used);
+#endif
 }
 
 TEST_CASE(
