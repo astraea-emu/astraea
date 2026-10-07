@@ -190,6 +190,12 @@ workload or authorized hardware capture is available; it must not be guessed.
 Landlock evaluation is non-blocking hardening and does not block C1 research
 or the existing production diagnostic.
 
+### Windows retail parity (#320)
+
+Windows x64 retains owned native/supervisor proofs but not arbitrary retail
+admission. The parity gate requires a default-deny boundary proving that raw
+guest `SYSCALL` cannot reach the Windows kernel, plus equivalent artifact/
+resource/IPC containment. This is not on the Linux C1 critical path.
 ### Repository governance (#168)
 
 Main protection/rulesets and merged-branch cleanup remain repository-admin
