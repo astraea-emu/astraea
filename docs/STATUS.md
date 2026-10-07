@@ -2,9 +2,9 @@
 
 **Repository:** `astraea-emu/astraea`  
 **Merged frontier:** production Linux x86-64 retail diagnostic path is active  
-**Current critical path:** #300 — establish the PS5 initial-process ABI before retail native entry  
+**Current critical path:** #300 — complete the evidenced PS5 initial-process contract before retail native entry  
 **Graphics:** V0-V3 complete for their bounded owned workloads  
-**Compatibility:** C0 complete on Linux x86-64; C1 active  
+**Compatibility:** C0 complete on Linux x86-64; partial C1A prefix merged; C1 active  
 **CI merge gate:** Linux x64, Windows x64, macOS ARM64, Linux ASan+UBSan, Linux Clang fuzz smoke
 
 ## What is complete
@@ -120,7 +120,26 @@ vector at +8, and the original process pointer passed to runtime environment
 initialization. This prefix may be encoded as typed Astraea state.
 
 Still unresolved and entry-blocking: mandatory RSI teardown semantics, exact
-initial RSP/stack state, primary-thread TLS/TCB/FS-GS, and bootstrap ordering.
+initial RSP/stack state, the runtime procparam/API relationship, primary-thread
+TLS/TCB/FS-GS, and bootstrap ordering.
+
+## Scalability / readiness axis
+
+ADR 0012 adds a third orthogonal S0-S5 axis so compatibility breadth does not
+outgrow verification and architecture:
+
+- **S0** fail-visible verification/provenance — established;
+- **S1** first-divergence and workload coverage accounting — begin with real
+  title execution;
+- **S2** lawful local cross-title routes/regression guards — grow after visible
+  milestones;
+- **S3** architecture ratchets — add when real compatibility-debt classes
+  appear;
+- **S4** measured performance budgets — after representative 3D workloads;
+- **S5** release/user-quality readiness — late.
+
+C6 is refined to C6A in-game, C6B playable defined route, and C6C
+reference-validated/regression-guarded support.
 
 ## After C1
 
@@ -184,9 +203,19 @@ Astraea does **not** currently claim:
 
 ## Next action
 
-Work #300. Encode the now-corroborated partial C1A direct-title prefix while
-keeping the current `unsupported_initial_process_abi` production stop. Then
-resolve RSI teardown, initial RSP, TLS/TCB and bootstrap ordering before any
-retail instruction is admitted.
+1. Merge #308 after its exact current-main CI gate: process-entry observation
+   validation and repeat-run structural comparison.
+2. Use the owned native-title observer described there to resolve RSI and exact
+   initial RSP without CRT mutation.
+3. Extend the same controlled run for #312 to measure
+   `sceKernelGetProcParam()` vs the mapped `PT_SCE_PROCPARAM`.
+4. Resolve C1C primary-thread TLS/TCB and C1D bootstrap effects only from
+   evidence required by the selected workload.
+5. Keep `unsupported_initial_process_abi` in production until the complete
+   selected profile is ready.
 
-Use `docs/research/ps5_initial_process_abi.md` as the durable evidence record.
+After C1, select the first lawful retail title by closure cost rather than
+prestige and start S1 first-divergence/coverage accounting immediately.
+
+Use `docs/research/ps5_initial_process_abi.md` as the durable evidence record
+and ADR 0012 for scale/readiness strategy.
