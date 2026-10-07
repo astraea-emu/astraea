@@ -65,9 +65,15 @@ validate_ps5_process_entry_observation(
                         static_cast<std::uint8_t>(
                             observation.rsp & 0x0fU),
                     .fs_base_nonzero =
-                        observation.fs_base != 0U,
+                        observation.fs_base.has_value()
+                            ? std::optional<bool>{
+                                  observation.fs_base.value() != 0U}
+                            : std::nullopt,
                     .gs_base_nonzero =
-                        observation.gs_base != 0U,
+                        observation.gs_base.has_value()
+                            ? std::optional<bool>{
+                                  observation.gs_base.value() != 0U}
+                            : std::nullopt,
                 },
         });
 }
