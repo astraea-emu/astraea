@@ -406,17 +406,25 @@ def analyze(
     }
     if entry_observation is not None:
         startup_rdi = int(entry_observation["rdi"])
+        process_prefix = bytes(entry_observation["process_prefix"])
+        argc = int.from_bytes(process_prefix[0:4], "little")
+        argv0 = int.from_bytes(process_prefix[8:16], "little")
         result["startup_parameters_distinct_from_api_return"] = (
             startup_rdi != api_procparam_runtime
         )
+        result["entry_projection"] = {
+            "argc": argc,
+            "argv0_nonzero": argv0 != 0,
+            "rsi_nonzero": int(entry_observation["rsi"]) != 0,
+            "rbp_zero": int(entry_observation["rbp"]) == 0,
+            "rsp_mod16": int(entry_observation["rsp"]) & 0xF,
+        }
         result["entry_observation"] = {
             "rdi": f"0x{startup_rdi:016x}",
             "rsi": f"0x{int(entry_observation['rsi']):016x}",
             "rbp": f"0x{int(entry_observation['rbp']):016x}",
             "rsp": f"0x{int(entry_observation['rsp']):016x}",
-            "process_prefix_hex": bytes(
-                entry_observation["process_prefix"]
-            ).hex(),
+            "process_prefix_hex": process_prefix.hex(),
         }
     return result
 
@@ -636,6 +644,16 @@ class SelfTests(unittest.TestCase):
         self.assertTrue(result["prefix_match"])
         self.assertTrue(
             result["startup_parameters_distinct_from_api_return"]
+        )
+        self.assertEqual(
+            result["entry_projection"],
+            {
+                "argc": 0x03020100,
+                "argv0_nonzero": True,
+                "rsi_nonzero": True,
+                "rbp_zero": False,
+                "rsp_mod16": 8,
+            },
         )
         self.assertEqual(
             result["entry_observation"]["rsp"],
