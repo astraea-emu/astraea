@@ -567,6 +567,7 @@ def _synthetic_final(
     corrupt_magic: bool = False,
     omit_load: bool = False,
     overlap_load: bool = False,
+    procparam_unmapped: bool = False,
 ) -> bytes:
     procparam_count = 2 if duplicate_procparam else 1
     load_count = 0 if omit_load else (2 if overlap_load else 1)
@@ -590,7 +591,7 @@ def _synthetic_final(
             0x4000,
             0x4000,
             0x100,
-            0x5000,
+            0x2000 if procparam_unmapped else 0x5000,
             0x1000,
         )
         index += 1
@@ -835,6 +836,16 @@ class SelfTests(unittest.TestCase):
             analyze(
                 _synthetic_intermediate(),
                 _synthetic_final(overlap_load=True),
+                capture_runtime=0x10005000,
+                api_procparam_runtime=0x10007000,
+                api_procparam_prefix=b"\0" * PREFIX_SIZE,
+            )
+
+    def test_final_procparam_must_be_mapped(self) -> None:
+        with self.assertRaisesRegex(AnalysisError, "PT_SCE_PROCPARAM"):
+            analyze(
+                _synthetic_intermediate(),
+                _synthetic_final(procparam_unmapped=True),
                 capture_runtime=0x10005000,
                 api_procparam_runtime=0x10007000,
                 api_procparam_prefix=b"\0" * PREFIX_SIZE,
