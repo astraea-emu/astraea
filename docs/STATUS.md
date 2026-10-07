@@ -44,6 +44,7 @@ Linux x86-64 now has a production `astraea diagnose <artifact>` path with:
 - separate controller and untrusted worker process;
 - bounded versioned binary protocol;
 - exact handle/fd inheritance policy and deterministic teardown;
+- pidfd-backed stable worker identity/signalling when supported, with reviewed fallback;
 - finite wall-clock and kernel resource ceilings;
 - sealed artifact handoff: worker never receives the original host pathname;
 - typed faults and terminal diagnostic events;
@@ -155,13 +156,13 @@ values.
 This work should advance when it becomes the shortest path for a selected
 workload or authorized hardware capture is available; it must not be guessed.
 
-### Linux defense in depth (#297 / #298)
+### Linux defense in depth
 
-- pidfd-backed lifetime/signalling;
-- optional Landlock ambient-resource confinement.
+- pidfd-backed worker lifetime/signalling (#297) is complete and merged;
+- optional Landlock ambient-resource confinement (#298) remains open.
 
-These harden C0 but do not block C1 research or the existing production
-diagnostic.
+Landlock evaluation is non-blocking hardening and does not block C1 research
+or the existing production diagnostic.
 
 ### Repository governance (#168)
 
