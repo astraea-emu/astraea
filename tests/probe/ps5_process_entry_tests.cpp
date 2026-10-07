@@ -45,8 +45,9 @@ struct ObservationFixture {
     std::uint64_t rsi = 0x0000000800100000ULL;
     std::uint64_t rbp = 0U;
     std::uint64_t rsp = 0x000000087fff0008ULL;
-    std::uint64_t fs_base = 0x0000000810000000ULL;
-    std::uint64_t gs_base = 0U;
+    std::optional<std::uint64_t> fs_base =
+        0x0000000810000000ULL;
+    std::optional<std::uint64_t> gs_base = 0U;
 
     ObservationFixture() {
         write_u32_le(process, 0U, 1U);
@@ -138,8 +139,12 @@ TEST_CASE(
     REQUIRE(result->projection.rsi_nonzero);
     REQUIRE(result->projection.rbp_zero);
     REQUIRE(result->projection.rsp_mod16 == 8U);
-    REQUIRE(result->projection.fs_base_nonzero);
-    REQUIRE_FALSE(result->projection.gs_base_nonzero);
+    REQUIRE(
+        result->projection.fs_base_nonzero ==
+        std::optional<bool>{true});
+    REQUIRE(
+        result->projection.gs_base_nonzero ==
+        std::optional<bool>{false});
 }
 
 TEST_CASE(
@@ -240,8 +245,52 @@ TEST_CASE(
     REQUIRE_FALSE(result->projection.argv0_nonzero);
     REQUIRE_FALSE(result->projection.rsi_nonzero);
     REQUIRE_FALSE(result->projection.rbp_zero);
-    REQUIRE_FALSE(result->projection.fs_base_nonzero);
-    REQUIRE(result->projection.gs_base_nonzero);
+    REQUIRE(
+        result->projection.fs_base_nonzero ==
+        std::optional<bool>{false});
+    REQUIRE(
+        result->projection.gs_base_nonzero ==
+        std::optional<bool>{true});
+}
+
+
+TEST_CASE(
+    "PS5 process-entry observation distinguishes unavailable segment bases from observed zero",
+    "[probe][c1][process-entry][segment-base][unknown]") {
+    ObservationFixture unavailable{};
+    unavailable.fs_base = std::nullopt;
+    unavailable.gs_base = std::nullopt;
+
+    const auto unknown =
+        validated(unavailable);
+
+    REQUIRE_FALSE(unknown.fs_base.has_value());
+    REQUIRE_FALSE(unknown.gs_base.has_value());
+    REQUIRE_FALSE(
+        unknown.projection.fs_base_nonzero.has_value());
+    REQUIRE_FALSE(
+        unknown.projection.gs_base_nonzero.has_value());
+
+    ObservationFixture observed_zero{};
+    observed_zero.fs_base = 0U;
+    observed_zero.gs_base = 0U;
+
+    const auto zero =
+        validated(observed_zero);
+
+    REQUIRE(
+        zero.projection.fs_base_nonzero ==
+        std::optional<bool>{false});
+    REQUIRE(
+        zero.projection.gs_base_nonzero ==
+        std::optional<bool>{false});
+
+    require_difference(
+        unknown,
+        zero,
+        astraea::probe::
+            Ps5ProcessEntryProjectionField::
+                fs_base_nonzero);
 }
 
 TEST_CASE(
@@ -345,7 +394,8 @@ TEST_CASE(
     second_fixture.rsi += 0x10000U;
     second_fixture.rbp = 0U;
     second_fixture.rsp += 0x1000U;
-    second_fixture.fs_base += 0x20000U;
+    second_fixture.fs_base =
+        second_fixture.fs_base.value() + 0x20000U;
     second_fixture.gs_base = 0U;
 
     write_u64_le(
