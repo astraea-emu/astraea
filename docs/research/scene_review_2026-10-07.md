@@ -94,6 +94,54 @@ study public architecture/evidence and reproduce independently supported
 behavior, but must copy **no implementation code** from this repository absent
 an explicit license or permission.
 
+### blackbearreloaded/ps5-native-app-boilerplate
+
+Repository: `blackbearreloaded/ps5-native-app-boilerplate`.
+
+This project materially changes the C1 evidence picture. Its clean-room
+runtime documentation states that the startup behavior was independently
+designed and implemented, and that the exact generated native title/runtime
+artifact was hardware-validated on PS5 firmware 6.02 and 12.70.
+
+Its project-owned `_start` consumes the same direct-title prefix as the
+ps5link lineage: first argument/process block, argc-like value at +0, argv at
++8, and the original process pointer passed to `_init_env`.
+
+That is enough independent hardware-exercised corroboration to promote the
+prefix shape into typed Astraea C1A code. It does **not** prove a mandatory
+non-null RSI teardown callback, initial RSP layout, FS/GS/TLS, or bootstrap
+ordering.
+
+The repository is GPL-3.0-or-later at the project-owned source level reviewed
+here. License compatibility does not remove Astraea's provenance rule: prefer
+small independently justified implementations over copying broad toolchain
+code.
+
+### ps5rs
+
+Repository: `claimore22/ps5rs`.
+
+This Rust project is useful for loader/HLE decomposition, deterministic fixture
+generation, fuzzing and schema discipline. Its host-side emulator executes
+guest x86-64 natively, but its current guest-entry trampoline primarily
+switches to a prepared stack and calls the entry point; it does not provide
+independent PS5 hardware process-entry evidence.
+
+It is explicitly GPL-2.0-only, so its implementation code must not be copied
+into Astraea's GPL-3.0-or-later tree.
+
+### PortPS5 / AnyPS5 relinker lineage
+
+`yuriolive/PortPS5` is a Windows-first native compatibility layer that relinks
+PS5 ELF input into PE images and provides replacement system libraries under
+the System V ABI. Its architecture rules—generic mechanisms, typed config, no
+title-id branches in core, strong CI policy—are useful comparative process
+evidence.
+
+Its relinker changes the original launch boundary, so it is not C1 loader-entry
+evidence. PortPS5 is GPL-2.0-only and must not be copied into Astraea without
+relicensing/permission.
+
 ### ps5link-sdk / SharpProspero
 
 Repository: `Rufidj/ps5link-sdk`; startup lineage derives from
@@ -132,7 +180,13 @@ Astraea is GPLv3-or-later. At the reviewed revisions:
 - `KytyPS5/KytyPS5` ships a GPLv2 license text;
 - `Force67/prosperity` ships a GPLv2 license text;
 - no root `LICENSE` or `COPYING` file was available through the
-  `sharpemu/sharpemu` repository API during this review.
+  `sharpemu/sharpemu` repository API during this review;
+- `blackbearreloaded/ps5-native-app-boilerplate` uses GPL-3.0-or-later for the
+  reviewed project-owned source;
+- `claimore22/ps5rs` is GPL-2.0-only;
+- `yuriolive/PortPS5` is GPL-2.0-only;
+- `mattias800/prosper` explicitly states that it currently grants no license
+  by default because it has no `LICENSE` file.
 
 A repository-level license file does not settle every file's `-only` /
 `or later` status or third-party provenance. Therefore:
@@ -151,13 +205,14 @@ A repository-level license file does not settle every file's `-only` /
 
 The scene has validated likely post-C1 dependency classes—runtime linking,
 TLS, process/thread services, page/resource tracking, richer shader compiler
-passes, synchronization and presentation—but it has not changed the first
-verified blocker.
+passes, synchronization and presentation. It also produced enough independent
+hardware-exercised evidence to promote the direct-title RDI/process-block
+prefix, but not enough to enable native retail entry.
 
-Keep `unsupported_initial_process_abi` in production. Continue #300. The
-shortest high-quality path is a transport-neutral C1 observation/validation
-contract, followed by a typed bootstrap/process-entry profile only after the
-required fields are corroborated.
+Keep `unsupported_initial_process_abi` in production. Continue #300. Encode
+the corroborated partial C1A prefix now, then use transport-neutral observation
+to resolve RSI teardown, RSP, TLS/TCB and bootstrap ordering before constructing
+an executable process-entry profile.
 
 ## Conclusion
 
