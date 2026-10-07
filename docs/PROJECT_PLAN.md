@@ -7,9 +7,18 @@ and emulation project whose correctness is driven by public specifications,
 controlled experiments, deterministic tests, and regression localization
 rather than title-specific hacks.
 
+The long-term quality bar is multi-dimensional:
+
+- **correctness** — evidenced guest-visible semantics and explicit unknowns;
+- **compatibility** — broad cross-engine title progression without core hacks;
+- **performance** — measured CPU/GPU efficiency on representative workloads;
+- **reliability** — deterministic diagnostics and regression-resistant routes;
+- **user quality** — stable presentation, input/audio/save behavior and
+  reproducible releases once the core is ready.
+
 Efficiency means removing the **first real dependency** on the shortest
-end-to-end path, not maximizing opcode count, HLE surface area, or visible
-compatibility claims.
+end-to-end path, not maximizing opcode count, HLE surface area, compatibility
+counts, screenshots, or speculative feature breadth.
 
 ## 2. Source of truth
 
@@ -357,7 +366,26 @@ passes are likely to become load-bearing.
 Real title output reaches VideoOut/presentation and a defined visible
 boot/menu milestone.
 
-### C6 — in-game / playable / accuracy progression
+### C6 — in-game / playable / validated support progression
+
+C6 is deliberately subdivided:
+
+#### C6A — in-game progression
+
+A defined route reaches recognizable gameplay with the scene rendering. Severe
+visual, timing, audio, input, save or performance defects may still exist.
+
+#### C6B — playable defined route
+
+A reviewed route can be completed with the behavior required by that route,
+including the relevant input/audio/save/presentation path. This is still not a
+global compatibility claim.
+
+#### C6C — reference-validated and regression-guarded support
+
+The selected route/state has been compared against an authorized reference or
+another independently justified oracle where needed, and an appropriate
+automatic local regression guard protects the supported milestone.
 
 Compatibility reporting must distinguish at least:
 
@@ -368,9 +396,90 @@ Compatibility reporting must distinguish at least:
 - menu
 - in-game
 - playable
-- accurate
+- reference-validated / guarded
 
-A category is an integration observation, not proof of semantic correctness.
+A category is an integration observation, not proof of complete platform
+semantics.
+
+## 8.1. Scalability / readiness gates
+
+The S-axis is orthogonal to both graphics technology and compatibility. It
+measures whether Astraea can grow from one successful title to a durable
+emulator without accumulating unmeasured compatibility debt.
+
+### S0 — fail-visible verification and provenance — established
+
+Maintain exact-head CI, typed unsupported behavior, sanitizers/fuzzing,
+deterministic owned fixtures, AstraeaProbe/trace support, and durable
+evidence/ADR records.
+
+### S1 — first-divergence and coverage accounting
+
+Once C1 admits real-title execution, measure the selected workload:
+
+- modules/imports discovered;
+- imports resolved;
+- imports actually called;
+- semantically implemented called HLEs;
+- first unsupported CPU/syscall/HLE boundary;
+- AGC/PM4 packet kinds observed;
+- shader instructions decoded and lowered;
+- first unsupported shader operation;
+- resource/synchronization classes encountered.
+
+Do not use a guessed platform-wide completion percentage. Retail bytes remain
+local; commit only lawful metadata, digests, normalized counts and typed
+boundaries.
+
+### S2 — local cross-title routes and regression guards
+
+As visible milestones appear, build a lawful local compatibility corpus spanning
+at least:
+
+1. small/custom 2D;
+2. Unity/IL2CPP;
+3. Unreal;
+4. demanding custom 3D.
+
+A shared-subsystem compatibility change should be exercised against the
+available guarded corpus before merge when practical. Dumps, screenshots and
+copyrighted title assets remain local/gitignored.
+
+### S3 — architecture ratchets
+
+When a real compatibility-debt class appears, make it mechanically non-growing.
+
+Candidate ratchets:
+
+- title IDs / executable hashes / shader hashes in shared core code;
+- unregistered title-specific workarounds;
+- unknown HLE success without evidenced semantics;
+- host exceptions crossing guest frames;
+- behavior-changing untyped environment switches;
+- steady-state blocking GPU waits/readbacks;
+- unbounded per-draw/per-HLE hot-path allocations;
+- production SPIR-V emitters without validation coverage.
+
+Do not add a ratchet until it can distinguish a real violation from legitimate
+code.
+
+### S4 — measured performance budgets
+
+Profile representative 3D workloads before optimizing. Track CPU/HLE/render
+phase time, GPU submit/render/present time, waits/readbacks, shader/pipeline
+compile events, hot-path allocation volume, frame progression/stalls, and
+residency/cache pressure when relevant.
+
+Correctness remains authoritative. A faster wrong result is not progress.
+
+### S5 — release and user-quality readiness
+
+Only after the title path is durable, add release-grade packaging, crash/
+diagnostic bundles, stable configuration, controller/input, audio, save-data
+and presentation quality, documented host/GPU/driver support, exact-build
+compatibility reports, and state migration where needed.
+
+See ADR 0012.
 
 ## 9. Direct-title-first strategy
 
@@ -388,7 +497,29 @@ Why:
 Firmware/VSH research remains optional if a selected dependency later
 justifies it.
 
-## 10. Workload-driven expansion after C1
+## 10. First-title selection and workload-driven expansion after C1
+
+### First retail target
+
+Select the first legally obtained retail workload for **closure cost**, not
+prestige.
+
+Prefer:
+
+- small module/import surface;
+- minimal network/entitlement dependence;
+- deterministic startup route;
+- modest shader/resource complexity;
+- independently demonstrated feasibility in public implementations;
+- usefulness as a representative engine/workload class.
+
+Do not choose a difficult AAA title merely because it is impressive if a
+smaller workload can expose the same runtime dependency faster.
+
+After one low-complexity title is progressing, expand toward the S2 corpus
+rather than optimizing one title indefinitely.
+
+### Dependency-driven expansion
 
 When a real title reaches a missing subsystem, implement the smallest durable
 abstraction rather than a title patch.
@@ -405,6 +536,14 @@ A `ModuleGraph` / runtime-linker layer above `GuestImage`:
 - dependency ordering
 - relocations across modules
 - unload/reload when later required
+
+Measure imported -> resolved -> called -> semantically implemented interfaces
+for the selected workload. A missing/unknown call must stay visible; do not
+return success while leaving required outputs undefined merely to advance a
+title.
+
+As the called surface grows, introduce declarative ABI/signature metadata and
+per-library conformance tests rather than hand-maintained ad-hoc dispatch.
 
 Do not turn the structural ELF parser into a runtime linker.
 
@@ -425,12 +564,20 @@ Do not expose unmanaged host thread/process identity as guest semantics.
 
 Once real title GPU workloads require it:
 
-- guest memory page tracking / invalidation
-- buffer and image caches
-- alias tracking
-- pipeline/shader cache
-- descriptor/resource discovery
-- queue/scheduler/synchronization model
+- canonical guest resource identity;
+- guest memory page tracking / invalidation;
+- explicit CPU-dirty / GPU-dirty ownership where needed;
+- buffer and image caches;
+- alias tracking;
+- pipeline/shader cache;
+- descriptor/resource discovery;
+- queue/scheduler/synchronization model.
+
+Current PS5 projects show that resource identity, dirty-page visibility,
+readback avoidance and synchronization become major correctness/performance
+boundaries under real 3D workloads. That is strong evidence to reserve a clean
+architecture seam, not permission to implement the subsystem before C4 makes
+it load-bearing.
 
 These are expected eventual needs, not current speculative tasks.
 
@@ -438,15 +585,21 @@ These are expected eventual needs, not current speculative tasks.
 
 When real shaders exceed the current bounded compiler profile:
 
-- SSA/value flow
-- dominance/phi handling
-- structured control flow
-- resource discovery/lowering
-- stage I/O lowering
-- optimization passes
-- deterministic compiler cache keys
+- build a local histogram/coverage report over the selected lawful shader
+  corpus and rank the first unsupported operation by impact;
+- SSA/value flow;
+- dominance/phi handling;
+- structured control flow;
+- resource discovery/lowering;
+- stage I/O lowering;
+- optimization passes;
+- deterministic compiler cache keys.
 
 Preserve the semantic Shader IR as the correctness/provenance layer.
+
+Astraea already validates emitted SPIR-V in bounded tests. As production emitter
+paths multiply, add a coverage guard so a new emitter cannot silently bypass
+validation.
 
 ## 11. Independent evidence tracks
 
@@ -461,7 +614,8 @@ workload or authorized hardware capture is available.
 
 ### Linux defense in depth (#297 / #298)
 
-pidfd and Landlock are worthwhile post-C0 hardening, not blockers for #300.
+pidfd-backed lifetime/signalling is merged. Landlock remains worthwhile
+post-C0 hardening, not a blocker for #300.
 
 ### Repository governance (#168)
 
@@ -556,6 +710,9 @@ compatibility:
      |
      v
     C1 PS5 initial-process ABI / first instruction   ACTIVE (#300)
+       C1A corroborated startup prefix            MERGED
+       C1A observation validator                  IN FLIGHT (#308)
+       C1B procparam relationship                 RESEARCH (#312)
      |
      v
     C2 bootstrap/modules/TLS/HLE
@@ -570,7 +727,16 @@ compatibility:
     C5 presentation/menu
      |
      v
-    C6 in-game/playable/accuracy
+    C6A in-game -> C6B playable route -> C6C reference-guarded
+
+scalability/readiness:
+    S0 fail-visible verification/provenance       ESTABLISHED
+     |
+     +-> S1 first-divergence/coverage             START WITH REAL TITLE
+     +-> S2 cross-title regression corpus         GROW AFTER VISIBLE STATES
+     +-> S3 architecture ratchets                 ADD WHEN DEFECT CLASSES APPEAR
+     +-> S4 measured performance budgets          AFTER REPRESENTATIVE 3D
+     `-> S5 release/user quality                  LATE
 ```
 
 The exact merged next action belongs in `docs/STATUS.md`. Live open GitHub
