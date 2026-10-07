@@ -22,6 +22,7 @@ ELFCLASS64 = 2
 ELFDATA2LSB = 1
 EM_X86_64 = 0x3E
 SHT_SYMTAB = 2
+PT_LOAD = 1
 PT_SCE_PROCPARAM = 0x61000001
 ANCHOR_SYMBOL = "astraea_ps5_entry_capture_v0"
 U64_MAX = (1 << 64) - 1
@@ -209,6 +210,55 @@ def find_defined_symbol(data: bytes, symbol: str, label: str) -> int:
     return matches[0]
 
 
+def mapped_loads(data: bytes, label: str) -> list[ProgramHeader]:
+    header = _parse_elf_header(data, label)
+    result: list[ProgramHeader] = []
+
+    for index in range(header.phnum):
+        at = header.phoff + index * header.phentsize
+        (
+            program_type,
+            _flags,
+            offset,
+            vaddr,
+            _paddr,
+            filesz,
+            memsz,
+            _align,
+        ) = _unpack_from("<IIQQQQQQ", data, at, f"{label} program header {index}")
+        if program_type != PT_LOAD or memsz == 0:
+            continue
+        if vaddr > U64_MAX - (memsz - 1):
+            raise AnalysisError(f"{label}: PT_LOAD {index} virtual range overflows u64")
+        result.append(
+            ProgramHeader(
+                program_type=program_type,
+                offset=offset,
+                vaddr=vaddr,
+                filesz=filesz,
+                memsz=memsz,
+            )
+        )
+
+    return result
+
+
+def require_unique_mapped_address(
+    loads: list[ProgramHeader],
+    address: int,
+    label: str,
+) -> None:
+    matches = [
+        load
+        for load in loads
+        if load.vaddr <= address < load.vaddr + load.memsz
+    ]
+    if not matches:
+        raise AnalysisError(f"{label}: address is not inside a mapped PT_LOAD")
+    if len(matches) != 1:
+        raise AnalysisError(f"{label}: address is inside overlapping PT_LOAD ranges")
+
+
 def find_procparam(data: bytes, label: str) -> tuple[ProgramHeader, bytes]:
     header = _parse_elf_header(data, label)
     matches: list[ProgramHeader] = []
@@ -373,6 +423,17 @@ def analyze(
 ) -> dict[str, object]:
     capture_link = find_defined_symbol(intermediate, ANCHOR_SYMBOL, "intermediate ELF")
     procparam, static_prefix = find_procparam(final, "final ELF")
+    loads = mapped_loads(final, "final ELF")
+    require_unique_mapped_address(
+        loads,
+        capture_link,
+        "final ELF observer anchor",
+    )
+    require_unique_mapped_address(
+        loads,
+        procparam.vaddr,
+        "final ELF PT_SCE_PROCPARAM",
+    )
 
     if capture_runtime < capture_link:
         raise AnalysisError("observed capture runtime address is below its link-time address")
@@ -500,8 +561,16 @@ def _synthetic_intermediate(*, duplicate_symbol: bool = False) -> bytes:
     return bytes(data)
 
 
-def _synthetic_final(*, duplicate_procparam: bool = False, corrupt_magic: bool = False) -> bytes:
-    phnum = 2 if duplicate_procparam else 1
+def _synthetic_final(
+    *,
+    duplicate_procparam: bool = False,
+    corrupt_magic: bool = False,
+    omit_load: bool = False,
+    overlap_load: bool = False,
+) -> bytes:
+    procparam_count = 2 if duplicate_procparam else 1
+    load_count = 0 if omit_load else (2 if overlap_load else 1)
+    phnum = load_count + procparam_count
     phoff = 0x40
     payload_offset = 0x180
     second_offset = 0x200
@@ -509,11 +578,43 @@ def _synthetic_final(*, duplicate_procparam: bool = False, corrupt_magic: bool =
     data = _elf_header(phoff=phoff, phnum=phnum, shoff=0, shnum=0)
     data.extend(b"\0" * (total - len(data)))
 
-    def write_header(index: int, offset: int, vaddr: int) -> None:
+    index = 0
+    if not omit_load:
         struct.pack_into(
             "<IIQQQQQQ",
             data,
             phoff + index * 0x38,
+            PT_LOAD,
+            6,
+            0x100,
+            0x4000,
+            0x4000,
+            0x100,
+            0x5000,
+            0x1000,
+        )
+        index += 1
+        if overlap_load:
+            struct.pack_into(
+                "<IIQQQQQQ",
+                data,
+                phoff + index * 0x38,
+                PT_LOAD,
+                4,
+                0x120,
+                0x4800,
+                0x4800,
+                0x80,
+                0x2000,
+                0x1000,
+            )
+            index += 1
+
+    def write_procparam(header_index: int, offset: int, vaddr: int) -> None:
+        struct.pack_into(
+            "<IIQQQQQQ",
+            data,
+            phoff + header_index * 0x38,
             PT_SCE_PROCPARAM,
             4,
             offset,
@@ -526,9 +627,9 @@ def _synthetic_final(*, duplicate_procparam: bool = False, corrupt_magic: bool =
         struct.pack_into("<Q", data, offset, 0x60)
         data[offset + 8 : offset + 12] = b"NOPE" if corrupt_magic else b"ORBI"
 
-    write_header(0, payload_offset, 0x7000)
+    write_procparam(index, payload_offset, 0x7000)
     if duplicate_procparam:
-        write_header(1, second_offset, 0x8000)
+        write_procparam(index + 1, second_offset, 0x8000)
     return bytes(data)
 
 
@@ -718,6 +819,26 @@ class SelfTests(unittest.TestCase):
         )
         with self.assertRaisesRegex(AnalysisError, "multiple"):
             parse_observation_log(line + "\n" + line + "\n")
+
+    def test_final_anchor_must_be_mapped(self) -> None:
+        with self.assertRaisesRegex(AnalysisError, "observer anchor"):
+            analyze(
+                _synthetic_intermediate(),
+                _synthetic_final(omit_load=True),
+                capture_runtime=0x10005000,
+                api_procparam_runtime=0x10007000,
+                api_procparam_prefix=b"\0" * PREFIX_SIZE,
+            )
+
+    def test_overlapping_final_loads_are_rejected(self) -> None:
+        with self.assertRaisesRegex(AnalysisError, "overlapping PT_LOAD"):
+            analyze(
+                _synthetic_intermediate(),
+                _synthetic_final(overlap_load=True),
+                capture_runtime=0x10005000,
+                api_procparam_runtime=0x10007000,
+                api_procparam_prefix=b"\0" * PREFIX_SIZE,
+            )
 
     def test_malformed_elf_is_rejected(self) -> None:
         with self.assertRaisesRegex(AnalysisError, "bad ELF magic"):
