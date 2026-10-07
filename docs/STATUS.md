@@ -85,9 +85,9 @@ before retail native entry.
 Promote it in layers rather than as one guessed ABI:
 
 1. **C1A — entry register/parameter-block contract**
-   - corroborate loader-provided RDI parameter block;
-   - corroborate RSI teardown role;
-   - bound argc/argv and stack observations.
+   - corroborated RDI/startup-block prefix is merged;
+   - owned process-entry observation validator is merged (#308);
+   - remaining evidence: RSI teardown role and exact initial RSP/stack state.
 2. **C1B — process metadata**
    - establish relationship to process/procparam metadata and ownership.
 3. **C1C — primary-thread TLS/TCB**
@@ -119,9 +119,10 @@ C1A prefix: RDI/process-parameter block, argc-like field at +0, argv-like
 vector at +8, and the original process pointer passed to runtime environment
 initialization. This prefix may be encoded as typed Astraea state.
 
-Still unresolved and entry-blocking: mandatory RSI teardown semantics, exact
-initial RSP/stack state, the runtime procparam/API relationship, primary-thread
-TLS/TCB/FS-GS, and bootstrap ordering.
+The software-side C1A evidence machinery is now merged. Still unresolved and
+entry-blocking: mandatory RSI teardown semantics, exact initial RSP/stack state,
+the runtime procparam/API relationship, primary-thread TLS/TCB/FS-GS, and
+bootstrap ordering.
 
 ## Scalability / readiness axis
 
@@ -203,14 +204,14 @@ Astraea does **not** currently claim:
 
 ## Next action
 
-1. Merge #308 after its exact current-main CI gate: process-entry observation
-   validation and repeat-run structural comparison.
-2. Use the owned native-title observer described there to resolve RSI and exact
-   initial RSP without CRT mutation.
-3. Extend the same controlled run for #312 to measure
+1. Run the owned native-title observer specified by the merged #308 contract to
+   resolve RSI and exact initial RSP **before CRT/compiler mutation**.
+2. Extend the same controlled run for #312 to measure
    `sceKernelGetProcParam()` vs the mapped `PT_SCE_PROCPARAM`.
-4. Resolve C1C primary-thread TLS/TCB and C1D bootstrap effects only from
+3. Resolve C1C primary-thread TLS/TCB and C1D bootstrap effects only from
    evidence required by the selected workload.
+4. In parallel, #316 may add a host-independent static closure profile for
+   first-title selection; it must not delay the C1 evidence run.
 5. Keep `unsupported_initial_process_abi` in production until the complete
    selected profile is ready.
 
