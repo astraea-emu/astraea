@@ -11,6 +11,7 @@
 extern "C" void astraea_test_invoke_entry_observer(const void* process_prefix);
 extern "C" AstraeaPs5EntryCaptureV0 astraea_ps5_entry_capture_v0;
 extern "C" AstraeaPs5EntryCaptureV0 astraea_test_target_capture;
+extern "C" std::uint64_t astraea_test_target_rflags;
 #endif
 
 TEST_CASE(
@@ -41,6 +42,7 @@ TEST_CASE(
         &astraea_test_target_capture,
         0,
         sizeof(astraea_test_target_capture));
+    astraea_test_target_rflags = 0U;
 
     astraea_test_invoke_entry_observer(process_prefix.data());
 
@@ -78,6 +80,22 @@ TEST_CASE(
     REQUIRE(
         captured.rdi ==
         reinterpret_cast<std::uintptr_t>(process_prefix.data()));
+
+    constexpr std::uint64_t arithmetic_flags_mask =
+        (UINT64_C(1) << 0U) |
+        (UINT64_C(1) << 2U) |
+        (UINT64_C(1) << 4U) |
+        (UINT64_C(1) << 6U) |
+        (UINT64_C(1) << 7U) |
+        (UINT64_C(1) << 11U);
+    constexpr std::uint64_t expected_arithmetic_flags =
+        (UINT64_C(1) << 2U) |
+        (UINT64_C(1) << 6U);
+
+    REQUIRE(
+        (astraea_test_target_rflags &
+         arithmetic_flags_mask) ==
+        expected_arithmetic_flags);
 #else
     SUCCEED(
         "The exact observer assembly is exercised only on Linux x86-64 CI");
