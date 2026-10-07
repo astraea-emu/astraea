@@ -40,6 +40,16 @@ constexpr std::uint32_t kPfExecute = 0x1U;
     return table.has_value() ? table->count : 0U;
 }
 
+[[nodiscard]] constexpr bool is_sce_dynamic_namespace(
+    std::int64_t tag) noexcept {
+    if (tag < 0) {
+        return false;
+    }
+    const auto raw =
+        static_cast<std::uint64_t>(tag);
+    return (raw & 0xffff0000ULL) == 0x61000000ULL;
+}
+
 }  // namespace
 
 RetailStaticClosureProfileResult
@@ -111,10 +121,13 @@ profile_retail_guest_image(
                         1U);
                 break;
             case astraea::loader::SceDynamicTagKind::unknown:
-                profile.sce_unknown_dynamic_record_count =
-                    saturating_add(
-                        profile.sce_unknown_dynamic_record_count,
-                        1U);
+                if (is_sce_dynamic_namespace(
+                        record.raw_tag)) {
+                    profile.sce_unknown_dynamic_record_count =
+                        saturating_add(
+                            profile.sce_unknown_dynamic_record_count,
+                            1U);
+                }
                 break;
             default:
                 break;
