@@ -275,17 +275,17 @@ def parse_u64(text: str, label: str) -> int:
     return value
 
 
-def parse_prefix(text: str) -> bytes:
+def parse_prefix(text: str, label: str = "prefix") -> bytes:
     if len(text) != PREFIX_SIZE * 2:
         raise AnalysisError(
-            f"api procparam prefix must contain exactly {PREFIX_SIZE} bytes of hex"
+            f"{label} must contain exactly {PREFIX_SIZE} bytes of hex"
         )
     try:
         value = bytes.fromhex(text)
     except ValueError as error:
-        raise AnalysisError("api procparam prefix is not valid hexadecimal") from error
+        raise AnalysisError(f"{label} is not valid hexadecimal") from error
     if len(value) != PREFIX_SIZE:
-        raise AnalysisError("api procparam prefix has the wrong size")
+        raise AnalysisError(f"{label} has the wrong size")
     return value
 
 
@@ -331,11 +331,13 @@ def parse_observation_line(line: str) -> dict[str, object]:
         "rsi": parse_u64(fields["rsi"], "rsi"),
         "rbp": parse_u64(fields["rbp"], "rbp"),
         "rsp": parse_u64(fields["rsp"], "rsp"),
-        "process_prefix": parse_prefix(fields["process_prefix"]),
+        "process_prefix": parse_prefix(fields["process_prefix"], "process prefix"),
         "api_procparam_runtime": parse_u64(
             fields["procparam_runtime"], "api procparam runtime"
         ),
-        "api_procparam_prefix": parse_prefix(fields["procparam_prefix"]),
+        "api_procparam_prefix": parse_prefix(
+            fields["procparam_prefix"], "api procparam prefix"
+        ),
     }
 
 
@@ -586,6 +588,34 @@ class SelfTests(unittest.TestCase):
         self.assertEqual(observed["rsi"], 0x2222)
         self.assertEqual(observed["process_prefix"], bytes(range(16)))
 
+    def test_log_record_drives_identity_analysis(self) -> None:
+        final = _synthetic_final()
+        observed = parse_observation_log(
+            "ASTRAEA_ENTRY_V0 status=complete "
+            "capture_runtime=0x0000000010005000 "
+            "rdi=0x0000000000001111 "
+            "rsi=0x0000000000002222 "
+            "rbp=0x0000000000003333 "
+            "rsp=0x0000000000004448 "
+            "process_prefix=000102030405060708090a0b0c0d0e0f "
+            "procparam_runtime=0x0000000010007000 "
+            "procparam_prefix=60000000000000004f52424900000000\\n"
+        )
+        result = analyze(
+            _synthetic_intermediate(),
+            final,
+            int(observed["capture_runtime"]),
+            int(observed["api_procparam_runtime"]),
+            bytes(observed["api_procparam_prefix"]),
+            entry_observation=observed,
+        )
+        self.assertTrue(result["pointer_match"])
+        self.assertTrue(result["prefix_match"])
+        self.assertEqual(
+            result["entry_observation"]["rsp"],
+            "0x0000000000004448",
+        )
+
     def test_duplicate_complete_log_record_is_rejected(self) -> None:
         line = (
             "ASTRAEA_ENTRY_V0 status=complete "
@@ -685,7 +715,8 @@ def main(argv: list[str] | None = None) -> int:
             args.api_procparam_runtime, "api procparam runtime"
         )
         api_procparam_prefix = parse_prefix(
-            args.api_procparam_prefix
+            args.api_procparam_prefix,
+            "api procparam prefix",
         )
 
     intermediate = args.intermediate.read_bytes()
