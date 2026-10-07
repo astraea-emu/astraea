@@ -133,6 +133,8 @@ profile_retail_artifact(
                 .code =
                     RetailStaticClosureArtifactErrorCode::
                         planning_stack_unavailable,
+                .guest_image_error = std::nullopt,
+                .profile_error = std::nullopt,
             });
     }
 
@@ -163,6 +165,7 @@ profile_retail_artifact(
                         guest_image_failure,
                 .guest_image_error =
                     std::move(image.error()),
+                .profile_error = std::nullopt,
             });
     }
 
@@ -175,6 +178,7 @@ profile_retail_artifact(
                 .code =
                     RetailStaticClosureArtifactErrorCode::
                         profile_failure,
+                .guest_image_error = std::nullopt,
                 .profile_error = profile.error(),
             });
     }
