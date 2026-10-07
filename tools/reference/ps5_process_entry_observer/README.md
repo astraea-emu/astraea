@@ -145,16 +145,21 @@ building the final PS5 executable and adds the static `PT_SCE_PROCPARAM`
 program header separately. That lets the host derive the title load bias from
 the observed capture-object address and its intermediate-PIE symbol value.
 
-Run:
+Preferred path: call `astraea_emit_ps5_entry_observation_v0()` once
+near the beginning of the owned application's normal `main`, capture that
+single kernel-log line to a local text file, then run:
 
 ```sh
 python3 tools/reference/ps5_process_entry_observer/procparam_identity.py \
   --intermediate /path/to/build/llvm-pie.elf \
   --final /path/to/build/eboot.elf \
-  --capture-runtime 0x... \
-  --api-procparam-runtime 0x... \
-  --api-procparam-prefix <32 hex digits>
+  --log-file /path/to/run1.log
 ```
+
+The emitter performs no allocation and formats the C1A/C1B values itself after
+normal runtime initialization. Manual `--capture-runtime`,
+`--api-procparam-runtime`, and `--api-procparam-prefix` arguments remain
+available for independent adapters, but must not be mixed with `--log-file`.
 
 The analyzer reports, separately:
 
