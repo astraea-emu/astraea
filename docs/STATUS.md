@@ -2,9 +2,9 @@
 
 **Repository:** `astraea-emu/astraea`  
 **Merged frontier:** production Linux x86-64 retail diagnostic path is active  
-**Current critical path:** #300 — establish the PS5 initial-process ABI before retail native entry  
+**Current critical path:** #300 — complete the evidenced PS5 initial-process contract before retail native entry  
 **Graphics:** V0-V3 complete for their bounded owned workloads  
-**Compatibility:** C0 complete on Linux x86-64; C1 active  
+**Compatibility:** C0 complete on Linux x86-64; partial C1A prefix merged; C1 active  
 **CI merge gate:** Linux x64, Windows x64, macOS ARM64, Linux ASan+UBSan, Linux Clang fuzz smoke
 
 ## What is complete
@@ -85,15 +85,21 @@ before retail native entry.
 Promote it in layers rather than as one guessed ABI:
 
 1. **C1A — entry register/parameter-block contract**
-   - corroborate loader-provided RDI parameter block;
-   - corroborate RSI teardown role;
-   - bound argc/argv and stack observations.
+   - corroborated RDI/startup-block prefix is merged;
+   - owned process-entry observation validator is merged (#308);
+   - remaining evidence: RSI teardown role and exact initial RSP/stack state.
 2. **C1B — process metadata**
    - establish relationship to process/procparam metadata and ownership.
 3. **C1C — primary-thread TLS/TCB**
-   - establish required TLS allocation and initial FS/GS state.
-4. **C1D — bootstrap ordering**
-   - establish which module/import/runtime initialization must precede entry.
+   - establish only the TLS/TCB/FS-GS state required before the first title
+     instruction.
+4. **C1D — pre-entry bootstrap effects**
+   - establish only the module/import/runtime effects that must precede title
+     entry.
+
+Dynamic TLS, additional guest threads, runtime module loads and continuing
+initialization after the first admitted instruction belong to C2 unless a
+selected workload proves they are pre-entry requirements.
 
 Only the subset required by the selected diagnostic workload should be
 implemented. Unknown fields remain unsupported.
@@ -119,8 +125,28 @@ C1A prefix: RDI/process-parameter block, argc-like field at +0, argv-like
 vector at +8, and the original process pointer passed to runtime environment
 initialization. This prefix may be encoded as typed Astraea state.
 
-Still unresolved and entry-blocking: mandatory RSI teardown semantics, exact
-initial RSP/stack state, primary-thread TLS/TCB/FS-GS, and bootstrap ordering.
+The software-side C1A evidence machinery is now merged. Still unresolved and
+entry-blocking: mandatory RSI teardown semantics, exact initial RSP/stack state,
+the runtime procparam/API relationship, primary-thread TLS/TCB/FS-GS, and
+bootstrap ordering.
+
+## Scalability / readiness axis
+
+ADR 0012 adds a third orthogonal S0-S5 axis so compatibility breadth does not
+outgrow verification and architecture:
+
+- **S0** fail-visible verification/provenance — established;
+- **S1** first-divergence and workload coverage accounting — begin with real
+  title execution;
+- **S2** lawful local cross-title routes/regression guards — grow after visible
+  milestones;
+- **S3** architecture ratchets — add when real compatibility-debt classes
+  appear;
+- **S4** measured performance budgets — after representative 3D workloads;
+- **S5** release/user-quality readiness — late.
+
+C6 is refined to C6A in-game, C6B playable defined route, and C6C
+reference-validated/regression-guarded support.
 
 ## After C1
 
@@ -139,7 +165,7 @@ dependency:
 The durable compatibility ladder is:
 
 ```text
-C0 diagnostic -> C1 first retail instruction -> C2 bootstrap/HLE closure
+C0 diagnostic -> C1 first retail instruction -> C2 post-entry runtime closure
  -> C3 boot -> C4 first headless title GPU/frame evidence
  -> C5 visible presentation/menu -> C6 in-game/playable/accuracy
 ```
@@ -164,6 +190,12 @@ workload or authorized hardware capture is available; it must not be guessed.
 Landlock evaluation is non-blocking hardening and does not block C1 research
 or the existing production diagnostic.
 
+### Windows retail parity (#320)
+
+Windows x64 retains owned native/supervisor proofs but not arbitrary retail
+admission. The parity gate requires a default-deny boundary proving that raw
+guest `SYSCALL` cannot reach the Windows kernel, plus equivalent artifact/
+resource/IPC containment. This is not on the Linux C1 critical path.
 ### Repository governance (#168)
 
 Main protection/rulesets and merged-branch cleanup remain repository-admin
@@ -184,9 +216,19 @@ Astraea does **not** currently claim:
 
 ## Next action
 
-Work #300. Encode the now-corroborated partial C1A direct-title prefix while
-keeping the current `unsupported_initial_process_abi` production stop. Then
-resolve RSI teardown, initial RSP, TLS/TCB and bootstrap ordering before any
-retail instruction is admitted.
+1. Run the owned native-title observer specified by the merged #308 contract to
+   resolve RSI and exact initial RSP **before CRT/compiler mutation**.
+2. Extend the same controlled run for #312 to measure
+   `sceKernelGetProcParam()` vs the mapped `PT_SCE_PROCPARAM`.
+3. Resolve C1C primary-thread TLS/TCB and C1D bootstrap effects only from
+   evidence required by the selected workload.
+4. In parallel, #316 may add a host-independent static closure profile for
+   first-title selection; it must not delay the C1 evidence run.
+5. Keep `unsupported_initial_process_abi` in production until the complete
+   selected profile is ready.
 
-Use `docs/research/ps5_initial_process_abi.md` as the durable evidence record.
+After C1, select the first lawful retail title by closure cost rather than
+prestige and start S1 first-divergence/coverage accounting immediately.
+
+Use `docs/research/ps5_initial_process_abi.md` as the durable evidence record
+and ADR 0012 for scale/readiness strategy.

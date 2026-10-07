@@ -3,14 +3,13 @@
 A verification-first PlayStation 5 compatibility research and emulation
 project.
 
-> **Status:** V0-V3 are complete for their bounded owned workloads. Astraea can
-> now accept a user-selected executable through the production Linux x86-64
-> `astraea diagnose <artifact>` path, move only sealed artifact bytes into a
-> supervised worker, apply finite resource limits, and return a deterministic
-> typed pre-entry diagnostic. A structurally ready PS5/SCE image deliberately
-> stops at `unsupported_initial_process_abi`: retail native entry is **not**
-> enabled until the PS5 process-entry contract is established. Astraea does
-> not claim that retail titles boot, render, reach a menu, or are playable.
+> **Status:** V0-V3 are complete for their bounded owned workloads. C0 retail
+> diagnostics are complete on Linux x86-64, and the independently corroborated
+> partial C1A direct-title startup prefix is now merged. Astraea still stops a
+> structurally ready PS5/SCE image at `unsupported_initial_process_abi` while
+> RSI teardown, exact initial RSP, process metadata, primary-thread TLS/TCB and
+> bootstrap ordering are resolved. Astraea does not claim that retail titles
+> boot, render, reach a menu, or are playable.
 
 ## Principles
 
@@ -22,7 +21,10 @@ project.
 - Guest semantics before host mapping: SCE/AGC/RDNA2 behavior remains separate
   from Vulkan and other host APIs.
 - Native x86-64 execution where host architecture permits it; portable
-  subsystems remain host-independent.
+  subsystems remain host-independent. Native execution does not assume every
+  host implements the PS5 Zen 2 instruction surface identically—unsupported
+  host instructions are a separate patch/trap/emulation boundary when a real
+  workload requires it.
 - Verification-first development: structured traces, differential tests,
   regression localization, fuzzing, sanitizers, and reproducible experiments.
 - Dependency-driven vertical integration: build the smallest real dependency
@@ -113,7 +115,9 @@ C2  runtime/bootstrap closure: modules, relocations, TLS, first HLE/syscall
 C3  deterministic title boot / sustained initialization
 C4  first real-title headless GPU submission / frame evidence
 C5  VideoOut/presentation -> visible boot or menu
-C6  in-game / playable / accuracy progression + compatibility reporting
+C6A in-game progression
+C6B playable defined route
+C6C reference-validated / regression-guarded support
 ```
 
 The current critical path is **C1**, tracked by #300. Astraea already accepts a
@@ -131,6 +135,7 @@ oracle. Title-specific hacks do not replace missing guest semantics.
   prerequisite.
 - Pull module/HLE/thread/TLS/GPU breadth from the first missing dependency
   exposed by a real workload.
+- Select the first lawful retail target by **closure cost**, not prestige.
 - Preserve raw provenance so later evidence can correct interpretations without
   recapturing inputs.
 - Keep targeted reference-hardware probes available when they are the shortest
@@ -138,6 +143,25 @@ oracle. Title-specific hacks do not replace missing guest semantics.
 - Add resource caches, scheduler breadth, compiler passes, and presentation
   only when real title paths demand them rather than speculatively cloning
   another emulator's feature list.
+- Track a third **S0-S5 scalability/readiness axis** so compatibility breadth
+  cannot silently outgrow coverage, regression protection, architecture,
+  performance discipline or release quality.
+
+## Scalability and readiness
+
+Astraea measures project scale separately from graphics and title milestones:
+
+```text
+S0  fail-visible verification/provenance                      ESTABLISHED
+S1  first-divergence + selected-workload coverage             START WITH REAL TITLE
+S2  lawful local cross-title route/regression corpus          GROW WITH VISIBLE STATES
+S3  architecture ratchets against compatibility debt          AS DEFECT CLASSES APPEAR
+S4  measured performance budgets                              AFTER REPRESENTATIVE 3D
+S5  release/user-quality readiness                            LATE
+```
+
+This is not a mandate to build all infrastructure now. ADR 0006 still applies:
+add the smallest scale mechanism when its failure mode becomes load-bearing.
 
 See:
 
@@ -145,6 +169,7 @@ See:
 - `docs/STATUS.md`
 - `docs/adr/0010-supervised-retail-execution.md`
 - `docs/adr/0011-orthogonal-graphics-and-compatibility-gates.md`
+- `docs/adr/0012-scalability-and-release-readiness-gates.md`
 - `docs/research/architecture_review_2026-09-24.md`
 - `docs/research/ps5_initial_process_abi.md`
 - `docs/CHAT_HANDOFF.md`

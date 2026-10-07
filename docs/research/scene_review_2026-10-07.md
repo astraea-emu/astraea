@@ -153,6 +153,84 @@ the original parameter pointer. The October review found no second
 independent controlled observation that turns this lineage into a complete
 title-loader ABI.
 
+## 2026-10-07 breadth and scale checkpoint
+
+The compatibility gap is now large enough that Astraea should measure it
+explicitly without chasing it blindly.
+
+### SharpEmu
+
+The project's public compatibility tracker reported 76 tested titles and 36
+reaching gameplay during this review. Its newest repository work is no longer
+dominated by first-loader primitives. It spans:
+
+- AudioOut2 ABI/state breadth;
+- save-data operations;
+- HTTP2/network state;
+- browser/common-dialog lifecycle;
+- AV-player compatibility;
+- guest-page / CPU-dirty / GPU-dirty memory visibility;
+- readback and synchronization reduction;
+- hot-path allocation removal;
+- render-resolution/resource-identity behavior;
+- host/guest profiling and platform-specific execution issues.
+
+A large batch of Silent Hill rendering/performance changes was also reverted
+back to a review-only state on 2026-10-07. The lesson is not that those
+changes were wrong; it is that compatibility velocity can outrun review and
+regression confidence.
+
+### prosper
+
+Its current compatibility page reports 61 tracked titles, with 28 at
+gameplay-or-better. More important than the raw count is the process used to
+hold that breadth:
+
+- reviewed local routes/snapshot guards;
+- data-driven shader/recompiler coverage;
+- first-blocker/falsification records;
+- explicit architecture/performance invariants;
+- CI ratchets for known debt classes;
+- title trackers that separate a current route from stale historical claims.
+
+Current 2026-10-07 work includes multi-target volume rendering, a validation
+memory census, architecture ratchet follow-ups, and title-specific evidence
+updates. That mix is representative of a mature compatibility project: new
+features, performance investigation, governance, and regression evidence all
+advance together.
+
+### Cross-host native CPU compatibility
+
+Current KytyPS5 and SharpEmu work also exposes a separate dependency class
+that the earlier Astraea roadmap under-emphasized: an x86-64 host is not
+guaranteed to expose every instruction a PS5 Zen 2 title uses.
+
+Recent KytyPS5 work extends an AMD guest-instruction patcher on macOS/Rosetta
+and tests trapped/emulated instruction paths; SharpEmu similarly carries
+native-backend compatibility handling for guest SHA and other unsupported host
+instructions.
+
+Astraea should preserve native execution as the fast path while treating
+host-ISA compatibility as its own post-C1 seam. A host #UD must not be
+misdiagnosed as a guest HLE or loader failure.
+### Strategic consequence for Astraea
+
+The right response is **not** to pre-copy the leaders' HLE/GPU surface.
+
+Instead Astraea should:
+
+1. cross C1 as quickly as evidence permits;
+2. start measuring first-divergence/coverage immediately on the selected
+   lawful title;
+3. choose the first retail target by closure cost rather than prestige;
+4. grow a cross-engine local regression corpus as visible states appear;
+5. introduce architecture/performance ratchets only when the corresponding
+   debt class becomes real;
+6. preserve the existing semantic/provenance boundaries that make corrections
+   cheap when new evidence invalidates an assumption.
+
+This review led to ADR 0012 and the S0-S5 scalability/readiness axis.
+
 ## Architecture verdict
 
 No foundational rewrite is justified.
