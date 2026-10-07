@@ -99,14 +99,14 @@ TEST_CASE(
                     astraea::memory::GuestAddress{0x40002400U},
                 .anchor_image_virtual_address = 0x2400U,
                 .procparam_image_virtual_address = 0x9000U,
-                .api_prefix = bytes,
+                .api_prefix = {},
                 .artifact_prefix = bytes,
             });
 
     REQUIRE(result.has_value());
     REQUIRE_FALSE(result->api_return_nonzero);
     REQUIRE_FALSE(result->api_matches_expected_mapped_procparam);
-    REQUIRE(result->api_prefix_matches_artifact_prefix);
+    REQUIRE_FALSE(result->api_prefix_matches_artifact_prefix);
 }
 
 TEST_CASE(
