@@ -170,10 +170,14 @@ The analyzer reports, separately:
 
 - derived load bias;
 - expected mapped `PT_SCE_PROCPARAM` address;
+- whether the API return is non-zero;
 - observed API-return address;
 - `pointer_match`;
+- whether a prefix was available;
 - static and observed 16-byte prefixes;
-- `prefix_match`.
+- `prefix_match`;
+- when the entry observation is present, whether the loader-built startup
+  pointer remains distinct from the API-return pointer.
 
 A mismatch is a valid experimental result, not an analyzer failure.
 
