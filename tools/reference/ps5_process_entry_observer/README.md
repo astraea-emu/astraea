@@ -62,6 +62,35 @@ At that revision:
 Astraea does not vendor that project. Keep the hardware experiment in a
 separate local checkout.
 
+### Preferred preparation helper
+
+For the pinned BlackBear revision, Astraea provides a fail-closed local
+preparation helper. It performs no clone/download/deployment operation.
+
+With a clean checkout at exactly the pinned commit, preview first:
+
+```sh
+python3 tools/reference/ps5_process_entry_observer/prepare_blackbear_checkout.py \
+  --check /path/to/ps5-native-app-boilerplate
+```
+
+Then apply the exact local integration:
+
+```sh
+python3 tools/reference/ps5_process_entry_observer/prepare_blackbear_checkout.py \
+  /path/to/ps5-native-app-boilerplate
+```
+
+The helper refuses a wrong revision, dirty worktree, or unexpected upstream
+source text. It does not commit/reset the external checkout. It copies the
+three Astraea-owned observer sources into `.astraea-observer/`, makes only the
+pinned build/main transformations described below, and writes a provenance
+manifest with upstream/Astraea identities and file hashes.
+
+After preparation, use the external project's ordinary build flow. Console
+deployment/launch remains outside Astraea and must use an environment the
+contributor is already authorized to operate.
+
 ### Required build delta
 
 For one controlled experiment:
