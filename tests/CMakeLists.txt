@@ -79,6 +79,8 @@ add_executable(astraea_core_tests
     probe/reference_tests.cpp
     probe/agc_link_shaders_tail_tests.cpp
     probe/ps5_process_entry_tests.cpp
+    probe/ps5_process_entry_observer_tests.cpp
+    probe/ps5_process_entry_observer_source_tests.cpp
     graphics/agc_shader_binary_tests.cpp
     graphics/agc_shader_container_tests.cpp
     graphics/packet_tests.cpp
@@ -131,6 +133,22 @@ target_link_libraries(astraea_core_tests PRIVATE
     Catch2::Catch2WithMain
     SPIRV-Tools
 )
+
+target_include_directories(astraea_core_tests PRIVATE
+    "${CMAKE_SOURCE_DIR}/tools/reference/ps5_process_entry_observer"
+)
+
+target_compile_definitions(astraea_core_tests PRIVATE
+    ASTRAEA_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
+)
+
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND
+   CMAKE_SYSTEM_PROCESSOR MATCHES "^(x86_64|AMD64)$")
+    target_sources(astraea_core_tests PRIVATE
+        "${CMAKE_SOURCE_DIR}/tools/reference/ps5_process_entry_observer/entry.S"
+        probe/ps5_process_entry_observer_harness.S
+    )
+endif()
 add_dependencies(
     astraea_core_tests
     astraea_guest_worker_probe

@@ -1,0 +1,165 @@
+# PS5 process-entry observer v0
+
+This directory contains the Astraea-owned pre-CRT observer used to answer the
+remaining C1A process-entry questions without changing Astraea's production
+retail admission policy.
+
+It is **not** a console transport, exploit, jailbreak, loader, or firmware
+tool. It is a tiny x86-64 entry shim intended to be linked into an independently
+generated native title in an execution environment the contributor is
+authorized to use.
+
+## What v0 records
+
+The fixed `AstraeaPs5EntryCaptureV0` record contains:
+
+- all integer GPRs visible at the shim entry;
+- exact original RSP;
+- the first 16 bytes at original RDI;
+- a version field;
+- a completion magic published only after the bounded snapshot is complete.
+
+v0 intentionally does **not** read a speculative stack window and does not try
+to read FS/GS base. Those remain separate evidence questions.
+
+## Preservation invariant
+
+Before the snapshot is complete, the shim uses only MOV-family instructions.
+Those instructions do not modify RFLAGS.
+
+The shim uses R10 as its only scratch GPR after first saving it, restores R10,
+and then tail-jumps to the normal CRT. RDI, RSI, RBP, RSP, the remaining GPRs,
+and flags are therefore handed to the CRT unchanged by the observer itself.
+
+The capture writes title-owned writable storage. The first 16 bytes at RDI are
+read because the validated native-title CRT already consumes that exact prefix.
+
+## Record completion
+
+`magic` is written last.
+
+The completed little-endian magic bytes are `ASTRPEV0`.
+
+Consumers must ignore a record whose magic or version is wrong.
+
+## Current external integration reference
+
+The integration reviewed on 2026-10-07 is:
+
+```text
+blackbearreloaded/ps5-native-app-boilerplate
+commit 2f672d1c2f508e26f82ce6e27cef289a0861413c
+```
+
+At that revision:
+
+- `tooling/native/app_crt.cpp` defines the ordinary project-owned `_start`;
+- the build links with `-e _start`;
+- the project is GPL-3.0-or-later;
+- its clean-room runtime/startup artifact is documented as hardware-validated
+  on PS5 firmware 6.02 and 12.70.
+
+Astraea does not vendor that project. Keep the hardware experiment in a
+separate local checkout.
+
+### Required build delta
+
+For one controlled experiment:
+
+1. compile the upstream project-owned `tooling/native/app_crt.cpp` with
+
+   ```text
+   -D_start=astraea_reference_crt_start
+   ```
+
+   so the normal CRT body is retained under the handoff symbol expected by
+   `entry.S`;
+
+2. compile Astraea's `entry.S` with the same x86-64 target toolchain and
+
+   ```text
+   -DASTRAEA_PS5_ENTRY_SYMBOL=_start
+   ```
+
+3. link the observer object before/alongside the renamed CRT object while
+   retaining the upstream `-e _start` entry selection;
+
+4. include `capture.h` in owned application code that runs **after** ordinary
+   runtime initialization and serialize the completed record through a normal
+   application logging path already supported by that environment.
+
+Do not add logging, calls, stack adjustment, constructors, or C/C++ code before
+the assembly snapshot.
+
+## Stable log content
+
+The post-init logger should preserve raw values from the record, at minimum:
+
+```text
+rdi
+rsi
+rbp
+rsp
+process_prefix[16]
+```
+
+It may additionally preserve the other captured GPRs.
+
+For Astraea promotion, the external adapter converts those values to the
+`astraea.ps5.process-entry/v0` observation contract documented in
+`docs/research/ps5_process_entry_probe.md`.
+
+Do not normalize raw addresses into invented fixed values. The Astraea
+validator derives the structural comparison separately.
+
+## Repeat rule
+
+Use one exact owned-title artifact and run it at least twice without changing
+the build or semantic environment.
+
+Record, where lawfully known:
+
+- native-title source commit;
+- final artifact SHA-256;
+- observer commit;
+- toolchain commit;
+- firmware/platform version;
+- launcher/loader environment.
+
+The two runs must produce matching structural projections before any new ABI
+rule is considered. Exact raw relationships still require review.
+
+## Relationship to C1B
+
+After the normal runtime initializes, the same owned title may perform the
+separate #312 observation of `sceKernelGetProcParam()` and compare it with the
+mapped title-owned `PT_SCE_PROCPARAM`.
+
+Do not merge the startup-vector and static-procparam concepts.
+
+## Tests
+
+On Linux x86-64, Astraea's host test compiles this exact assembly source under
+its non-entry default symbol, drives it with a synthetic register fixture, and
+proves:
+
+- capture layout and magic;
+- first-16-byte copy;
+- exact RSP preservation across the tail jump;
+- every captured GPR reaching the synthetic CRT target unchanged.
+
+Other CI platforms compile the portable record-layout test but do not assemble
+or execute the x86-64 shim.
+
+## Provenance boundary
+
+Do not commit:
+
+- console transport/deployment tooling;
+- firmware or keys;
+- Sony modules;
+- proprietary SDK output;
+- retail binaries;
+- captured proprietary memory.
+
+The hardware adapter and deployment mechanism remain outside Astraea core.

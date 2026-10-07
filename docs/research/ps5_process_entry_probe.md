@@ -137,6 +137,27 @@ For promotion-quality evidence:
 7. review raw values/relationships separately before promoting an exact ABI
    field.
 
+## Repository-owned observer kit
+
+The exact v0 pre-CRT observer source now lives at:
+
+`tools/reference/ps5_process_entry_observer/`
+
+It contains:
+
+- a fixed C-compatible capture layout;
+- the preserving x86-64 assembly entry shim;
+- a pinned clean-room native-title integration recipe;
+- a Linux x86-64 host harness that proves GPR/RSP preservation across the
+  observer's tail-jump.
+
+The observer deliberately captures no FS/GS base and reads no speculative
+stack window in v0. Its only memory read outside its own capture record is the
+already-corroborated first 16 bytes at original RDI.
+
+Use the kit as the preferred C1A hardware observation artifact rather than
+recreating an ad-hoc `_start` probe.
+
 ## External adapter boundary
 
 The hardware adapter remains outside Astraea core. It may emit AstraeaProbe v0
