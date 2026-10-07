@@ -65,6 +65,11 @@ struct GuestWorkerProcessSessionResult {
     std::optional<GuestWorkerFault> terminal_fault;
     std::optional<GuestWorkerDiagnostic> terminal_diagnostic;
 
+    // Linux-only defense-in-depth observation. True when the controller
+    // obtained a stable pidfd for this worker and used the pidfd-aware
+    // supervision path. Always false on other platforms.
+    bool linux_pidfd_used = false;
+
     auto operator<=>(const GuestWorkerProcessSessionResult&) const =
         default;
 };
@@ -86,6 +91,7 @@ enum class GuestWorkerProcessSessionErrorCode {
     syscall_request_limit_exceeded,
     resource_policy_failure,
     artifact_preparation_failure,
+    process_identity_failure,
     child_exit_failure,
     host_allocation_failure,
 };
@@ -109,6 +115,12 @@ using GuestWorkerProcessSessionRunResult =
 
 [[nodiscard]] bool
 guest_worker_process_session_available() noexcept;
+
+// Returns whether this Linux host can create a stable pidfd for an existing
+// process. False on non-Linux hosts. This is a defense-in-depth capability
+// probe; pidfd unavailability does not disable the supervised session.
+[[nodiscard]] bool
+guest_worker_process_pidfd_available() noexcept;
 
 // First supervised-process proof.
 //
