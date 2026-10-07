@@ -136,6 +136,36 @@ TEST_CASE(
 }
 
 TEST_CASE(
+    "post-init PS5 observer emitter preserves null procparam return as evidence",
+    "[probe][c1][process-entry][observer][emitter][null]") {
+#if defined(__linux__) && defined(__x86_64__)
+    auto& capture = astraea_ps5_entry_capture_v0;
+    std::memset(&capture, 0, sizeof(capture));
+    capture.magic = ASTRAEA_PS5_ENTRY_CAPTURE_V0_MAGIC;
+    capture.version = ASTRAEA_PS5_ENTRY_CAPTURE_V0_VERSION;
+    capture.rdi = UINT64_C(0x1111222233334444);
+    capture.rsp = UINT64_C(0x5555666677770008);
+
+    g_test_procparam = nullptr;
+    g_test_debug_text.clear();
+
+    astraea_emit_ps5_entry_observation_v0();
+
+    REQUIRE(
+        g_test_debug_text.find(
+            " procparam_runtime=0x0000000000000000") !=
+        std::string::npos);
+    REQUIRE(
+        g_test_debug_text.find(
+            " procparam_prefix=unavailable") !=
+        std::string::npos);
+#else
+    SUCCEED(
+        "The post-init observer emitter is exercised on Linux x86-64 CI");
+#endif
+}
+
+TEST_CASE(
     "post-init PS5 observer emitter rejects incomplete capture",
     "[probe][c1][process-entry][observer][emitter][negative]") {
 #if defined(__linux__) && defined(__x86_64__)
