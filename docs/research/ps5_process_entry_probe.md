@@ -33,13 +33,16 @@ rdi                : u64
 rsi                : u64
 rbp                : u64
 rsp                : u64
-fs_base            : u64
-gs_base            : u64
+fs_base            : u64   # omit when not captured
+gs_base            : u64   # omit when not captured
 process_window_base: u64
 process_window     : bytes
 ```
 
-Raw values are evidence. Zero is a valid observation.
+Raw values are evidence. Zero is a valid **observed** value. When FS or GS
+base is not captured, omit that observation rather than encoding an invented
+zero. Astraea preserves unavailable, observed-zero, and observed-nonzero as
+three distinct states.
 
 ## Validation
 
@@ -54,8 +57,8 @@ argv0_nonzero
 rsi_nonzero
 rbp_zero
 rsp_mod16
-fs_base_nonzero
-gs_base_nonzero
+fs_base_nonzero   # optional: unknown when FS base was not captured
+gs_base_nonzero   # optional: unknown when GS base was not captured
 ```
 
 These fields may be compared across equivalent cases without assuming raw
@@ -111,8 +114,9 @@ Do not add `RDFSBASE`/`RDGSBASE` to the first observer merely because the Zen 2
 CPU supports those instructions. Whether userspace execution of those
 instructions is enabled is itself a platform fact. Treat FS/GS-base capture as
 a separate controlled probe using an independently evidenced safe mechanism.
-Until then, the v0 Astraea observation may record zero/unknown for those
-fields and must not turn that into a PS5 rule.
+Until then, the v0 Astraea observation should omit those fields when they are
+not captured. It must never encode "unknown" as zero or turn either state into
+a PS5 rule.
 
 ### Repetition and provenance
 
