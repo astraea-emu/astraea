@@ -18,6 +18,7 @@ astraea_set_project_warnings(astraea_guest_worker_probe)
 astraea_enable_sanitizers(astraea_guest_worker_probe)
 
 add_executable(astraea_core_tests
+    app/retail_profile_tests.cpp
     core/version_tests.cpp
     core/result_tests.cpp
     loader/elf64_tests.cpp
@@ -128,6 +129,11 @@ add_executable(astraea_core_tests
     trace/graphics_v0_tests.cpp
     trace/shader_vector_execution_v0_tests.cpp
 )
+target_sources(astraea_core_tests PRIVATE
+    "${CMAKE_SOURCE_DIR}/src/app/artifact_file.cpp"
+    "${CMAKE_SOURCE_DIR}/src/app/retail_profile.cpp"
+)
+
 target_link_libraries(astraea_core_tests PRIVATE
     Astraea::core
     Catch2::Catch2WithMain
@@ -136,6 +142,7 @@ target_link_libraries(astraea_core_tests PRIVATE
 
 target_include_directories(astraea_core_tests PRIVATE
     "${CMAKE_SOURCE_DIR}/tools/reference/ps5_process_entry_observer"
+    "${CMAKE_SOURCE_DIR}/src/app"
 )
 
 target_compile_definitions(astraea_core_tests PRIVATE
