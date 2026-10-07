@@ -322,8 +322,19 @@ def parse_observation_line(line: str) -> dict[str, object]:
             "observation is missing required fields: " + ", ".join(missing)
         )
 
+    procparam_runtime = parse_u64(
+        fields["procparam_runtime"], "api procparam runtime"
+    )
     if fields["procparam_prefix"] == "unavailable":
-        raise AnalysisError("procparam prefix is unavailable")
+        if procparam_runtime != 0:
+            raise AnalysisError(
+                "procparam prefix may be unavailable only when the API return is null"
+            )
+        procparam_prefix = None
+    else:
+        procparam_prefix = parse_prefix(
+            fields["procparam_prefix"], "api procparam prefix"
+        )
 
     return {
         "capture_runtime": parse_u64(fields["capture_runtime"], "capture runtime"),
@@ -332,12 +343,8 @@ def parse_observation_line(line: str) -> dict[str, object]:
         "rbp": parse_u64(fields["rbp"], "rbp"),
         "rsp": parse_u64(fields["rsp"], "rsp"),
         "process_prefix": parse_prefix(fields["process_prefix"], "process prefix"),
-        "api_procparam_runtime": parse_u64(
-            fields["procparam_runtime"], "api procparam runtime"
-        ),
-        "api_procparam_prefix": parse_prefix(
-            fields["procparam_prefix"], "api procparam prefix"
-        ),
+        "api_procparam_runtime": procparam_runtime,
+        "api_procparam_prefix": procparam_prefix,
     }
 
 
@@ -360,7 +367,7 @@ def analyze(
     final: bytes,
     capture_runtime: int,
     api_procparam_runtime: int,
-    api_procparam_prefix: bytes,
+    api_procparam_prefix: bytes | None,
     *,
     entry_observation: dict[str, object] | None = None,
 ) -> dict[str, object]:
@@ -384,8 +391,16 @@ def analyze(
         "observed_procparam_runtime": f"0x{api_procparam_runtime:016x}",
         "pointer_match": api_procparam_runtime == expected_runtime,
         "static_prefix_hex": static_prefix.hex(),
-        "observed_prefix_hex": api_procparam_prefix.hex(),
-        "prefix_match": api_procparam_prefix == static_prefix,
+        "observed_prefix_hex": (
+            None
+            if api_procparam_prefix is None
+            else api_procparam_prefix.hex()
+        ),
+        "prefix_match": (
+            False
+            if api_procparam_prefix is None
+            else api_procparam_prefix == static_prefix
+        ),
     }
     if entry_observation is not None:
         result["entry_observation"] = {
@@ -616,6 +631,48 @@ class SelfTests(unittest.TestCase):
             "0x0000000000004448",
         )
 
+    def test_null_procparam_return_is_preserved_as_observation(self) -> None:
+        final = _synthetic_final()
+        result = analyze(
+            _synthetic_intermediate(),
+            final,
+            capture_runtime=0x10005000,
+            api_procparam_runtime=0,
+            api_procparam_prefix=None,
+        )
+        self.assertFalse(result["pointer_match"])
+        self.assertFalse(result["prefix_match"])
+        self.assertIsNone(result["observed_prefix_hex"])
+
+    def test_null_procparam_log_record_is_preserved(self) -> None:
+        observed = parse_observation_log(
+            "ASTRAEA_ENTRY_V0 status=complete "
+            "capture_runtime=0x0000000010005000 "
+            "rdi=0x0000000000001111 "
+            "rsi=0x0000000000002222 "
+            "rbp=0x0000000000003333 "
+            "rsp=0x0000000000004448 "
+            "process_prefix=000102030405060708090a0b0c0d0e0f "
+            "procparam_runtime=0x0000000000000000 "
+            "procparam_prefix=unavailable\n"
+        )
+        self.assertEqual(observed["api_procparam_runtime"], 0)
+        self.assertIsNone(observed["api_procparam_prefix"])
+
+    def test_unavailable_prefix_with_nonzero_pointer_is_rejected(self) -> None:
+        with self.assertRaisesRegex(AnalysisError, "null"):
+            parse_observation_line(
+                "ASTRAEA_ENTRY_V0 status=complete "
+                "capture_runtime=0x0000000010005000 "
+                "rdi=0x0000000000001111 "
+                "rsi=0x0000000000002222 "
+                "rbp=0x0000000000003333 "
+                "rsp=0x0000000000004448 "
+                "process_prefix=000102030405060708090a0b0c0d0e0f "
+                "procparam_runtime=0x0000000010007000 "
+                "procparam_prefix=unavailable"
+            )
+
     def test_duplicate_complete_log_record_is_rejected(self) -> None:
         line = (
             "ASTRAEA_ENTRY_V0 status=complete "
@@ -690,14 +747,14 @@ def main(argv: list[str] | None = None) -> int:
         api_procparam_runtime = int(
             entry_observation["api_procparam_runtime"]
         )
-        api_procparam_prefix = bytes(
-            entry_observation["api_procparam_prefix"]
+        raw_prefix = entry_observation["api_procparam_prefix"]
+        api_procparam_prefix = (
+            None if raw_prefix is None else bytes(raw_prefix)
         )
     else:
         required_observations = {
             "--capture-runtime": args.capture_runtime,
             "--api-procparam-runtime": args.api_procparam_runtime,
-            "--api-procparam-prefix": args.api_procparam_prefix,
         }
         missing = [
             name
@@ -714,10 +771,22 @@ def main(argv: list[str] | None = None) -> int:
         api_procparam_runtime = parse_u64(
             args.api_procparam_runtime, "api procparam runtime"
         )
-        api_procparam_prefix = parse_prefix(
-            args.api_procparam_prefix,
-            "api procparam prefix",
-        )
+        if api_procparam_runtime == 0:
+            if args.api_procparam_prefix not in (None, "unavailable"):
+                raise AnalysisError(
+                    "--api-procparam-prefix must be omitted or unavailable "
+                    "when the API return is null"
+                )
+            api_procparam_prefix = None
+        else:
+            if args.api_procparam_prefix is None:
+                raise AnalysisError(
+                    "missing required argument: --api-procparam-prefix"
+                )
+            api_procparam_prefix = parse_prefix(
+                args.api_procparam_prefix,
+                "api procparam prefix",
+            )
 
     intermediate = args.intermediate.read_bytes()
     final = args.final_elf.read_bytes()
