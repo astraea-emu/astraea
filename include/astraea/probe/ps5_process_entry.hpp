@@ -97,6 +97,12 @@ struct Ps5ProcessEntryProjectionDifference {
     Ps5ProcessEntryProjectionField field =
         Ps5ProcessEntryProjectionField::argc;
 
+    // Normalized structural values for the first differing field. Boolean
+    // states use 0/1. Optional FS/GS states use nullopt for "not captured",
+    // preserving the distinction between unknown and an observed zero base.
+    std::optional<std::uint64_t> first_value;
+    std::optional<std::uint64_t> second_value;
+
     auto operator<=>(const Ps5ProcessEntryProjectionDifference&) const =
         default;
 };
