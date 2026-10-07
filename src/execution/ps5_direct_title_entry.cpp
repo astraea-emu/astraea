@@ -127,6 +127,11 @@ assess_ps5_direct_title_entry_readiness(
             Ps5DirectTitleEntryBlocker::
                 initial_rsp_contract);
     }
+    if (!request.process_metadata_contract_established) {
+        add_blocker(
+            Ps5DirectTitleEntryBlocker::
+                process_metadata_contract);
+    }
     if (!request.primary_thread_tls_contract_established) {
         add_blocker(
             Ps5DirectTitleEntryBlocker::
