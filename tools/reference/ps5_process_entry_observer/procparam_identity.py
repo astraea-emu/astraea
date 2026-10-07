@@ -289,12 +289,78 @@ def parse_prefix(text: str) -> bytes:
     return value
 
 
+def parse_observation_line(line: str) -> dict[str, object]:
+    parts = line.strip().split()
+    if not parts or parts[0] != "ASTRAEA_ENTRY_V0":
+        raise AnalysisError("observation line does not start with ASTRAEA_ENTRY_V0")
+
+    fields: dict[str, str] = {}
+    for token in parts[1:]:
+        if "=" not in token:
+            raise AnalysisError(f"malformed observation token {token!r}")
+        key, value = token.split("=", 1)
+        if key in fields:
+            raise AnalysisError(f"duplicate observation field {key!r}")
+        fields[key] = value
+
+    if fields.get("status") != "complete":
+        raise AnalysisError("observation status is not complete")
+
+    required = (
+        "capture_runtime",
+        "rdi",
+        "rsi",
+        "rbp",
+        "rsp",
+        "process_prefix",
+        "procparam_runtime",
+        "procparam_prefix",
+    )
+    missing = [name for name in required if name not in fields]
+    if missing:
+        raise AnalysisError(
+            "observation is missing required fields: " + ", ".join(missing)
+        )
+
+    if fields["procparam_prefix"] == "unavailable":
+        raise AnalysisError("procparam prefix is unavailable")
+
+    return {
+        "capture_runtime": parse_u64(fields["capture_runtime"], "capture runtime"),
+        "rdi": parse_u64(fields["rdi"], "rdi"),
+        "rsi": parse_u64(fields["rsi"], "rsi"),
+        "rbp": parse_u64(fields["rbp"], "rbp"),
+        "rsp": parse_u64(fields["rsp"], "rsp"),
+        "process_prefix": parse_prefix(fields["process_prefix"]),
+        "api_procparam_runtime": parse_u64(
+            fields["procparam_runtime"], "api procparam runtime"
+        ),
+        "api_procparam_prefix": parse_prefix(fields["procparam_prefix"]),
+    }
+
+
+def parse_observation_log(text: str) -> dict[str, object]:
+    matches = [
+        line
+        for line in text.splitlines()
+        if line.strip().startswith("ASTRAEA_ENTRY_V0 ")
+    ]
+    complete = [line for line in matches if " status=complete" in line]
+    if not complete:
+        raise AnalysisError("log contains no complete ASTRAEA_ENTRY_V0 record")
+    if len(complete) != 1:
+        raise AnalysisError("log contains multiple complete ASTRAEA_ENTRY_V0 records")
+    return parse_observation_line(complete[0])
+
+
 def analyze(
     intermediate: bytes,
     final: bytes,
     capture_runtime: int,
     api_procparam_runtime: int,
     api_procparam_prefix: bytes,
+    *,
+    entry_observation: dict[str, object] | None = None,
 ) -> dict[str, object]:
     capture_link = find_defined_symbol(intermediate, ANCHOR_SYMBOL, "intermediate ELF")
     procparam, static_prefix = find_procparam(final, "final ELF")
@@ -306,7 +372,7 @@ def analyze(
         raise AnalysisError("runtime procparam address overflows u64")
     expected_runtime = load_bias + procparam.vaddr
 
-    return {
+    result: dict[str, object] = {
         "schema": "astraea.ps5.procparam-identity/v0",
         "capture_link_vaddr": f"0x{capture_link:016x}",
         "capture_runtime_address": f"0x{capture_runtime:016x}",
@@ -319,6 +385,17 @@ def analyze(
         "observed_prefix_hex": api_procparam_prefix.hex(),
         "prefix_match": api_procparam_prefix == static_prefix,
     }
+    if entry_observation is not None:
+        result["entry_observation"] = {
+            "rdi": f"0x{int(entry_observation['rdi']):016x}",
+            "rsi": f"0x{int(entry_observation['rsi']):016x}",
+            "rbp": f"0x{int(entry_observation['rbp']):016x}",
+            "rsp": f"0x{int(entry_observation['rsp']):016x}",
+            "process_prefix_hex": bytes(
+                entry_observation["process_prefix"]
+            ).hex(),
+        }
+    return result
 
 
 def _elf_header(*, phoff: int, phnum: int, shoff: int, shnum: int) -> bytearray:
@@ -492,6 +569,38 @@ class SelfTests(unittest.TestCase):
                 api_procparam_prefix=b"\0" * PREFIX_SIZE,
             )
 
+    def test_observation_log_parses_machine_record(self) -> None:
+        observed = parse_observation_log(
+            "noise before\\n"
+            "ASTRAEA_ENTRY_V0 status=complete "
+            "capture_runtime=0x0000000010005000 "
+            "rdi=0x0000000000001111 "
+            "rsi=0x0000000000002222 "
+            "rbp=0x0000000000003333 "
+            "rsp=0x0000000000004448 "
+            "process_prefix=000102030405060708090a0b0c0d0e0f "
+            "procparam_runtime=0x0000000010007000 "
+            "procparam_prefix=60000000000000004f52424900000000\\n"
+        )
+        self.assertEqual(observed["capture_runtime"], 0x10005000)
+        self.assertEqual(observed["rsi"], 0x2222)
+        self.assertEqual(observed["process_prefix"], bytes(range(16)))
+
+    def test_duplicate_complete_log_record_is_rejected(self) -> None:
+        line = (
+            "ASTRAEA_ENTRY_V0 status=complete "
+            "capture_runtime=0x0000000010005000 "
+            "rdi=0x0000000000001111 "
+            "rsi=0x0000000000002222 "
+            "rbp=0x0000000000003333 "
+            "rsp=0x0000000000004448 "
+            "process_prefix=000102030405060708090a0b0c0d0e0f "
+            "procparam_runtime=0x0000000010007000 "
+            "procparam_prefix=60000000000000004f52424900000000"
+        )
+        with self.assertRaisesRegex(AnalysisError, "multiple"):
+            parse_observation_log(line + "\\n" + line + "\\n")
+
     def test_malformed_elf_is_rejected(self) -> None:
         with self.assertRaisesRegex(AnalysisError, "bad ELF magic"):
             find_defined_symbol(b"not-an-elf" + b"\0" * 64, ANCHOR_SYMBOL, "bad")
@@ -504,6 +613,11 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--capture-runtime")
     parser.add_argument("--api-procparam-runtime")
     parser.add_argument("--api-procparam-prefix")
+    parser.add_argument(
+        "--log-file",
+        type=Path,
+        help="read capture/procparam observations from one emitted log record",
+    )
     parser.add_argument("--self-test", action="store_true")
     return parser
 
@@ -516,25 +630,73 @@ def main(argv: list[str] | None = None) -> int:
         result = unittest.TextTestRunner(verbosity=2).run(suite)
         return 0 if result.wasSuccessful() else 1
 
-    required = {
+    required_files = {
         "--intermediate": args.intermediate,
         "--final": args.final_elf,
-        "--capture-runtime": args.capture_runtime,
-        "--api-procparam-runtime": args.api_procparam_runtime,
-        "--api-procparam-prefix": args.api_procparam_prefix,
     }
-    missing = [name for name, value in required.items() if value is None]
-    if missing:
-        raise AnalysisError("missing required arguments: " + ", ".join(missing))
+    missing_files = [
+        name for name, value in required_files.items() if value is None
+    ]
+    if missing_files:
+        raise AnalysisError(
+            "missing required arguments: " + ", ".join(missing_files)
+        )
+
+    entry_observation = None
+    if args.log_file is not None:
+        manual = (
+            args.capture_runtime,
+            args.api_procparam_runtime,
+            args.api_procparam_prefix,
+        )
+        if any(value is not None for value in manual):
+            raise AnalysisError(
+                "--log-file cannot be combined with manual observation arguments"
+            )
+        entry_observation = parse_observation_log(
+            args.log_file.read_text(encoding="utf-8")
+        )
+        capture_runtime = int(entry_observation["capture_runtime"])
+        api_procparam_runtime = int(
+            entry_observation["api_procparam_runtime"]
+        )
+        api_procparam_prefix = bytes(
+            entry_observation["api_procparam_prefix"]
+        )
+    else:
+        required_observations = {
+            "--capture-runtime": args.capture_runtime,
+            "--api-procparam-runtime": args.api_procparam_runtime,
+            "--api-procparam-prefix": args.api_procparam_prefix,
+        }
+        missing = [
+            name
+            for name, value in required_observations.items()
+            if value is None
+        ]
+        if missing:
+            raise AnalysisError(
+                "missing required arguments: " + ", ".join(missing)
+            )
+        capture_runtime = parse_u64(
+            args.capture_runtime, "capture runtime"
+        )
+        api_procparam_runtime = parse_u64(
+            args.api_procparam_runtime, "api procparam runtime"
+        )
+        api_procparam_prefix = parse_prefix(
+            args.api_procparam_prefix
+        )
 
     intermediate = args.intermediate.read_bytes()
     final = args.final_elf.read_bytes()
     result = analyze(
         intermediate,
         final,
-        parse_u64(args.capture_runtime, "capture runtime"),
-        parse_u64(args.api_procparam_runtime, "api procparam runtime"),
-        parse_prefix(args.api_procparam_prefix),
+        capture_runtime,
+        api_procparam_runtime,
+        api_procparam_prefix,
+        entry_observation=entry_observation,
     )
     print(json.dumps(result, sort_keys=True, separators=(",", ":")))
     return 0
