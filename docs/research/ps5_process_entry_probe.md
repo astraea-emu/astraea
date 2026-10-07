@@ -69,6 +69,11 @@ addresses are stable.
 At least two consecutive same-case observations should have the same structural
 projection before a structural claim is promoted.
 
+The repeat comparator reports the first differing field plus both normalized
+values. Boolean states are reported as 0/1. For optional FS/GS observations,
+an unavailable capture remains absent rather than being collapsed into an
+observed zero.
+
 Structural equality is necessary, not sufficient, for an exact ABI rule.
 Review the raw observations and provenance before promoting:
 
