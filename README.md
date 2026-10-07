@@ -1,198 +1,168 @@
 # Astraea
 
-A verification-first PlayStation 5 compatibility research and emulation
-project.
+[![CI](https://github.com/astraea-emu/astraea/actions/workflows/ci.yml/badge.svg)](https://github.com/astraea-emu/astraea/actions/workflows/ci.yml)
 
-> **Status:** V0-V3 are complete for their bounded owned workloads. C0 retail
-> diagnostics are complete on Linux x86-64, and the independently corroborated
-> partial C1A direct-title startup prefix is now merged. Astraea still stops a
-> structurally ready PS5/SCE image at `unsupported_initial_process_abi` while
-> RSI teardown, exact initial RSP, process metadata, primary-thread TLS/TCB and
-> bootstrap ordering are resolved. Astraea does not claim that retail titles
-> boot, render, reach a menu, or are playable.
+**A verification-first, clean-room PlayStation 5 compatibility research emulator.**
 
-## Principles
+Astraea explores PS5 executable/runtime behavior, native x86-64 execution,
+AGC/RDNA2 graphics, and Vulkan translation with an evidence-first rule:
+unknown platform behavior stays explicit instead of becoming a compatibility
+guess.
 
-- Clean-room implementation: no proprietary Sony source code, firmware, keys,
-  SDK files, proprietary system modules, or copyrighted retail assets in this
-  repository.
-- Evidence before emulation: document public or controlled behavior before
-  encoding PS5-specific assumptions.
-- Guest semantics before host mapping: SCE/AGC/RDNA2 behavior remains separate
-  from Vulkan and other host APIs.
-- Native x86-64 execution where host architecture permits it; portable
-  subsystems remain host-independent. Native execution does not assume every
-  host implements the PS5 Zen 2 instruction surface identically—unsupported
-  host instructions are a separate patch/trap/emulation boundary when a real
-  workload requires it.
-- Verification-first development: structured traces, differential tests,
-  regression localization, fuzzing, sanitizers, and reproducible experiments.
-- Dependency-driven vertical integration: build the smallest real dependency
-  that advances the next end-to-end gate instead of maximizing isolated API or
-  opcode coverage.
-- Unknown behavior stays typed and explicit instead of becoming a plausible
-  fallback.
-- GitHub is the durable source of truth for architecture, status, decisions,
-  evidence, and handoffs.
+> **Research status:** Astraea is not yet a commercial-title emulator.
+> Linux x86-64 can safely admit a legally obtained executable to a supervised
+> diagnostic path, but a structurally ready title still stops before its first
+> retail instruction while the remaining PS5 process-entry state is established.
+
+Astraea is an independent project and is not affiliated with or endorsed by
+Sony Interactive Entertainment.
+
+## Current frontier
+
+| Area | State |
+| --- | --- |
+| Graphics V0-V3 | **Complete for bounded owned workloads** — AGC/RDNA2 input through typed guest GPU state to deterministic Vulkan execution/readback |
+| Retail C0 | **Complete on Linux x86-64** — supervised sealed-artifact diagnostic with typed first-boundary reporting |
+| Retail C1 | **Active** — corroborated startup-block prefix and process-entry observation validator are merged; RSI/RSP, procparam, TLS/TCB, and pre-entry bootstrap evidence remain |
+| Verification S0 | **Established** — multi-platform CI, ASan/UBSan, fuzz smoke, traces, probes, typed unsupported behavior, ADR/provenance discipline |
+| Commercial game boot/playability | **Not claimed** |
+
+The exact merged frontier and next dependency live in
+[`docs/STATUS.md`](docs/STATUS.md).
+
+## What exists today
+
+### Loader and execution
+
+- strict PS5/SCE ELF parsing and mapping validation;
+- dynamic metadata, symbol, relocation, import-identity, and TLS-template foundations;
+- controlled native x86-64 guest execution for Astraea-owned probes;
+- Linux and Windows owned native-execution/supervisor proofs;
+- typed HLE/import gate infrastructure;
+- a corroborated partial direct-title process-entry contract.
+
+### Supervised retail diagnostics
+
+Linux x86-64 has a production diagnostic path with:
+
+- separate controller and untrusted worker processes;
+- sealed artifact handoff instead of passing the original host pathname;
+- finite wall-clock and kernel resource ceilings;
+- pidfd-backed worker identity/signalling when available;
+- pre-kernel seccomp interception for guest-originated raw `SYSCALL`;
+- typed syscall/fault/diagnostic boundaries;
+- deterministic loader, dependency, relocation, TLS, and process-entry stops.
+
+A currently otherwise-ready image stops at
+`unsupported_initial_process_abi`. That is an intentional correctness
+boundary, not a boot failure hidden behind a success stub.
+
+### Graphics
+
+The bounded graphics path proves:
+
+```text
+AGC shader/container
+  -> generic RDNA2 decode
+  -> semantic Shader IR
+  -> compiler/value IR
+  -> Vulkan-valid SPIR-V
+
+submitted PM4/state/resources
+  -> typed guest GPU state
+  -> shader/resource resolution
+  -> real Vulkan raster/transfer execution
+  -> deterministic readback
+```
+
+This does **not** imply complete PM4, AGC, shader ISA, descriptors, tiling,
+resource tracking, synchronization, or presentation support.
 
 ## Architecture
 
-Astraea keeps guest-domain behavior separate from host implementation.
+Astraea keeps guest semantics separate from host implementation:
 
-1. **Guest image / process path** — SCE ELF/module parsing, mappings,
-   relocations, import identity, process-entry/TLS state, native x86-64
-   execution, and HLE platform services.
-2. **Supervised retail runtime** — controller/worker process boundary, sealed
-   artifact authority, typed protocol, guest syscall interception, faults,
-   time/resource limits, and deterministic diagnostic stops.
-3. **PS5 GPU frontend** — AGC shader containers/objects, command buffers,
-   register/state, guest resources, synchronization, and presentation state.
-4. **Shader semantics/compiler** — AMD-documented RDNA2 decoding, semantic
-   Shader IR and CFG, semantic-oracle execution for verified subsets, a
-   separate workload-driven compiler/value IR, then SPIR-V lowering.
-5. **Host GPU backend** — Vulkan resource/pipeline/synchronization
-   materialization from the guest GPU model. Vulkan is not the guest API.
-6. **Astraea Lab / Probe** — trace capture, normalization, first-divergence
-   analysis, controlled owned programs, and lawful reference-hardware
-   experiments when evidence requires them.
+1. **Guest image / process** — SCE ELF, mappings, relocations, imports, process-entry state, TLS and native x86-64 execution.
+2. **Supervised runtime** — worker isolation, syscall interception, faults, finite resource policy and typed stops.
+3. **PS5 GPU frontend** — AGC objects, PM4, registers, resources and synchronization.
+4. **Shader semantics** — AMD-documented RDNA2 decoding into a guest-semantic Shader IR.
+5. **Compiler/backend** — workload-driven compiler IR, SPIR-V and Vulkan.
+6. **Verification** — deterministic fixtures, trace/first-divergence tooling, AstraeaProbe, sanitizers, fuzzing and controlled hardware evidence.
 
-"Generic RDNA2" means AMD-defined ISA behavior shared by the hardware family.
-It is real emulator behavior, not placeholder data. PS5 AGC metadata and stage
-ABI remain separate Sony-specific evidence surfaces.
+The full architecture and gate definitions are in
+[`docs/PROJECT_PLAN.md`](docs/PROJECT_PLAN.md) and [`docs/adr/`](docs/adr/).
 
-## Development hosts
+## Roadmap
 
-Portable repository work targets macOS, Linux, and Windows.
+Astraea tracks three orthogonal axes:
 
-Native PS5 x86-64 guest execution targets x86-64 hosts. Linux x86-64 is the
-first platform admitted for arbitrary retail **diagnostics** because Astraea
-has a verified pre-kernel guest-syscall containment boundary there. Windows
-retains the owned synthetic native-execution/supervision proofs, but arbitrary
-retail native entry is not admitted there yet.
+- **V — graphics technology:** bounded graphics integration and controlled differential validation;
+- **C — compatibility:** diagnostic -> first retail instruction -> post-entry runtime closure -> boot -> headless frame -> presentation -> in-game/playable -> reference-guarded support;
+- **S — scalability/readiness:** first-divergence coverage, cross-title regression guards, architecture ratchets, measured performance, and eventual release quality.
 
-Vulkan is the first host graphics backend and SPIR-V is the first host shader
-module format. Semantic Shader IR remains backend-independent; compiler/value
-IR is introduced only when a real workload requires structured dataflow,
-stage I/O, resources, or other compiler concerns. See ADR 0007.
+The current critical path is **C1**. The software-side observation machinery is
+merged; the next load-bearing work is controlled process-entry evidence, not
+speculative HLE or GPU breadth.
 
-## Graphics integration gates
+See [`docs/README.md`](docs/README.md) for the documentation map.
 
-The bounded graphics path is now:
+## Build and test
 
-```text
-V0  AGC container -> RDNA2 -> semantic Shader IR             COMPLETE
- |
- v
-V1  owned guest -> persistent AGC shader identity             COMPLETE
- |
- v
-V2  supported semantic Shader IR -> validated SPIR-V          COMPLETE
- |
- v
-V3  submitted PM4/state/resources -> Vulkan -> exact result   COMPLETE
- |
- +--> V4 controlled PS5 differential when evidence requires it
- |
- `--> V5 guest flip/VideoOut -> host presentation             FUTURE
+Requirements include CMake 3.25+, a C++23 compiler, and the platform tools
+needed by the selected preset.
+
+Linux:
+
+```sh
+cmake --preset linux-dev
+cmake --build --preset linux-dev
+ctest --preset linux-dev
 ```
 
-V3 completion is deliberately bounded: it proves an owned submitted raster
-workload through decoded draw-time state, stage-qualified shader identity,
-typed guest image backing, generated SPIR-V, real Vulkan execution, and exact
-readback. It does **not** imply broad PS5 graphics compatibility.
+macOS:
 
-The remaining `sceAgcLinkShaders` tail in #191 is a separate evidence track;
-it is not guessed merely to make a title progress.
-
-## Retail compatibility gates
-
-Graphics gates and title-compatibility gates are orthogonal.
-
-```text
-C0  supervised production retail diagnostic                  COMPLETE (Linux x86-64)
-C1  evidenced PS5 process-entry ABI -> first retail instruction
-C2  runtime/bootstrap closure: modules, relocations, TLS, first HLE/syscall
-C3  deterministic title boot / sustained initialization
-C4  first real-title headless GPU submission / frame evidence
-C5  VideoOut/presentation -> visible boot or menu
-C6A in-game progression
-C6B playable defined route
-C6C reference-validated / regression-guarded support
+```sh
+bash scripts/bootstrap-macos.sh
+cmake --preset macos-dev
+cmake --build --preset macos-dev
+ctest --preset macos-dev
 ```
 
-The current critical path is **C1**, tracked by #300. Astraea already accepts a
-legally obtained user artifact as a bounded diagnostic input, but a
-structurally ready image intentionally stops before its first retail
-instruction until the initial PS5 process state is supported by sufficient
-evidence.
+Windows development uses the `windows-dev` CMake preset.
 
-A compatibility category is an integration observation, not a correctness
-oracle. Title-specific hacks do not replace missing guest semantics.
+CI gates every pull request on Linux x64, Windows x64, macOS ARM64, Linux
+ASan+UBSan, and Linux Clang fuzz smoke.
 
-## Current strategy
+### Linux retail diagnostic
 
-- Prefer direct-title diagnostics over making full firmware/VSH boot a
-  prerequisite.
-- Pull module/HLE/thread/TLS/GPU breadth from the first missing dependency
-  exposed by a real workload.
-- Select the first lawful retail target by **closure cost**, not prestige.
-- Preserve raw provenance so later evidence can correct interpretations without
-  recapturing inputs.
-- Keep targeted reference-hardware probes available when they are the shortest
-  way to resolve one PS5-specific blocker.
-- Add resource caches, scheduler breadth, compiler passes, and presentation
-  only when real title paths demand them rather than speculatively cloning
-  another emulator's feature list.
-- Track a third **S0-S5 scalability/readiness axis** so compatibility breadth
-  cannot silently outgrow coverage, regression protection, architecture,
-  performance discipline or release quality.
+On Linux x86-64, a locally built Astraea binary can inspect a legally obtained
+artifact through the supervised diagnostic boundary:
 
-## Scalability and readiness
-
-Astraea measures project scale separately from graphics and title milestones:
-
-```text
-S0  fail-visible verification/provenance                      ESTABLISHED
-S1  first-divergence + selected-workload coverage             START WITH REAL TITLE
-S2  lawful local cross-title route/regression corpus          GROW WITH VISIBLE STATES
-S3  architecture ratchets against compatibility debt          AS DEFECT CLASSES APPEAR
-S4  measured performance budgets                              AFTER REPRESENTATIVE 3D
-S5  release/user-quality readiness                            LATE
+```sh
+./out/build/linux-dev/astraea diagnose /path/to/artifact
 ```
 
-This is not a mandate to build all infrastructure now. ADR 0006 still applies:
-add the smallest scale mechanism when its failure mode becomes load-bearing.
+This is a diagnostic/research interface. It does not imply that the title will
+boot or that Astraea supports redistributed game content.
 
-See:
+## Clean-room boundary
 
-- `docs/PROJECT_PLAN.md`
-- `docs/STATUS.md`
-- `docs/adr/0010-supervised-retail-execution.md`
-- `docs/adr/0011-orthogonal-graphics-and-compatibility-gates.md`
-- `docs/adr/0012-scalability-and-release-readiness-gates.md`
-- `docs/research/architecture_review_2026-09-24.md`
-- `docs/research/ps5_initial_process_abi.md`
-- `docs/CHAT_HANDOFF.md`
+This repository does not include or request Sony source code, firmware, keys,
+proprietary SDK files, proprietary system modules, or retail game content.
 
-## Compatibility boundary
+PS5-specific behavior must be supported by public specifications, lawful
+interface information, independently authored tooling, or controlled
+observations with provenance. Comparative emulator implementations are useful
+for experiment design, but are not treated as hardware truth.
 
-The production Linux x86-64 diagnostic path is active. It is intentionally
-narrow:
+Read [`docs/CLEAN_ROOM.md`](docs/CLEAN_ROOM.md) before contributing
+PS5-specific behavior.
 
-- controller reads the user-selected host path;
-- worker receives sealed bytes, not the original path;
-- finite worker resource policy is installed before guest RUN;
-- guest-originated Linux syscalls are trapped before host-kernel execution;
-- filesystem/network behavior is not ambiently inherited;
-- typed loader/pre-entry/fault/syscall boundaries stop deterministically;
-- a currently otherwise-ready PS5/SCE image stops at
-  `unsupported_initial_process_abi`.
+## Contributing
 
-This is permission to **diagnose** legally obtained retail executables safely
-under Astraea's documented threat model. It is not a claim that Astraea can
-boot or play commercial PS5 games.
+Contributions should be small, testable, provenance-aware, and tied to a real
+dependency or invariant. See [`CONTRIBUTING.md`](CONTRIBUTING.md).
 
 ## License
 
-Astraea is licensed under the GNU General Public License v3.0 or later. See
-`LICENSE`.
+GNU General Public License v3.0 or later. See [`LICENSE`](LICENSE).
