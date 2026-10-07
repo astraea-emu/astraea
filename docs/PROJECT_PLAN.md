@@ -170,11 +170,14 @@ macOS, Linux, and Windows remain first-class for portable code and CI.
 The PS5 CPU is x86-64.
 
 - Linux x86-64: native owned probes plus production retail diagnostics.
-- Windows x86-64: owned native/supervisor proofs, but arbitrary retail
+- Windows x86-64: owned native/supervisor proofs exist, but arbitrary retail
   admission remains disabled until equivalent pre-kernel syscall containment
-  exists.
+  exists. #320 is the parity lane; concrete retail admission should begin from
+  a stable Linux C2/C3 workload unless an independent bounded containment proof
+  can land earlier without delaying C1.
 - Apple Silicon macOS: portable analysis/compiler/test host, not native PS5 CPU
-  execution.
+  execution. A future CPU-translation strategy would be a separate major
+  decision, not an implicit extension of the native backend.
 
 ### Graphics
 
