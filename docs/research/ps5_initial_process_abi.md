@@ -274,6 +274,12 @@ new PS5 constant or register value.
   block, teardown callback, and guest stack before calling a title entry.
   This converges on the broad ps5link RDI/RSI shape but is implementation
   behavior, not a real-loader observation.
+- Current `mattias800/prosper` directly enters the title with a SysV-style
+  initial vector, RDI pointing at that vector, RSI set to zero, and guest
+  FS/TCB activated before the jump. This is independent implementation
+  pressure, not controlled loader evidence; its success with real titles
+  demonstrates why compatibility alone cannot establish the exact hardware
+  entry contract.
 - Current Force67/prosperity instead models PS5 startup by entering libkernel
   first with a FreeBSD-like initial stack and a non-zero initial FS/TCB.
   Its firmware-derived TCB details are research clues, not Astraea constants.
