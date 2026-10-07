@@ -146,6 +146,7 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND
    CMAKE_SYSTEM_PROCESSOR MATCHES "^(x86_64|AMD64)$")
     target_sources(astraea_core_tests PRIVATE
         "${CMAKE_SOURCE_DIR}/tools/reference/ps5_process_entry_observer/entry.S"
+        "${CMAKE_SOURCE_DIR}/tools/reference/ps5_process_entry_observer/emit_observation.cpp"
         probe/ps5_process_entry_observer_harness.S
     )
 endif()
