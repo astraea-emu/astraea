@@ -166,6 +166,17 @@ emitter records `procparam_runtime=0` and `procparam_prefix=unavailable`;
 the analyzer preserves the null result and reports both identity checks false
 rather than treating the run as malformed.
 
+The analyzer also derives the same normalized C1A structural projection used
+by Astraea core from the frozen entry record:
+
+- argc;
+- argv[0] zero/non-zero;
+- RSI zero/non-zero;
+- RBP zero/non-zero;
+- RSP modulo 16.
+
+This lets each run produce one offline JSON containing both C1A and C1B facts.
+
 The analyzer reports, separately:
 
 - derived load bias;
