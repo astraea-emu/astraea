@@ -1,8 +1,15 @@
 # Retail execution supervisor research design
 
-**Status:** design candidate for C0 / ADR 0010  
+**Status:** implemented C0 design reference; production Linux diagnostic gate complete  
 **Date:** 2026-09-24  
 **Issue:** #206
+
+> **Current status:** The design below records how C0 was established. Linux
+> x86-64 now uses the supervised worker, sealed artifact handoff, resource
+> ceilings, typed fault/diagnostic protocol, and kernel-mediated pre-execution
+> syscall containment. Windows has the synthetic supervisor/syscall/fault
+> proofs but is not admitted for arbitrary retail code. The next blocker is
+> PS5 process-entry state (#300), not C0 containment.
 
 ## Purpose
 
@@ -407,7 +414,7 @@ The proof fails if:
   UD2` round trip.
 - **Existing trusted-probe backend preserved:** C0 adds a separate worker path;
   it does not remove the current in-process owned-probe path.
-- **Retail remains disabled until gate completion:** required by ADR 0010.
+- **Historical gate condition:** retail diagnostics remained disabled until ADR 0010/C0 completion. That Linux x86-64 diagnostic gate is now complete; retail native entry remains separately blocked on #300.
 
 ## Non-goals
 
