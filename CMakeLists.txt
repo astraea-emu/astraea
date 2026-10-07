@@ -103,6 +103,7 @@ add_library(astraea_core STATIC
     src/memory/mapping.cpp
     src/memory/initialized_image_view.cpp
     src/execution/context.cpp
+    src/execution/ps5_direct_title_entry.cpp
     src/execution/memory_plan.cpp
     src/execution/linux_memory.cpp
     src/execution/linux_execution.cpp

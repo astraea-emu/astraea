@@ -39,6 +39,7 @@ add_executable(astraea_core_tests
     memory/mapping_tests.cpp
     memory/initialized_image_view_tests.cpp
     execution/context_tests.cpp
+    execution/ps5_direct_title_entry_tests.cpp
     execution/memory_plan_tests.cpp
     execution/linux_memory_tests.cpp
     execution/linux_execution_tests.cpp
