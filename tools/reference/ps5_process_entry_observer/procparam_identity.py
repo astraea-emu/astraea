@@ -389,7 +389,9 @@ def analyze(
         "procparam_link_vaddr": f"0x{procparam.vaddr:016x}",
         "expected_procparam_runtime": f"0x{expected_runtime:016x}",
         "observed_procparam_runtime": f"0x{api_procparam_runtime:016x}",
+        "api_return_nonzero": api_procparam_runtime != 0,
         "pointer_match": api_procparam_runtime == expected_runtime,
+        "prefix_available": api_procparam_prefix is not None,
         "static_prefix_hex": static_prefix.hex(),
         "observed_prefix_hex": (
             None
@@ -403,8 +405,12 @@ def analyze(
         ),
     }
     if entry_observation is not None:
+        startup_rdi = int(entry_observation["rdi"])
+        result["startup_parameters_distinct_from_api_return"] = (
+            startup_rdi != api_procparam_runtime
+        )
         result["entry_observation"] = {
-            "rdi": f"0x{int(entry_observation['rdi']):016x}",
+            "rdi": f"0x{startup_rdi:016x}",
             "rsi": f"0x{int(entry_observation['rsi']):016x}",
             "rbp": f"0x{int(entry_observation['rbp']):016x}",
             "rsp": f"0x{int(entry_observation['rsp']):016x}",
@@ -529,7 +535,9 @@ class SelfTests(unittest.TestCase):
             api_procparam_runtime=0x10007000,
             api_procparam_prefix=static_prefix,
         )
+        self.assertTrue(result["api_return_nonzero"])
         self.assertTrue(result["pointer_match"])
+        self.assertTrue(result["prefix_available"])
         self.assertTrue(result["prefix_match"])
         self.assertEqual(result["load_bias"], "0x0000000010000000")
 
@@ -626,6 +634,9 @@ class SelfTests(unittest.TestCase):
         )
         self.assertTrue(result["pointer_match"])
         self.assertTrue(result["prefix_match"])
+        self.assertTrue(
+            result["startup_parameters_distinct_from_api_return"]
+        )
         self.assertEqual(
             result["entry_observation"]["rsp"],
             "0x0000000000004448",
@@ -640,7 +651,9 @@ class SelfTests(unittest.TestCase):
             api_procparam_runtime=0,
             api_procparam_prefix=None,
         )
+        self.assertFalse(result["api_return_nonzero"])
         self.assertFalse(result["pointer_match"])
+        self.assertFalse(result["prefix_available"])
         self.assertFalse(result["prefix_match"])
         self.assertIsNone(result["observed_prefix_hex"])
 
