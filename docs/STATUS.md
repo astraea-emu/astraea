@@ -97,6 +97,21 @@ Promote it in layers rather than as one guessed ABI:
 Only the subset required by the selected diagnostic workload should be
 implemented. Unknown fields remain unsupported.
 
+## 2026-10-07 re-entry review
+
+A fresh comparison against current KytyPS5, Prosperity, SharpEmu and
+ps5link/SharpProspero work did not invalidate Astraea's architecture and did
+not provide enough independent loader evidence to enable retail entry.
+
+The important refinement is that C1 must distinguish **bootstrap entry** from
+the later **title entry**. Current public implementations do not agree on
+where execution begins: one lineage synthesizes the title RDI/RSI envelope,
+while another current PS5 implementation enters libkernel first with an
+initial stack and FS/TCB state. These are comparative implementations, not
+permission to guess either contract.
+
+See `docs/research/scene_review_2026-10-07.md`. The critical path remains #300.
+
 ## After C1
 
 The first real title, not a speculative feature checklist, determines the next
