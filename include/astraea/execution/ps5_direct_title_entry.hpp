@@ -79,6 +79,7 @@ validate_ps5_direct_title_entry_prefix(
 enum class Ps5DirectTitleEntryBlocker {
     loader_teardown_contract,
     initial_rsp_contract,
+    process_metadata_contract,
     primary_thread_tls_contract,
     bootstrap_contract,
 };
@@ -86,6 +87,7 @@ enum class Ps5DirectTitleEntryBlocker {
 struct Ps5DirectTitleEntryReadinessRequest {
     bool loader_teardown_contract_established = false;
     bool initial_rsp_contract_established = false;
+    bool process_metadata_contract_established = false;
     bool primary_thread_tls_contract_established = false;
     bool bootstrap_contract_established = false;
 
@@ -94,7 +96,7 @@ struct Ps5DirectTitleEntryReadinessRequest {
 };
 
 struct Ps5DirectTitleEntryReadiness {
-    std::array<Ps5DirectTitleEntryBlocker, 4> blockers{};
+    std::array<Ps5DirectTitleEntryBlocker, 5> blockers{};
     std::size_t blocker_count = 0;
 
     [[nodiscard]] bool ready() const noexcept {
