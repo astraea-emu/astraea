@@ -35,6 +35,58 @@ artifact_profile_error_name(
 
 }  // namespace
 
+void write_retail_closure_profile(
+    std::ostream& output,
+    const astraea::execution::
+        RetailStaticClosureProfile& profile) {
+    output
+        << "Astraea retail closure profile\n"
+        << "program_headers="
+        << profile.program_header_count << "\n"
+        << "load_segments="
+        << profile.load_segment_count << "\n"
+        << "load_memory_bytes="
+        << profile.load_memory_bytes << "\n"
+        << "executable_load_segments="
+        << profile.executable_load_segment_count << "\n"
+        << "executable_load_memory_bytes="
+        << profile.executable_load_memory_bytes << "\n"
+        << "generic_needed="
+        << profile.generic_needed_count << "\n"
+        << "sce_needed_modules="
+        << profile.sce_needed_module_count << "\n"
+        << "sce_import_libraries="
+        << profile.sce_import_library_count << "\n"
+        << "sce_unknown_dynamic_records="
+        << profile.sce_unknown_dynamic_record_count << "\n"
+        << "dynamic_symbols=";
+
+    if (profile.dynamic_symbol_count.has_value()) {
+        output << profile.dynamic_symbol_count.value();
+    } else {
+        output << "unavailable";
+    }
+
+    output
+        << "\n"
+        << "rel_relocations="
+        << profile.rel_relocation_count << "\n"
+        << "rela_relocations="
+        << profile.rela_relocation_count << "\n"
+        << "plt_relocations="
+        << profile.plt_relocation_count << "\n"
+        << "total_relocations="
+        << profile.total_relocation_count << "\n"
+        << "tls_present="
+        << (profile.tls_present ? 1 : 0) << "\n"
+        << "tls_initialized_bytes="
+        << profile.tls_initialized_bytes << "\n"
+        << "tls_total_bytes="
+        << profile.tls_total_bytes << "\n"
+        << "tls_alignment="
+        << profile.tls_alignment << "\n";
+}
+
 int run_retail_closure_profile(
     std::string_view artifact_path) {
     auto artifact =
@@ -88,54 +140,9 @@ int run_retail_closure_profile(
         return 4;
     }
 
-    const auto& profile = profiled.value();
-    std::cout
-        << "Astraea retail closure profile\n"
-        << "program_headers="
-        << profile.program_header_count << "\n"
-        << "load_segments="
-        << profile.load_segment_count << "\n"
-        << "load_memory_bytes="
-        << profile.load_memory_bytes << "\n"
-        << "executable_load_segments="
-        << profile.executable_load_segment_count << "\n"
-        << "executable_load_memory_bytes="
-        << profile.executable_load_memory_bytes << "\n"
-        << "generic_needed="
-        << profile.generic_needed_count << "\n"
-        << "sce_needed_modules="
-        << profile.sce_needed_module_count << "\n"
-        << "sce_import_libraries="
-        << profile.sce_import_library_count << "\n"
-        << "sce_unknown_dynamic_records="
-        << profile.sce_unknown_dynamic_record_count << "\n"
-        << "dynamic_symbols=";
-
-    if (profile.dynamic_symbol_count.has_value()) {
-        std::cout << profile.dynamic_symbol_count.value();
-    } else {
-        std::cout << "unavailable";
-    }
-
-    std::cout
-        << "\n"
-        << "rel_relocations="
-        << profile.rel_relocation_count << "\n"
-        << "rela_relocations="
-        << profile.rela_relocation_count << "\n"
-        << "plt_relocations="
-        << profile.plt_relocation_count << "\n"
-        << "total_relocations="
-        << profile.total_relocation_count << "\n"
-        << "tls_present="
-        << (profile.tls_present ? 1 : 0) << "\n"
-        << "tls_initialized_bytes="
-        << profile.tls_initialized_bytes << "\n"
-        << "tls_total_bytes="
-        << profile.tls_total_bytes << "\n"
-        << "tls_alignment="
-        << profile.tls_alignment << "\n";
-
+    write_retail_closure_profile(
+        std::cout,
+        profiled.value());
     return 0;
 }
 
