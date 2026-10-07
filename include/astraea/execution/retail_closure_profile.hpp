@@ -87,9 +87,6 @@ struct RetailStaticClosureArtifactError {
         guest_image_error;
     std::optional<RetailStaticClosureProfileError>
         profile_error;
-
-    auto operator<=>(const RetailStaticClosureArtifactError&) const =
-        default;
 };
 
 using RetailStaticClosureArtifactResult =
