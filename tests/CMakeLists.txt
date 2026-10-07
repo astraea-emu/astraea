@@ -78,6 +78,7 @@ add_executable(astraea_core_tests
     probe/hello_tests.cpp
     probe/reference_tests.cpp
     probe/agc_link_shaders_tail_tests.cpp
+    probe/ps5_process_entry_tests.cpp
     graphics/agc_shader_binary_tests.cpp
     graphics/agc_shader_container_tests.cpp
     graphics/packet_tests.cpp
