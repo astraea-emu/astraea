@@ -3,13 +3,42 @@
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
+#include <span>
 #include <limits>
+#include <string>
+#include <utility>
 
 namespace astraea::execution {
 namespace {
 
 constexpr std::uint32_t kPtLoad = 1U;
 constexpr std::uint32_t kPfExecute = 0x1U;
+
+[[nodiscard]] bool overlaps_load_segment(
+    astraea::memory::GuestRange candidate,
+    const astraea::loader::ElfImage& elf) noexcept {
+    constexpr std::uint32_t kPtLoadLocal = 1U;
+
+    for (const auto& header : elf.program_headers) {
+        if (header.type != kPtLoadLocal ||
+            header.memory_size == 0U) {
+            continue;
+        }
+
+        const auto range =
+            astraea::memory::GuestRange::create(
+                astraea::memory::GuestAddress{
+                    header.virtual_address},
+                astraea::memory::GuestSize{
+                    header.memory_size});
+        if (!range.has_value() ||
+            candidate.overlaps(range.value())) {
+            return true;
+        }
+    }
+    return false;
+}
+
 
 [[nodiscard]] constexpr std::uint64_t saturating_add(
     std::uint64_t lhs,
@@ -51,6 +80,108 @@ constexpr std::uint32_t kPfExecute = 0x1U;
 }
 
 }  // namespace
+
+std::optional<astraea::memory::GuestRange>
+choose_retail_analysis_stack(
+    std::span<const std::byte> artifact) noexcept {
+    const auto parsed =
+        astraea::loader::parse_elf64(
+            artifact,
+            astraea::loader::ElfParseProfile::ps5_sce);
+
+    for (std::size_t index = 0U;
+         index < kRetailAnalysisStackCandidateCount;
+         ++index) {
+        const auto delta =
+            static_cast<std::uint64_t>(index) *
+            kRetailAnalysisStackStride;
+        if (delta > kRetailAnalysisStackFirstBase) {
+            break;
+        }
+
+        const auto candidate =
+            astraea::memory::GuestRange::create(
+                astraea::memory::GuestAddress{
+                    kRetailAnalysisStackFirstBase - delta},
+                astraea::memory::GuestSize{
+                    kRetailAnalysisStackSize});
+        if (!candidate.has_value()) {
+            continue;
+        }
+
+        // Preserve the eventual GuestImage parser error for malformed input.
+        if (!parsed.has_value() ||
+            !overlaps_load_segment(
+                candidate.value(),
+                parsed.value())) {
+            return candidate.value();
+        }
+    }
+
+    return std::nullopt;
+}
+
+RetailStaticClosureArtifactResult
+profile_retail_artifact(
+    std::vector<std::byte> artifact_bytes) {
+    const auto stack =
+        choose_retail_analysis_stack(
+            artifact_bytes);
+    if (!stack.has_value()) {
+        return RetailStaticClosureArtifactResult::failure(
+            RetailStaticClosureArtifactError{
+                .code =
+                    RetailStaticClosureArtifactErrorCode::
+                        planning_stack_unavailable,
+            });
+    }
+
+    auto image =
+        astraea::loader::build_guest_image(
+            astraea::loader::GuestImageRequest{
+                .image_bytes =
+                    std::move(artifact_bytes),
+                .initial_stack =
+                    astraea::loader::InitialStackRequest{
+                        .storage = stack.value(),
+                        .arguments = {
+                            "astraea-retail-profile",
+                        },
+                        .environment = {},
+                        .auxiliary_vector = {},
+                    },
+                .elf_profile =
+                    astraea::loader::ElfParseProfile::
+                        ps5_sce,
+            });
+
+    if (!image.has_value()) {
+        return RetailStaticClosureArtifactResult::failure(
+            RetailStaticClosureArtifactError{
+                .code =
+                    RetailStaticClosureArtifactErrorCode::
+                        guest_image_failure,
+                .guest_image_error =
+                    std::move(image.error()),
+            });
+    }
+
+    const auto profile =
+        profile_retail_guest_image(
+            image.value());
+    if (!profile.has_value()) {
+        return RetailStaticClosureArtifactResult::failure(
+            RetailStaticClosureArtifactError{
+                .code =
+                    RetailStaticClosureArtifactErrorCode::
+                        profile_failure,
+                .profile_error = profile.error(),
+            });
+    }
+
+    return RetailStaticClosureArtifactResult::success(
+        profile.value());
+}
 
 RetailStaticClosureProfileResult
 profile_retail_guest_image(
