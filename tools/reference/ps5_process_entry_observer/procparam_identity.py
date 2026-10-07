@@ -22,6 +22,7 @@ ELFCLASS64 = 2
 ELFDATA2LSB = 1
 EM_X86_64 = 0x3E
 SHT_SYMTAB = 2
+PT_LOAD = 1
 PT_SCE_PROCPARAM = 0x61000001
 ANCHOR_SYMBOL = "astraea_ps5_entry_capture_v0"
 U64_MAX = (1 << 64) - 1
@@ -209,6 +210,55 @@ def find_defined_symbol(data: bytes, symbol: str, label: str) -> int:
     return matches[0]
 
 
+def mapped_loads(data: bytes, label: str) -> list[ProgramHeader]:
+    header = _parse_elf_header(data, label)
+    result: list[ProgramHeader] = []
+
+    for index in range(header.phnum):
+        at = header.phoff + index * header.phentsize
+        (
+            program_type,
+            _flags,
+            offset,
+            vaddr,
+            _paddr,
+            filesz,
+            memsz,
+            _align,
+        ) = _unpack_from("<IIQQQQQQ", data, at, f"{label} program header {index}")
+        if program_type != PT_LOAD or memsz == 0:
+            continue
+        if vaddr > U64_MAX - (memsz - 1):
+            raise AnalysisError(f"{label}: PT_LOAD {index} virtual range overflows u64")
+        result.append(
+            ProgramHeader(
+                program_type=program_type,
+                offset=offset,
+                vaddr=vaddr,
+                filesz=filesz,
+                memsz=memsz,
+            )
+        )
+
+    return result
+
+
+def require_unique_mapped_address(
+    loads: list[ProgramHeader],
+    address: int,
+    label: str,
+) -> None:
+    matches = [
+        load
+        for load in loads
+        if load.vaddr <= address < load.vaddr + load.memsz
+    ]
+    if not matches:
+        raise AnalysisError(f"{label}: address is not inside a mapped PT_LOAD")
+    if len(matches) != 1:
+        raise AnalysisError(f"{label}: address is inside overlapping PT_LOAD ranges")
+
+
 def find_procparam(data: bytes, label: str) -> tuple[ProgramHeader, bytes]:
     header = _parse_elf_header(data, label)
     matches: list[ProgramHeader] = []
@@ -322,8 +372,19 @@ def parse_observation_line(line: str) -> dict[str, object]:
             "observation is missing required fields: " + ", ".join(missing)
         )
 
+    procparam_runtime = parse_u64(
+        fields["procparam_runtime"], "api procparam runtime"
+    )
     if fields["procparam_prefix"] == "unavailable":
-        raise AnalysisError("procparam prefix is unavailable")
+        if procparam_runtime != 0:
+            raise AnalysisError(
+                "procparam prefix may be unavailable only when the API return is null"
+            )
+        procparam_prefix = None
+    else:
+        procparam_prefix = parse_prefix(
+            fields["procparam_prefix"], "api procparam prefix"
+        )
 
     return {
         "capture_runtime": parse_u64(fields["capture_runtime"], "capture runtime"),
@@ -332,12 +393,8 @@ def parse_observation_line(line: str) -> dict[str, object]:
         "rbp": parse_u64(fields["rbp"], "rbp"),
         "rsp": parse_u64(fields["rsp"], "rsp"),
         "process_prefix": parse_prefix(fields["process_prefix"], "process prefix"),
-        "api_procparam_runtime": parse_u64(
-            fields["procparam_runtime"], "api procparam runtime"
-        ),
-        "api_procparam_prefix": parse_prefix(
-            fields["procparam_prefix"], "api procparam prefix"
-        ),
+        "api_procparam_runtime": procparam_runtime,
+        "api_procparam_prefix": procparam_prefix,
     }
 
 
@@ -360,12 +417,23 @@ def analyze(
     final: bytes,
     capture_runtime: int,
     api_procparam_runtime: int,
-    api_procparam_prefix: bytes,
+    api_procparam_prefix: bytes | None,
     *,
     entry_observation: dict[str, object] | None = None,
 ) -> dict[str, object]:
     capture_link = find_defined_symbol(intermediate, ANCHOR_SYMBOL, "intermediate ELF")
     procparam, static_prefix = find_procparam(final, "final ELF")
+    loads = mapped_loads(final, "final ELF")
+    require_unique_mapped_address(
+        loads,
+        capture_link,
+        "final ELF observer anchor",
+    )
+    require_unique_mapped_address(
+        loads,
+        procparam.vaddr,
+        "final ELF PT_SCE_PROCPARAM",
+    )
 
     if capture_runtime < capture_link:
         raise AnalysisError("observed capture runtime address is below its link-time address")
@@ -382,22 +450,105 @@ def analyze(
         "procparam_link_vaddr": f"0x{procparam.vaddr:016x}",
         "expected_procparam_runtime": f"0x{expected_runtime:016x}",
         "observed_procparam_runtime": f"0x{api_procparam_runtime:016x}",
+        "api_return_nonzero": api_procparam_runtime != 0,
         "pointer_match": api_procparam_runtime == expected_runtime,
+        "prefix_available": api_procparam_prefix is not None,
         "static_prefix_hex": static_prefix.hex(),
-        "observed_prefix_hex": api_procparam_prefix.hex(),
-        "prefix_match": api_procparam_prefix == static_prefix,
+        "observed_prefix_hex": (
+            None
+            if api_procparam_prefix is None
+            else api_procparam_prefix.hex()
+        ),
+        "prefix_match": (
+            False
+            if api_procparam_prefix is None
+            else api_procparam_prefix == static_prefix
+        ),
     }
     if entry_observation is not None:
+        startup_rdi = int(entry_observation["rdi"])
+        process_prefix = bytes(entry_observation["process_prefix"])
+        argc = int.from_bytes(process_prefix[0:4], "little")
+        argv0 = int.from_bytes(process_prefix[8:16], "little")
+        result["startup_parameters_distinct_from_api_return"] = (
+            startup_rdi != api_procparam_runtime
+        )
+        result["entry_projection"] = {
+            "argc": argc,
+            "argv0_nonzero": argv0 != 0,
+            "rsi_nonzero": int(entry_observation["rsi"]) != 0,
+            "rbp_zero": int(entry_observation["rbp"]) == 0,
+            "rsp_mod16": int(entry_observation["rsp"]) & 0xF,
+        }
         result["entry_observation"] = {
-            "rdi": f"0x{int(entry_observation['rdi']):016x}",
+            "rdi": f"0x{startup_rdi:016x}",
             "rsi": f"0x{int(entry_observation['rsi']):016x}",
             "rbp": f"0x{int(entry_observation['rbp']):016x}",
             "rsp": f"0x{int(entry_observation['rsp']):016x}",
-            "process_prefix_hex": bytes(
-                entry_observation["process_prefix"]
-            ).hex(),
+            "process_prefix_hex": process_prefix.hex(),
         }
     return result
+
+
+def structural_projection(result: dict[str, object]) -> dict[str, object]:
+    entry = result.get("entry_projection")
+    if not isinstance(entry, dict):
+        raise AnalysisError("result does not contain an entry projection")
+    if "startup_parameters_distinct_from_api_return" not in result:
+        raise AnalysisError("result does not contain startup/procparam separation")
+
+    return {
+        "argc": entry["argc"],
+        "argv0_nonzero": entry["argv0_nonzero"],
+        "rsi_nonzero": entry["rsi_nonzero"],
+        "rbp_zero": entry["rbp_zero"],
+        "rsp_mod16": entry["rsp_mod16"],
+        "api_return_nonzero": result["api_return_nonzero"],
+        "pointer_match": result["pointer_match"],
+        "prefix_available": result["prefix_available"],
+        "prefix_match": result["prefix_match"],
+        "startup_parameters_distinct_from_api_return":
+            result["startup_parameters_distinct_from_api_return"],
+    }
+
+
+def compare_structural_results(
+    first: dict[str, object],
+    second: dict[str, object],
+) -> dict[str, object]:
+    first_projection = structural_projection(first)
+    second_projection = structural_projection(second)
+
+    order = (
+        "argc",
+        "argv0_nonzero",
+        "rsi_nonzero",
+        "rbp_zero",
+        "rsp_mod16",
+        "api_return_nonzero",
+        "pointer_match",
+        "prefix_available",
+        "prefix_match",
+        "startup_parameters_distinct_from_api_return",
+    )
+
+    difference = None
+    for field in order:
+        if first_projection[field] != second_projection[field]:
+            difference = {
+                "field": field,
+                "first": first_projection[field],
+                "second": second_projection[field],
+            }
+            break
+
+    return {
+        "schema": "astraea.ps5.process-entry-repeat/v0",
+        "equivalent": difference is None,
+        "first_difference": difference,
+        "first_projection": first_projection,
+        "second_projection": second_projection,
+    }
 
 
 def _elf_header(*, phoff: int, phnum: int, shoff: int, shnum: int) -> bytearray:
@@ -471,8 +622,17 @@ def _synthetic_intermediate(*, duplicate_symbol: bool = False) -> bytes:
     return bytes(data)
 
 
-def _synthetic_final(*, duplicate_procparam: bool = False, corrupt_magic: bool = False) -> bytes:
-    phnum = 2 if duplicate_procparam else 1
+def _synthetic_final(
+    *,
+    duplicate_procparam: bool = False,
+    corrupt_magic: bool = False,
+    omit_load: bool = False,
+    overlap_load: bool = False,
+    procparam_unmapped: bool = False,
+) -> bytes:
+    procparam_count = 2 if duplicate_procparam else 1
+    load_count = 0 if omit_load else (2 if overlap_load else 1)
+    phnum = load_count + procparam_count
     phoff = 0x40
     payload_offset = 0x180
     second_offset = 0x200
@@ -480,11 +640,43 @@ def _synthetic_final(*, duplicate_procparam: bool = False, corrupt_magic: bool =
     data = _elf_header(phoff=phoff, phnum=phnum, shoff=0, shnum=0)
     data.extend(b"\0" * (total - len(data)))
 
-    def write_header(index: int, offset: int, vaddr: int) -> None:
+    index = 0
+    if not omit_load:
         struct.pack_into(
             "<IIQQQQQQ",
             data,
             phoff + index * 0x38,
+            PT_LOAD,
+            6,
+            0x100,
+            0x4000,
+            0x4000,
+            0x100,
+            0x2000 if procparam_unmapped else 0x5000,
+            0x1000,
+        )
+        index += 1
+        if overlap_load:
+            struct.pack_into(
+                "<IIQQQQQQ",
+                data,
+                phoff + index * 0x38,
+                PT_LOAD,
+                4,
+                0x120,
+                0x4800,
+                0x4800,
+                0x80,
+                0x2000,
+                0x1000,
+            )
+            index += 1
+
+    def write_procparam(header_index: int, offset: int, vaddr: int) -> None:
+        struct.pack_into(
+            "<IIQQQQQQ",
+            data,
+            phoff + header_index * 0x38,
             PT_SCE_PROCPARAM,
             4,
             offset,
@@ -497,9 +689,9 @@ def _synthetic_final(*, duplicate_procparam: bool = False, corrupt_magic: bool =
         struct.pack_into("<Q", data, offset, 0x60)
         data[offset + 8 : offset + 12] = b"NOPE" if corrupt_magic else b"ORBI"
 
-    write_header(0, payload_offset, 0x7000)
+    write_procparam(index, payload_offset, 0x7000)
     if duplicate_procparam:
-        write_header(1, second_offset, 0x8000)
+        write_procparam(index + 1, second_offset, 0x8000)
     return bytes(data)
 
 
@@ -514,7 +706,9 @@ class SelfTests(unittest.TestCase):
             api_procparam_runtime=0x10007000,
             api_procparam_prefix=static_prefix,
         )
+        self.assertTrue(result["api_return_nonzero"])
         self.assertTrue(result["pointer_match"])
+        self.assertTrue(result["prefix_available"])
         self.assertTrue(result["prefix_match"])
         self.assertEqual(result["load_bias"], "0x0000000010000000")
 
@@ -573,7 +767,7 @@ class SelfTests(unittest.TestCase):
 
     def test_observation_log_parses_machine_record(self) -> None:
         observed = parse_observation_log(
-            "noise before\\n"
+            "noise before\n"
             "ASTRAEA_ENTRY_V0 status=complete "
             "capture_runtime=0x0000000010005000 "
             "rdi=0x0000000000001111 "
@@ -582,7 +776,7 @@ class SelfTests(unittest.TestCase):
             "rsp=0x0000000000004448 "
             "process_prefix=000102030405060708090a0b0c0d0e0f "
             "procparam_runtime=0x0000000010007000 "
-            "procparam_prefix=60000000000000004f52424900000000\\n"
+            "procparam_prefix=60000000000000004f52424900000000\n"
         )
         self.assertEqual(observed["capture_runtime"], 0x10005000)
         self.assertEqual(observed["rsi"], 0x2222)
@@ -599,7 +793,7 @@ class SelfTests(unittest.TestCase):
             "rsp=0x0000000000004448 "
             "process_prefix=000102030405060708090a0b0c0d0e0f "
             "procparam_runtime=0x0000000010007000 "
-            "procparam_prefix=60000000000000004f52424900000000\\n"
+            "procparam_prefix=60000000000000004f52424900000000\n"
         )
         result = analyze(
             _synthetic_intermediate(),
@@ -611,10 +805,67 @@ class SelfTests(unittest.TestCase):
         )
         self.assertTrue(result["pointer_match"])
         self.assertTrue(result["prefix_match"])
+        self.assertTrue(
+            result["startup_parameters_distinct_from_api_return"]
+        )
+        self.assertEqual(
+            result["entry_projection"],
+            {
+                "argc": 0x03020100,
+                "argv0_nonzero": True,
+                "rsi_nonzero": True,
+                "rbp_zero": False,
+                "rsp_mod16": 8,
+            },
+        )
         self.assertEqual(
             result["entry_observation"]["rsp"],
             "0x0000000000004448",
         )
+
+    def test_null_procparam_return_is_preserved_as_observation(self) -> None:
+        final = _synthetic_final()
+        result = analyze(
+            _synthetic_intermediate(),
+            final,
+            capture_runtime=0x10005000,
+            api_procparam_runtime=0,
+            api_procparam_prefix=None,
+        )
+        self.assertFalse(result["api_return_nonzero"])
+        self.assertFalse(result["pointer_match"])
+        self.assertFalse(result["prefix_available"])
+        self.assertFalse(result["prefix_match"])
+        self.assertIsNone(result["observed_prefix_hex"])
+
+    def test_null_procparam_log_record_is_preserved(self) -> None:
+        observed = parse_observation_log(
+            "ASTRAEA_ENTRY_V0 status=complete "
+            "capture_runtime=0x0000000010005000 "
+            "rdi=0x0000000000001111 "
+            "rsi=0x0000000000002222 "
+            "rbp=0x0000000000003333 "
+            "rsp=0x0000000000004448 "
+            "process_prefix=000102030405060708090a0b0c0d0e0f "
+            "procparam_runtime=0x0000000000000000 "
+            "procparam_prefix=unavailable\n"
+        )
+        self.assertEqual(observed["api_procparam_runtime"], 0)
+        self.assertIsNone(observed["api_procparam_prefix"])
+
+    def test_unavailable_prefix_with_nonzero_pointer_is_rejected(self) -> None:
+        with self.assertRaisesRegex(AnalysisError, "null"):
+            parse_observation_line(
+                "ASTRAEA_ENTRY_V0 status=complete "
+                "capture_runtime=0x0000000010005000 "
+                "rdi=0x0000000000001111 "
+                "rsi=0x0000000000002222 "
+                "rbp=0x0000000000003333 "
+                "rsp=0x0000000000004448 "
+                "process_prefix=000102030405060708090a0b0c0d0e0f "
+                "procparam_runtime=0x0000000010007000 "
+                "procparam_prefix=unavailable"
+            )
 
     def test_duplicate_complete_log_record_is_rejected(self) -> None:
         line = (
@@ -629,7 +880,95 @@ class SelfTests(unittest.TestCase):
             "procparam_prefix=60000000000000004f52424900000000"
         )
         with self.assertRaisesRegex(AnalysisError, "multiple"):
-            parse_observation_log(line + "\\n" + line + "\\n")
+            parse_observation_log(line + "\n" + line + "\n")
+
+    def test_final_anchor_must_be_mapped(self) -> None:
+        with self.assertRaisesRegex(AnalysisError, "observer anchor"):
+            analyze(
+                _synthetic_intermediate(),
+                _synthetic_final(omit_load=True),
+                capture_runtime=0x10005000,
+                api_procparam_runtime=0x10007000,
+                api_procparam_prefix=b"\0" * PREFIX_SIZE,
+            )
+
+    def test_overlapping_final_loads_are_rejected(self) -> None:
+        with self.assertRaisesRegex(AnalysisError, "overlapping PT_LOAD"):
+            analyze(
+                _synthetic_intermediate(),
+                _synthetic_final(overlap_load=True),
+                capture_runtime=0x10005000,
+                api_procparam_runtime=0x10007000,
+                api_procparam_prefix=b"\0" * PREFIX_SIZE,
+            )
+
+    def test_final_procparam_must_be_mapped(self) -> None:
+        with self.assertRaisesRegex(AnalysisError, "PT_SCE_PROCPARAM"):
+            analyze(
+                _synthetic_intermediate(),
+                _synthetic_final(procparam_unmapped=True),
+                capture_runtime=0x10005000,
+                api_procparam_runtime=0x10007000,
+                api_procparam_prefix=b"\0" * PREFIX_SIZE,
+            )
+
+    def test_repeat_comparison_ignores_aslr_sensitive_addresses(self) -> None:
+        first = analyze(
+            _synthetic_intermediate(),
+            _synthetic_final(),
+            capture_runtime=0x10005000,
+            api_procparam_runtime=0x10007000,
+            api_procparam_prefix=_synthetic_final()[0x180 : 0x190],
+            entry_observation={
+                "rdi": 0x10001111,
+                "rsi": 0x10002222,
+                "rbp": 0,
+                "rsp": 0x10004448,
+                "process_prefix": bytes(range(16)),
+            },
+        )
+        second = analyze(
+            _synthetic_intermediate(),
+            _synthetic_final(),
+            capture_runtime=0x20005000,
+            api_procparam_runtime=0x20007000,
+            api_procparam_prefix=_synthetic_final()[0x180 : 0x190],
+            entry_observation={
+                "rdi": 0x20001111,
+                "rsi": 0x20002222,
+                "rbp": 0,
+                "rsp": 0x20004448,
+                "process_prefix": bytes(range(16)),
+            },
+        )
+        comparison = compare_structural_results(first, second)
+        self.assertTrue(comparison["equivalent"])
+        self.assertIsNone(comparison["first_difference"])
+
+    def test_repeat_comparison_reports_first_structural_difference(self) -> None:
+        first = analyze(
+            _synthetic_intermediate(),
+            _synthetic_final(),
+            capture_runtime=0x10005000,
+            api_procparam_runtime=0x10007000,
+            api_procparam_prefix=_synthetic_final()[0x180 : 0x190],
+            entry_observation={
+                "rdi": 0x10001111,
+                "rsi": 0x10002222,
+                "rbp": 0,
+                "rsp": 0x10004448,
+                "process_prefix": bytes(range(16)),
+            },
+        )
+        second = dict(first)
+        second["entry_projection"] = dict(first["entry_projection"])
+        second["entry_projection"]["rsp_mod16"] = 0
+        comparison = compare_structural_results(first, second)
+        self.assertFalse(comparison["equivalent"])
+        self.assertEqual(
+            comparison["first_difference"],
+            {"field": "rsp_mod16", "first": 8, "second": 0},
+        )
 
     def test_malformed_elf_is_rejected(self) -> None:
         with self.assertRaisesRegex(AnalysisError, "bad ELF magic"):
@@ -647,6 +986,13 @@ def _build_parser() -> argparse.ArgumentParser:
         "--log-file",
         type=Path,
         help="read capture/procparam observations from one emitted log record",
+    )
+    parser.add_argument(
+        "--compare-log-files",
+        nargs=2,
+        type=Path,
+        metavar=("RUN1", "RUN2"),
+        help="analyze two emitted log records and compare only structural facts",
     )
     parser.add_argument("--self-test", action="store_true")
     return parser
@@ -672,6 +1018,46 @@ def main(argv: list[str] | None = None) -> int:
             "missing required arguments: " + ", ".join(missing_files)
         )
 
+    if args.compare_log_files is not None:
+        if args.log_file is not None or any(
+            value is not None
+            for value in (
+                args.capture_runtime,
+                args.api_procparam_runtime,
+                args.api_procparam_prefix,
+            )
+        ):
+            raise AnalysisError(
+                "--compare-log-files cannot be combined with other observation arguments"
+            )
+
+        intermediate = args.intermediate.read_bytes()
+        final = args.final_elf.read_bytes()
+        results = []
+        for path in args.compare_log_files:
+            observed = parse_observation_log(
+                path.read_text(encoding="utf-8")
+            )
+            raw_prefix = observed["api_procparam_prefix"]
+            results.append(
+                analyze(
+                    intermediate,
+                    final,
+                    int(observed["capture_runtime"]),
+                    int(observed["api_procparam_runtime"]),
+                    None if raw_prefix is None else bytes(raw_prefix),
+                    entry_observation=observed,
+                )
+            )
+        print(
+            json.dumps(
+                compare_structural_results(results[0], results[1]),
+                indent=2,
+                sort_keys=True,
+            )
+        )
+        return 0
+
     entry_observation = None
     if args.log_file is not None:
         manual = (
@@ -690,14 +1076,14 @@ def main(argv: list[str] | None = None) -> int:
         api_procparam_runtime = int(
             entry_observation["api_procparam_runtime"]
         )
-        api_procparam_prefix = bytes(
-            entry_observation["api_procparam_prefix"]
+        raw_prefix = entry_observation["api_procparam_prefix"]
+        api_procparam_prefix = (
+            None if raw_prefix is None else bytes(raw_prefix)
         )
     else:
         required_observations = {
             "--capture-runtime": args.capture_runtime,
             "--api-procparam-runtime": args.api_procparam_runtime,
-            "--api-procparam-prefix": args.api_procparam_prefix,
         }
         missing = [
             name
@@ -714,10 +1100,22 @@ def main(argv: list[str] | None = None) -> int:
         api_procparam_runtime = parse_u64(
             args.api_procparam_runtime, "api procparam runtime"
         )
-        api_procparam_prefix = parse_prefix(
-            args.api_procparam_prefix,
-            "api procparam prefix",
-        )
+        if api_procparam_runtime == 0:
+            if args.api_procparam_prefix not in (None, "unavailable"):
+                raise AnalysisError(
+                    "--api-procparam-prefix must be omitted or unavailable "
+                    "when the API return is null"
+                )
+            api_procparam_prefix = None
+        else:
+            if args.api_procparam_prefix is None:
+                raise AnalysisError(
+                    "missing required argument: --api-procparam-prefix"
+                )
+            api_procparam_prefix = parse_prefix(
+                args.api_procparam_prefix,
+                "api procparam prefix",
+            )
 
     intermediate = args.intermediate.read_bytes()
     final = args.final_elf.read_bytes()

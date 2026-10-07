@@ -220,8 +220,9 @@ Astraea does **not** currently claim:
    `tools/reference/ps5_process_entry_observer/` into the validated owned
    native-title toolchain and run the exact artifact twice to resolve RSI and
    exact initial RSP **before CRT/compiler mutation**.
-2. Extend the same controlled run for #312 to measure
-   `sceKernelGetProcParam()` vs the mapped `PT_SCE_PROCPARAM`.
+2. In that same run, emit the post-init #312 record and analyze it offline
+   against the exact intermediate/final owned ELF pair to measure
+   `sceKernelGetProcParam()` vs mapped `PT_SCE_PROCPARAM`.
 3. Resolve C1C primary-thread TLS/TCB and C1D bootstrap effects only from
    evidence required by the selected workload.
 4. The host-independent static closure profiler from #316/#318 is merged and
