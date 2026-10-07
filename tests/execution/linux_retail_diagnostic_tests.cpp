@@ -1,5 +1,6 @@
 #include <astraea/execution/linux_retail_diagnostic.hpp>
 #include <astraea/execution/guest_worker_process_session.hpp>
+#include <astraea/execution/retail_closure_profile.hpp>
 
 #include <bit>
 #include <cstddef>
@@ -34,6 +35,8 @@ struct FixtureOptions {
     bool executable = true;
     bool generic_needed = false;
     bool sce_needed = false;
+    bool sce_import_library = false;
+    bool sce_unknown_tag = false;
     bool sce_metadata_conflict = false;
     bool relocation = false;
     bool tls = false;
@@ -134,6 +137,8 @@ make_sce_fixture(FixtureOptions options = {}) {
     const bool has_dynamic =
         options.generic_needed ||
         options.sce_needed ||
+        options.sce_import_library ||
+        options.sce_unknown_tag ||
         options.sce_metadata_conflict ||
         options.relocation;
     const std::uint16_t ph_count =
@@ -211,6 +216,22 @@ make_sce_fixture(FixtureOptions options = {}) {
                 dynamic_count++,
                 0x61000045,
                 0x1234U);
+        }
+
+        if (options.sce_import_library) {
+            write_dynamic_entry(
+                bytes,
+                dynamic_count++,
+                0x61000049,
+                0x5678U);
+        }
+
+        if (options.sce_unknown_tag) {
+            write_dynamic_entry(
+                bytes,
+                dynamic_count++,
+                0x6100007f,
+                0x9abcU);
         }
 
         if (options.sce_metadata_conflict) {
@@ -340,6 +361,17 @@ preflight(std::vector<std::byte> bytes) {
                     .environment = {},
                     .auxiliary_vector = {},
                 });
+}
+
+astraea::execution::
+    RetailStaticClosureProfileResult
+closure_profile(std::vector<std::byte> bytes) {
+    const auto planned =
+        preflight(std::move(bytes));
+    REQUIRE(planned.image.has_value());
+    return astraea::execution::
+        profile_retail_guest_image(
+            planned.image.value());
 }
 
 #if defined(__linux__) && defined(__x86_64__)
@@ -609,6 +641,131 @@ TEST_CASE(
         kEntry);
 }
 
+
+TEST_CASE(
+    "retail closure profile reports independent structural pressure dimensions",
+    "[execution][analysis][retail][closure-profile]") {
+    const auto result =
+        closure_profile(
+            make_sce_fixture(
+                FixtureOptions{
+                    .generic_needed = true,
+                    .sce_needed = true,
+                    .sce_import_library = true,
+                    .sce_unknown_tag = true,
+                    .relocation = true,
+                    .tls = true,
+                }));
+
+    REQUIRE(result.has_value());
+
+    REQUIRE(result->program_header_count == 3U);
+    REQUIRE(result->load_segment_count == 1U);
+    REQUIRE(result->load_memory_bytes == kImageSize);
+    REQUIRE(result->executable_load_segment_count == 1U);
+    REQUIRE(
+        result->executable_load_memory_bytes ==
+        kImageSize);
+
+    REQUIRE(result->generic_needed_count == 1U);
+    REQUIRE(result->sce_needed_module_count == 1U);
+    REQUIRE(result->sce_import_library_count == 1U);
+    REQUIRE(
+        result->sce_unknown_dynamic_record_count ==
+        1U);
+
+    REQUIRE(
+        result->dynamic_symbol_count ==
+        std::optional<std::uint64_t>{1U});
+
+    REQUIRE(result->rel_relocation_count == 0U);
+    REQUIRE(result->rela_relocation_count == 1U);
+    REQUIRE(result->plt_relocation_count == 0U);
+    REQUIRE(result->total_relocation_count == 1U);
+
+    REQUIRE(result->tls_present);
+    REQUIRE(result->tls_initialized_bytes == 2U);
+    REQUIRE(result->tls_total_bytes == 8U);
+    REQUIRE(result->tls_alignment == 1U);
+}
+
+TEST_CASE(
+    "retail closure profile keeps absent symbol and TLS dimensions explicit",
+    "[execution][analysis][retail][closure-profile][minimal]") {
+    const auto result =
+        closure_profile(make_sce_fixture());
+
+    REQUIRE(result.has_value());
+    REQUIRE(result->program_header_count == 1U);
+    REQUIRE(result->load_segment_count == 1U);
+    REQUIRE_FALSE(result->dynamic_symbol_count.has_value());
+    REQUIRE(result->total_relocation_count == 0U);
+    REQUIRE_FALSE(result->tls_present);
+    REQUIRE(result->tls_initialized_bytes == 0U);
+    REQUIRE(result->tls_total_bytes == 0U);
+    REQUIRE(result->tls_alignment == 0U);
+}
+
+TEST_CASE(
+    "retail closure profile preserves SCE metadata conflict as typed failure",
+    "[execution][analysis][retail][closure-profile][negative]") {
+    const auto result =
+        closure_profile(
+            make_sce_fixture(
+                FixtureOptions{
+                    .sce_metadata_conflict = true,
+                }));
+
+    REQUIRE_FALSE(result.has_value());
+    REQUIRE(
+        result.error().code ==
+        astraea::execution::
+            RetailStaticClosureProfileErrorCode::
+                sce_dynamic_metadata_failure);
+    REQUIRE(
+        result.error().sce_dynamic_metadata_error
+            .has_value());
+    REQUIRE(
+        result.error().sce_dynamic_metadata_error->
+            code ==
+        astraea::loader::
+            SceDynamicMetadataErrorCode::
+                conflicting_singleton_tag);
+}
+
+TEST_CASE(
+    "retail closure profile saturates aggregate load footprint",
+    "[execution][analysis][retail][closure-profile][saturation]") {
+    auto planned =
+        preflight(make_sce_fixture());
+    REQUIRE(planned.image.has_value());
+
+    auto image =
+        std::move(planned.image.value());
+    REQUIRE_FALSE(image.elf.program_headers.empty());
+
+    auto extra =
+        image.elf.program_headers.front();
+    image.elf.program_headers.front().memory_size =
+        std::numeric_limits<std::uint64_t>::max();
+    extra.memory_size = 4096U;
+    extra.index = image.elf.program_headers.size();
+    image.elf.program_headers.push_back(extra);
+
+    const auto result =
+        astraea::execution::
+            profile_retail_guest_image(image);
+
+    REQUIRE(result.has_value());
+    REQUIRE(result->load_segment_count == 2U);
+    REQUIRE(
+        result->load_memory_bytes ==
+        std::numeric_limits<std::uint64_t>::max());
+    REQUIRE(result->executable_load_segment_count == 2U);
+    REQUIRE(
+        result->executable_load_memory_bytes ==
+        std::numeric_limits<std::uint64_t>::max());
+}
 
 TEST_CASE(
     "production retail worker preserves dependency relocation TLS and initial-ABI boundaries",
