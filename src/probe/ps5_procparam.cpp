@@ -20,8 +20,12 @@ validate_ps5_procparam_observation(
             });
     }
 
-    if (observation.api_prefix.size() <
-        kPs5ProcParamObservationPrefixSize) {
+    const bool api_return_nonzero =
+        observation.api_return.value() != 0U;
+
+    if (api_return_nonzero &&
+        observation.api_prefix.size() <
+            kPs5ProcParamObservationPrefixSize) {
         return Ps5ProcParamObservationResult::failure(
             Ps5ProcParamObservationError{
                 .code =
@@ -66,6 +70,7 @@ validate_ps5_procparam_observation(
             observation.procparam_image_virtual_address};
 
     const bool prefix_matches =
+        api_return_nonzero &&
         std::equal(
             observation.api_prefix.begin(),
             observation.api_prefix.begin() +
@@ -78,7 +83,7 @@ validate_ps5_procparam_observation(
             .load_bias = load_bias,
             .expected_mapped_procparam = expected,
             .api_return_nonzero =
-                observation.api_return.value() != 0U,
+                api_return_nonzero,
             .api_matches_expected_mapped_procparam =
                 observation.api_return == expected,
             .api_prefix_matches_artifact_prefix =
