@@ -490,6 +490,67 @@ def analyze(
     return result
 
 
+def structural_projection(result: dict[str, object]) -> dict[str, object]:
+    entry = result.get("entry_projection")
+    if not isinstance(entry, dict):
+        raise AnalysisError("result does not contain an entry projection")
+    if "startup_parameters_distinct_from_api_return" not in result:
+        raise AnalysisError("result does not contain startup/procparam separation")
+
+    return {
+        "argc": entry["argc"],
+        "argv0_nonzero": entry["argv0_nonzero"],
+        "rsi_nonzero": entry["rsi_nonzero"],
+        "rbp_zero": entry["rbp_zero"],
+        "rsp_mod16": entry["rsp_mod16"],
+        "api_return_nonzero": result["api_return_nonzero"],
+        "pointer_match": result["pointer_match"],
+        "prefix_available": result["prefix_available"],
+        "prefix_match": result["prefix_match"],
+        "startup_parameters_distinct_from_api_return":
+            result["startup_parameters_distinct_from_api_return"],
+    }
+
+
+def compare_structural_results(
+    first: dict[str, object],
+    second: dict[str, object],
+) -> dict[str, object]:
+    first_projection = structural_projection(first)
+    second_projection = structural_projection(second)
+
+    order = (
+        "argc",
+        "argv0_nonzero",
+        "rsi_nonzero",
+        "rbp_zero",
+        "rsp_mod16",
+        "api_return_nonzero",
+        "pointer_match",
+        "prefix_available",
+        "prefix_match",
+        "startup_parameters_distinct_from_api_return",
+    )
+
+    difference = None
+    for field in order:
+        if first_projection[field] != second_projection[field]:
+            difference = {
+                "field": field,
+                "first": first_projection[field],
+                "second": second_projection[field],
+            }
+            break
+
+    return {
+        "schema": "astraea.ps5.process-entry-repeat/v0",
+        "equivalent": difference is None,
+        "first_difference": difference,
+        "first_projection": first_projection,
+        "second_projection": second_projection,
+    }
+
+
 def _elf_header(*, phoff: int, phnum: int, shoff: int, shnum: int) -> bytearray:
     data = bytearray(0x40)
     data[0:4] = ELF_MAGIC
@@ -851,6 +912,64 @@ class SelfTests(unittest.TestCase):
                 api_procparam_prefix=b"\0" * PREFIX_SIZE,
             )
 
+    def test_repeat_comparison_ignores_aslr_sensitive_addresses(self) -> None:
+        first = analyze(
+            _synthetic_intermediate(),
+            _synthetic_final(),
+            capture_runtime=0x10005000,
+            api_procparam_runtime=0x10007000,
+            api_procparam_prefix=_synthetic_final()[0x180 : 0x190],
+            entry_observation={
+                "rdi": 0x10001111,
+                "rsi": 0x10002222,
+                "rbp": 0,
+                "rsp": 0x10004448,
+                "process_prefix": bytes(range(16)),
+            },
+        )
+        second = analyze(
+            _synthetic_intermediate(),
+            _synthetic_final(),
+            capture_runtime=0x20005000,
+            api_procparam_runtime=0x20007000,
+            api_procparam_prefix=_synthetic_final()[0x180 : 0x190],
+            entry_observation={
+                "rdi": 0x20001111,
+                "rsi": 0x20002222,
+                "rbp": 0,
+                "rsp": 0x20004448,
+                "process_prefix": bytes(range(16)),
+            },
+        )
+        comparison = compare_structural_results(first, second)
+        self.assertTrue(comparison["equivalent"])
+        self.assertIsNone(comparison["first_difference"])
+
+    def test_repeat_comparison_reports_first_structural_difference(self) -> None:
+        first = analyze(
+            _synthetic_intermediate(),
+            _synthetic_final(),
+            capture_runtime=0x10005000,
+            api_procparam_runtime=0x10007000,
+            api_procparam_prefix=_synthetic_final()[0x180 : 0x190],
+            entry_observation={
+                "rdi": 0x10001111,
+                "rsi": 0x10002222,
+                "rbp": 0,
+                "rsp": 0x10004448,
+                "process_prefix": bytes(range(16)),
+            },
+        )
+        second = dict(first)
+        second["entry_projection"] = dict(first["entry_projection"])
+        second["entry_projection"]["rsp_mod16"] = 0
+        comparison = compare_structural_results(first, second)
+        self.assertFalse(comparison["equivalent"])
+        self.assertEqual(
+            comparison["first_difference"],
+            {"field": "rsp_mod16", "first": 8, "second": 0},
+        )
+
     def test_malformed_elf_is_rejected(self) -> None:
         with self.assertRaisesRegex(AnalysisError, "bad ELF magic"):
             find_defined_symbol(b"not-an-elf" + b"\0" * 64, ANCHOR_SYMBOL, "bad")
@@ -867,6 +986,13 @@ def _build_parser() -> argparse.ArgumentParser:
         "--log-file",
         type=Path,
         help="read capture/procparam observations from one emitted log record",
+    )
+    parser.add_argument(
+        "--compare-log-files",
+        nargs=2,
+        type=Path,
+        metavar=("RUN1", "RUN2"),
+        help="analyze two emitted log records and compare only structural facts",
     )
     parser.add_argument("--self-test", action="store_true")
     return parser
@@ -891,6 +1017,46 @@ def main(argv: list[str] | None = None) -> int:
         raise AnalysisError(
             "missing required arguments: " + ", ".join(missing_files)
         )
+
+    if args.compare_log_files is not None:
+        if args.log_file is not None or any(
+            value is not None
+            for value in (
+                args.capture_runtime,
+                args.api_procparam_runtime,
+                args.api_procparam_prefix,
+            )
+        ):
+            raise AnalysisError(
+                "--compare-log-files cannot be combined with other observation arguments"
+            )
+
+        intermediate = args.intermediate.read_bytes()
+        final = args.final_elf.read_bytes()
+        results = []
+        for path in args.compare_log_files:
+            observed = parse_observation_log(
+                path.read_text(encoding="utf-8")
+            )
+            raw_prefix = observed["api_procparam_prefix"]
+            results.append(
+                analyze(
+                    intermediate,
+                    final,
+                    int(observed["capture_runtime"]),
+                    int(observed["api_procparam_runtime"]),
+                    None if raw_prefix is None else bytes(raw_prefix),
+                    entry_observation=observed,
+                )
+            )
+        print(
+            json.dumps(
+                compare_structural_results(results[0], results[1]),
+                indent=2,
+                sort_keys=True,
+            )
+        )
+        return 0
 
     entry_observation = None
     if args.log_file is not None:
