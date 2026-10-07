@@ -329,28 +329,39 @@ loader-provided entry state.
 
 #### C1C — primary-thread TLS/TCB
 
-Establish TLS allocation, TCB structure requirements, and initial FS/GS bases.
+Establish only the TLS/TCB state that must already exist **before the first
+title instruction**: initial image placement/identity as required, initial
+FS/GS bases, and the minimum primary-thread control state.
 
-#### C1D — bootstrap ordering
+Dynamic TLS, additional guest threads, TLS module growth and runtime thread
+lifecycle belong to C2 unless the selected title proves one of them is a
+pre-entry requirement.
 
-Establish which dynamic/module/runtime initialization must be complete before
-entry for the selected workload.
+#### C1D — pre-entry bootstrap effects
+
+Establish only which module/import/runtime effects must be complete **before
+title entry** for the selected workload.
+
+C1D does not require implementing every runtime module or continuing
+initialization after entry. Those first post-entry dependencies define C2.
 
 **C1 completion criterion:** one selected legally obtained or independently
 owned title/profile may execute its first native retail instructions without
 using Astraea's synthetic owned-probe stack and without inventing unknown entry
 state.
 
-### C2 — runtime/bootstrap closure
+### C2 — post-entry runtime closure
 
-Advance from first instruction through the first real runtime dependencies:
+Advance from the first admitted title instruction through the first real
+post-entry runtime dependencies:
 
-- module graph / runtime linker
-- relocation/import completion
-- HLE-vs-LLE module policy
-- primary thread/TLS
-- first guest syscall/HLE services
-- process/thread/handle model
+- module graph / runtime linker;
+- relocation/import completion beyond the pre-entry minimum;
+- HLE-vs-LLE module policy;
+- dynamic TLS and guest thread lifecycle when first required;
+- first guest syscall/HLE services;
+- process/thread/handle model;
+- runtime module loads / init calls required after entry;
 - deterministic first unsupported runtime boundary
 
 C2 is workload-driven. Do not pre-implement an entire OS API catalog.
@@ -745,7 +756,7 @@ compatibility:
        C1B procparam relationship                 RESEARCH (#312)
      |
      v
-    C2 bootstrap/modules/TLS/HLE
+    C2 post-entry runtime/modules/HLE
      |
      v
     C3 deterministic boot
