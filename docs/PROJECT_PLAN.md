@@ -547,6 +547,25 @@ per-library conformance tests rather than hand-maintained ad-hoc dispatch.
 
 Do not turn the structural ELF parser into a runtime linker.
 
+### Host CPU ISA compatibility layer
+
+Native x86-64 execution is a performance strategy, not a claim that every host
+implements the PS5 Zen 2 instruction surface identically.
+
+When a selected title first reaches an unsupported host instruction:
+
+- record the exact guest opcode/fault and host capability;
+- prefer a bounded ahead-of-execution patch/trampoline when it preserves
+  semantics cleanly;
+- otherwise trap and emulate the smallest instruction family required;
+- test the native-supported and compatibility paths against one semantic
+  oracle;
+- keep host ISA compatibility separate from PS5 OS/HLE semantics.
+
+Current public PS5 projects already need this class for AMD-specific/SHA and
+other host-dependent instructions, especially across Intel and Rosetta
+environments. This is an expected post-C1 dependency class, not work to
+pre-implement before a selected title exposes it.
 ### Guest process/kernel layer
 
 Introduce typed process/thread/handle abstractions when demanded:
