@@ -140,6 +140,7 @@ add_library(astraea_core STATIC
     src/probe/reference.cpp
     src/probe/agc_link_shaders_tail.cpp
     src/probe/ps5_process_entry.cpp
+    src/probe/ps5_procparam.cpp
     src/graphics/agc_shader_binary.cpp
     src/graphics/agc_shader_container.cpp
     src/graphics/packet.cpp
