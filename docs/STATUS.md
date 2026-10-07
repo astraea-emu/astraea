@@ -216,8 +216,10 @@ Astraea does **not** currently claim:
 
 ## Next action
 
-1. Run the owned native-title observer specified by the merged #308 contract to
-   resolve RSI and exact initial RSP **before CRT/compiler mutation**.
+1. Integrate the repository-owned observer in
+   `tools/reference/ps5_process_entry_observer/` into the validated owned
+   native-title toolchain and run the exact artifact twice to resolve RSI and
+   exact initial RSP **before CRT/compiler mutation**.
 2. Extend the same controlled run for #312 to measure
    `sceKernelGetProcParam()` vs the mapped `PT_SCE_PROCPARAM`.
 3. Resolve C1C primary-thread TLS/TCB and C1D bootstrap effects only from
