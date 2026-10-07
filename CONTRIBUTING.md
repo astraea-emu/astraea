@@ -15,6 +15,8 @@ Do not begin a broad subsystem rewrite without an accepted ADR.
 
 ## Branches
 
+Branches are disposable implementation workspaces, not long-term project archives.
+
 Use a short scoped prefix:
 - `feat/`
 - `fix/`
@@ -22,10 +24,16 @@ Use a short scoped prefix:
 - `test/`
 - `docs/`
 - `bootstrap/`
+- `chore/`
 
 Examples:
 - `feat/elf64-program-headers`
 - `research/mutex-timeout-semantics`
+
+After merge, delete the head branch. Preserve durable findings in code/tests,
+issues, ADRs, or `docs/research/` rather than retaining historical branches.
+Closed/superseded branches should be removed once any useful evidence has been
+migrated.
 
 ## Pull requests
 
