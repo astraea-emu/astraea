@@ -29,6 +29,7 @@
 .hidden ASTRAEA_PS5_ENTRY_TARGET_SYMBOL
 
 ASTRAEA_PS5_ENTRY_SYMBOL:
+.Lastraea_snapshot_begin:
     movq %rax, ASTRAEA_PS5_ENTRY_CAPTURE_SYMBOL + 0x10(%rip)
     movq %rbx, ASTRAEA_PS5_ENTRY_CAPTURE_SYMBOL + 0x18(%rip)
     movq %rcx, ASTRAEA_PS5_ENTRY_CAPTURE_SYMBOL + 0x20(%rip)
@@ -57,6 +58,7 @@ ASTRAEA_PS5_ENTRY_SYMBOL:
     /* ASCII bytes "ASTRPEV0" in little-endian order. Publish last. */
     movabsq $0x3056455052545341, %r10
     movq %r10, ASTRAEA_PS5_ENTRY_CAPTURE_SYMBOL(%rip)
+.Lastraea_snapshot_complete:
 
     /* Restore the only scratch GPR before handing off to the CRT. */
     movq ASTRAEA_PS5_ENTRY_CAPTURE_SYMBOL + 0x60(%rip), %r10
