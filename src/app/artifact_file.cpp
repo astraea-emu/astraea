@@ -1,6 +1,7 @@
 #include "artifact_file.hpp"
 
 #include <cstddef>
+#include <cstdint>
 #include <filesystem>
 #include <fstream>
 #include <limits>
