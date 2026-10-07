@@ -59,6 +59,11 @@ At that revision:
 - its clean-room runtime/startup artifact is documented as hardware-validated
   on PS5 firmware 6.02 and 12.70.
 
+The same pinned build bootstraps public `ps5-payload-dev/sdk` release v0.42,
+whose libkernel stub set exports `sceKernelGetProcParam`. The post-init C1B
+observation therefore uses the public stub family already consumed by the
+clean-room title build; it does not depend on a private runtime symbol.
+
 Astraea does not vendor that project. Keep the hardware experiment in a
 separate local checkout.
 
