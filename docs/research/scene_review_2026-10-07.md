@@ -62,6 +62,38 @@ and shader translation. A 2026-10-07 change also reverted a large batch of
 Silent Hill rendering/performance merges, reinforcing the value of exact-head
 review and regression discipline under compatibility pressure.
 
+### mattias800/prosper
+
+Repository: `mattias800/prosper`.
+
+This project was not included in the September comparison and is now one of
+the most valuable public comparators. It is a user-space PS5-to-PC
+compatibility layer with native x86-64 execution, clean-room HLE, AGC/Vulkan
+translation and an RDNA2-to-SPIR-V recompiler. Its current roadmap reports
+multiple titles at an automatic snapshot-guard rung and uses unusually strong
+evidence, falsification and regression discipline.
+
+Its proposed architecture sequence independently converges on several
+boundaries Astraea already adopted: typed GPU command representation, a pure
+SSA-like recompiler layer, page/resource ownership, typed guest pointers,
+declarative HLE tables, conformance suites and replay/regression gates. This
+is evidence against replacing Astraea's architecture merely to chase current
+compatibility breadth.
+
+For C1, current `prosper` code directly enters the title with a SysV-style
+argc/argv/env/auxv stack, points RDI at that initial vector, uses RSI=0, and
+activates a guest FS/TCB before entry. That is a third implementation choice:
+it is useful comparative pressure, but it is still emulator behavior rather
+than a controlled PS5 loader observation. In particular, working titles under
+an implementation with RSI=0 must not be misread as evidence that the
+ps5link-observed teardown role is false or optional on hardware.
+
+Licensing is decisive: the repository README explicitly states that no
+`LICENSE` file exists and that no license is granted by default. Astraea may
+study public architecture/evidence and reproduce independently supported
+behavior, but must copy **no implementation code** from this repository absent
+an explicit license or permission.
+
 ### ps5link-sdk / SharpProspero
 
 Repository: `Rufidj/ps5link-sdk`; startup lineage derives from
