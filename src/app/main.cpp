@@ -59,6 +59,13 @@ int main(int argc, char** argv) {
             run_retail_dependency_manifest(argv[2]);
     }
 
+    if (argc == 4 &&
+        std::string_view{argv[1]} == "dependencies" &&
+        std::string_view{argv[2]} == "--public-sce-pack-v1") {
+        return astraea::app::run_retail_dependency_manifest(
+            argv[3], true);
+    }
+
     print_usage();
     return argc == 1 ? 0 : 2;
 }
