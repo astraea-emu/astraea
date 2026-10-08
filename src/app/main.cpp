@@ -18,6 +18,7 @@ void print_usage() {
         << "  astraea diagnose <ps5-elf-or-eboot>\n"
         << "  astraea profile <ps5-elf-or-eboot>\n"
         << "  astraea dependencies <ps5-elf-or-eboot>\n"
+        << "  astraea dependencies --public-sce-pack-v1 <ps5-elf-or-eboot>\n"
         << "\n"
         << "The profile command is read-only structural analysis. "
            "The retail diagnostic is currently Linux x86-64 only. "
