@@ -1,6 +1,7 @@
 #include <astraea/execution/guest_memory.hpp>
 #include <astraea/execution/linux_memory.hpp>
 #include <astraea/execution/sce_glob_dat_apply.hpp>
+#include <astraea/execution/module_graph_import_apply.hpp>
 #include <astraea/loader/guest_image.hpp>
 #include <astraea/memory/mapping.hpp>
 
@@ -629,6 +630,131 @@ TEST_CASE(
             read_back)
             .has_value());
     REQUIRE(read_back == patches[0].bytes);
+}
+
+#endif
+
+
+TEST_CASE(
+    "owned module import application refuses unavailable prepared guest memory",
+    "[execution][module-graph][owned-apply]") {
+    auto image = make_empty_image();
+    astraea::execution::LinuxPreparedMemory prepared;
+    GuestMemoryAccess memory{image, prepared};
+    const auto synthetic = make_patch(0x1000);
+    const astraea::execution::OwnedModuleAbsolutePatch patch{
+        .target = synthetic.relocation_target,
+        .source_symbol_address = synthetic.gate_destination,
+        .raw_relocation_type = 6U,
+        .raw_addend = std::int64_t{-9},
+        .bytes = synthetic.bytes,
+    };
+    const auto applied =
+        astraea::execution::apply_owned_module_import_patch(
+            patch, memory);
+    REQUIRE_FALSE(applied.has_value());
+    REQUIRE(applied.error().code ==
+        GuestMemoryErrorCode::prepared_memory_unavailable);
+}
+
+#if defined(__linux__) && defined(__x86_64__) && defined(MAP_FIXED_NOREPLACE)
+
+TEST_CASE(
+    "owned module import application writes exact bytes to checked guest mapping",
+    "[execution][module-graph][owned-apply]") {
+    constexpr auto read = static_cast<std::uint8_t>(GuestPermission::read);
+    constexpr auto write = static_cast<std::uint8_t>(GuestPermission::write);
+    auto layout = make_layout(permissions(read | write));
+    auto prepared =
+        astraea::execution::prepare_linux_guest_memory(layout.image);
+    REQUIRE(prepared.has_value());
+    GuestMemoryAccess memory{layout.image, prepared.value()};
+    const auto synthetic = make_patch(layout.data_base, 0x12345678U);
+    const astraea::execution::OwnedModuleAbsolutePatch patch{
+        .target = synthetic.relocation_target,
+        .source_symbol_address = synthetic.gate_destination,
+        .raw_relocation_type = 6U,
+        .raw_addend = std::int64_t{17},
+        .bytes = synthetic.bytes,
+    };
+    const auto applied =
+        astraea::execution::apply_owned_module_import_patch(
+            patch, memory);
+    REQUIRE(applied.has_value());
+    REQUIRE(applied->target == patch.target);
+    REQUIRE(applied->provider_guest_address ==
+        patch.source_symbol_address);
+    std::array<std::byte, 8> actual{};
+    REQUIRE(memory.read(
+        GuestAddress{layout.data_base}, actual).has_value());
+    REQUIRE(actual == patch.bytes);
+}
+
+TEST_CASE(
+    "owned module import application preserves data on readonly refusal",
+    "[execution][module-graph][owned-apply]") {
+    constexpr auto read = static_cast<std::uint8_t>(GuestPermission::read);
+    auto layout = make_layout(permissions(read));
+    auto prepared =
+        astraea::execution::prepare_linux_guest_memory(layout.image);
+    REQUIRE(prepared.has_value());
+    GuestMemoryAccess memory{layout.image, prepared.value()};
+    const auto synthetic = make_patch(layout.data_base, 0x12345678U);
+    const astraea::execution::OwnedModuleAbsolutePatch patch{
+        .target = synthetic.relocation_target,
+        .source_symbol_address = synthetic.gate_destination,
+        .raw_relocation_type = 6U,
+        .raw_addend = std::int64_t{0},
+        .bytes = synthetic.bytes,
+    };
+    std::array<std::byte, 8> before{};
+    REQUIRE(memory.read(GuestAddress{layout.data_base}, before).has_value());
+    const auto applied =
+        astraea::execution::apply_owned_module_import_patch(
+            patch, memory);
+    REQUIRE_FALSE(applied.has_value());
+    REQUIRE(applied.error().code ==
+        GuestMemoryErrorCode::guest_memory_permission_denied);
+    std::array<std::byte, 8> after{};
+    REQUIRE(memory.read(GuestAddress{layout.data_base}, after).has_value());
+    REQUIRE(after == before);
+}
+
+TEST_CASE(
+    "owned module import application rejects unmapped and partial target spans",
+    "[execution][module-graph][owned-apply]") {
+    constexpr auto read = static_cast<std::uint8_t>(GuestPermission::read);
+    constexpr auto write = static_cast<std::uint8_t>(GuestPermission::write);
+    auto layout = make_layout(permissions(read | write), 4);
+    auto prepared =
+        astraea::execution::prepare_linux_guest_memory(layout.image);
+    REQUIRE(prepared.has_value());
+    GuestMemoryAccess memory{layout.image, prepared.value()};
+    const auto synthetic = make_patch(layout.data_base, 0x12345678U);
+    auto partial = astraea::execution::OwnedModuleAbsolutePatch{
+        .target = synthetic.relocation_target,
+        .source_symbol_address = synthetic.gate_destination,
+        .raw_relocation_type = 6U,
+        .raw_addend = std::int64_t{0},
+        .bytes = synthetic.bytes,
+    };
+    std::array<std::byte, 4> before{};
+    REQUIRE(memory.read(GuestAddress{layout.data_base}, before).has_value());
+    const auto rejected =
+        astraea::execution::apply_owned_module_import_patch(partial, memory);
+    REQUIRE_FALSE(rejected.has_value());
+    REQUIRE(rejected.error().code ==
+        GuestMemoryErrorCode::guest_memory_unmapped);
+    std::array<std::byte, 4> after{};
+    REQUIRE(memory.read(GuestAddress{layout.data_base}, after).has_value());
+    REQUIRE(after == before);
+
+    partial.target = GuestAddress{layout.unmapped_base};
+    const auto unmapped =
+        astraea::execution::apply_owned_module_import_patch(partial, memory);
+    REQUIRE_FALSE(unmapped.has_value());
+    REQUIRE(unmapped.error().code ==
+        GuestMemoryErrorCode::guest_memory_unmapped);
 }
 
 #endif
