@@ -133,6 +133,22 @@ Windows development uses the `windows-dev` CMake preset.
 CI gates every pull request on Linux x64, Windows x64, macOS ARM64, Linux
 ASan+UBSan, and Linux Clang fuzz smoke.
 
+### Static closure profiling
+
+On Linux, Windows, or macOS, inspect the structural pressure of a legally
+obtained PS5/SCE ELF without executing guest code:
+
+```sh
+./out/build/linux-dev/astraea profile /path/to/artifact
+```
+
+The command reports independent dimensions such as module/import counts,
+relocations, load footprint, dynamic symbols, and TLS. It intentionally does
+**not** produce a compatibility percentage or weighted difficulty score.
+
+Use these dimensions together with deterministic-route and external-feasibility
+evidence when choosing the first retail target.
+
 ### Linux retail diagnostic
 
 On Linux x86-64, a locally built Astraea binary can inspect a legally obtained
