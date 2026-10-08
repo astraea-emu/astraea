@@ -231,9 +231,10 @@ Astraea does **not** currently claim:
    the selected workload.
 4. Resolve C1D pre-entry bootstrap effects only from evidence required by the
    selected workload.
-5. The host-independent static closure profiler from #316/#318 is merged and
-   may be used to compare lawfully owned first-title candidates without
-   changing execution admission.
+5. Use the portable `astraea profile <artifact>` surface to compare lawfully
+   owned first-title candidates by independent structural dimensions. It shares
+   artifact-reading and planning-stack policy with the production diagnostic
+   path and never executes guest code.
 6. Keep `unsupported_initial_process_abi` in production until the complete
    selected profile is ready.
 
