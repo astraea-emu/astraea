@@ -146,6 +146,7 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND
    CMAKE_SYSTEM_PROCESSOR MATCHES "^(x86_64|AMD64)$")
     target_sources(astraea_core_tests PRIVATE
         "${CMAKE_SOURCE_DIR}/tools/reference/ps5_process_entry_observer/entry.S"
+        "${CMAKE_SOURCE_DIR}/tools/reference/ps5_process_entry_observer/emit_observation.cpp"
         probe/ps5_process_entry_observer_harness.S
     )
 endif()
@@ -178,6 +179,17 @@ astraea_verify_explicit_cpp_sources(
 list(APPEND CMAKE_MODULE_PATH "${catch2_SOURCE_DIR}/extras")
 include(Catch)
 catch_discover_tests(astraea_core_tests)
+
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    find_package(Python3 REQUIRED COMPONENTS Interpreter)
+    add_test(
+        NAME astraea_ps5_procparam_identity_analyzer_self_test
+        COMMAND
+            "${Python3_EXECUTABLE}"
+            "${CMAKE_SOURCE_DIR}/tools/reference/ps5_process_entry_observer/procparam_identity.py"
+            --self-test
+    )
+endif()
 
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND
    CMAKE_SYSTEM_PROCESSOR MATCHES "^(x86_64|AMD64)$" AND

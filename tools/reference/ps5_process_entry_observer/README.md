@@ -59,6 +59,11 @@ At that revision:
 - its clean-room runtime/startup artifact is documented as hardware-validated
   on PS5 firmware 6.02 and 12.70.
 
+The same pinned build bootstraps public `ps5-payload-dev/sdk` release v0.42,
+whose libkernel stub set exports `sceKernelGetProcParam`. The post-init C1B
+observation therefore uses the public stub family already consumed by the
+clean-room title build; it does not depend on a private runtime symbol.
+
 Astraea does not vendor that project. Keep the hardware experiment in a
 separate local checkout.
 
@@ -128,6 +133,100 @@ Record, where lawfully known:
 
 The two runs must produce matching structural projections before any new ABI
 rule is considered. Exact raw relationships still require review.
+
+## Same-run C1B procparam observation
+
+Do not schedule a second hardware cycle for #312.
+
+After the normal CRT/runtime is initialized, the owned application should
+also record:
+
+- runtime address of `astraea_ps5_entry_capture_v0`;
+- pointer returned by `sceKernelGetProcParam()`;
+- exactly the first 16 bytes at that returned pointer.
+
+The pinned converter preserves allocated input-section virtual addresses when
+building the final PS5 executable and adds the static `PT_SCE_PROCPARAM`
+program header separately. That lets the host derive the title load bias from
+the observed capture-object address and its intermediate-PIE symbol value.
+
+Preferred path: call `astraea_emit_ps5_entry_observation_v0()` once
+near the beginning of the owned application's normal `main`, capture that
+single kernel-log line to a local text file, then run:
+
+```sh
+python3 tools/reference/ps5_process_entry_observer/procparam_identity.py \
+  --intermediate /path/to/build/llvm-pie.elf \
+  --final /path/to/build/eboot.elf \
+  --log-file /path/to/run1.log
+```
+
+The emitter performs no allocation and formats the C1A/C1B values itself after
+normal runtime initialization. Manual `--capture-runtime`,
+`--api-procparam-runtime`, and `--api-procparam-prefix` arguments remain
+available for independent adapters, but must not be mixed with `--log-file`.
+
+A null `sceKernelGetProcParam()` return is valid evidence. In that case the
+emitter records `procparam_runtime=0` and `procparam_prefix=unavailable`;
+the analyzer preserves the null result and reports both identity checks false
+rather than treating the run as malformed.
+
+The analyzer also derives the same normalized C1A structural projection used
+by Astraea core from the frozen entry record:
+
+- argc;
+- argv[0] zero/non-zero;
+- RSI zero/non-zero;
+- RBP zero/non-zero;
+- RSP modulo 16.
+
+After capturing two same-artifact runs, compare them mechanically:
+
+```sh
+python3 tools/reference/ps5_process_entry_observer/procparam_identity.py \
+  --intermediate /path/to/build/llvm-pie.elf \
+  --final /path/to/build/eboot.elf \
+  --compare-log-files /path/to/run1.log /path/to/run2.log
+```
+
+The comparison intentionally excludes raw runtime addresses and load bias. It
+compares, in fixed order:
+
+- argc;
+- argv[0] zero/non-zero;
+- RSI zero/non-zero;
+- RBP zero/non-zero;
+- RSP modulo 16;
+- procparam API null/non-null state;
+- procparam pointer identity;
+- procparam prefix availability/identity;
+- startup-vector vs procparam separation.
+
+The JSON result reports `equivalent` plus the first structural difference and
+both values. A matching comparison is necessary, not sufficient, for promotion:
+retain and review both raw records before turning an exact relationship into a
+PS5 rule.
+
+This lets each run produce one offline JSON containing both C1A and C1B facts.
+
+The analyzer reports, separately:
+
+- derived load bias;
+- expected mapped `PT_SCE_PROCPARAM` address;
+- whether the API return is non-zero;
+- observed API-return address;
+- `pointer_match`;
+- whether a prefix was available;
+- static and observed 16-byte prefixes;
+- `prefix_match`;
+- when the entry observation is present, whether the loader-built startup
+  pointer remains distinct from the API-return pointer.
+
+A mismatch is a valid experimental result, not an analyzer failure.
+
+The analyzer accepts only ELF64 little-endian x86-64 inputs, requires a unique
+defined observer capture symbol and a unique `PT_SCE_PROCPARAM`, validates the
+owned static procparam size/`ORBI` prefix, and uses checked u64 arithmetic.
 
 ## Relationship to C1B
 
