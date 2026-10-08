@@ -87,7 +87,7 @@ constexpr std::size_t kAnalysisStackCandidateCount = 256U;
 
 [[nodiscard]] std::optional<astraea::memory::GuestRange>
 choose_analysis_stack(
-    std::span<const std::byte> artifact) noexcept {
+    std::span<const std::byte> artifact) {
     const auto parsed =
         astraea::loader::parse_elf64(
             artifact,
