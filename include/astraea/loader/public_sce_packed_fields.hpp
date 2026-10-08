@@ -2,6 +2,11 @@
 
 #include <compare>
 #include <cstdint>
+#include <cstddef>
+#include <map>
+#include <string>
+#include <string_view>
+#include <utility>
 
 namespace astraea::loader {
 
@@ -30,5 +35,42 @@ decode_public_sce_packed_fields(std::uint64_t raw) noexcept {
         .local_id = static_cast<std::uint16_t>((raw >> 48U) & 0xffffULL),
     };
 }
+
+
+enum class PublicSceLocalIdRecordResult {
+    inserted,
+    equivalent_duplicate,
+    conflicting_reuse,
+};
+
+// This ledger is local to an explicitly selected PUBLIC emitter profile,
+// not a Sony dynamic-loader module index. Modules and import libraries must
+// maintain independent instances of this ledger.
+class PublicSceLocalIdLedger {
+public:
+    [[nodiscard]] PublicSceLocalIdRecordResult record(
+        PublicScePackedFields fields,
+        std::string_view published_name) {
+        const auto it = records_.find(fields.local_id);
+        if (it != records_.end()) {
+            if (it->second.first != fields.version ||
+                it->second.second != published_name) {
+                return PublicSceLocalIdRecordResult::conflicting_reuse;
+            }
+            return PublicSceLocalIdRecordResult::equivalent_duplicate;
+        }
+        records_.emplace(
+            fields.local_id,
+            std::pair{fields.version, std::string{published_name}});
+        return PublicSceLocalIdRecordResult::inserted;
+    }
+
+    [[nodiscard]] std::size_t size() const noexcept {
+        return records_.size();
+    }
+
+private:
+    std::map<std::uint16_t, std::pair<std::uint16_t, std::string>> records_;
+};
 
 }  // namespace astraea::loader
