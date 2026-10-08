@@ -2,10 +2,10 @@
 
 **Repository:** `astraea-emu/astraea`  
 **Merged frontier:** production Linux x86-64 retail diagnostic path is active  
-**Current critical path:** #300 — complete the evidenced PS5 initial-process contract before retail native entry  
+**Current execution priority:** #356 — PC-only public native-title dependency identities; #334 hardware ABI retained for later C1 promotion  
 **Graphics:** V0-V3 complete for their bounded owned workloads  
 **Compatibility:** C0 complete on Linux x86-64; partial C1A prefix merged; C1 active  
-**CI merge gate:** Linux x64, Windows x64, macOS ARM64, Linux ASan+UBSan, Linux Clang fuzz smoke
+**CI merge gate:** Linux x64, Windows x64, macOS ARM64, Linux ASan+UBSan, Linux Clang fuzz smoke; pinned C1 workflow also required when its source/workflow changes
 
 ## What is complete
 
@@ -76,6 +76,43 @@ retail entry point.
 
 That result is useful: it confirms the production artifact/supervisor path and
 identifies C1 as the next dependency. It is not a boot/playability result.
+
+## 2026-10-08 software-first checkpoint
+
+The public, independently authored
+`blackbearreloaded/ps5-native-app-boilerplate@2f672d1c` title is now
+built and tested in the pinned CI integration workflow (PRs #353–#355):
+
+- `astraea profile`: 14 program headers, 5 load segments, 4 generic needed
+  entries, 4 SCE needed-module entries, 4 SCE import libraries, 40 RELA
+  relocations, and a zero-byte TLS template/header;
+- `astraea diagnose`: stable pre-entry typed refusal
+  `unsupported_dynamic_dependencies`, `guest_rip=0x10`,
+  `detail0=12` (sum of metadata entry categories, **not** 12 unique modules);
+- real ELF-pair offline analyzer and synthetic repeat/disagreement tests pass.
+
+This is **neither a retail game nor PS5 hardware observation**. It shows
+a genuine PC-testable closure dependency earlier than the initial-process
+ABI on this particular public artifact. See
+`docs/research/public_native_title_closure_2026-10-08.md`.
+
+Current work queue: **#356**, deterministic fail-closed module/import
+identity inventory from existing validated loader metadata; then a scoped,
+generic module/linker and relocation test slice only when independently
+reproducible. No fake-success HLE, invented ABI fields, speculative GPU
+breadth or copyrighted executable assets.
+
+The normal-title #334 two-run hardware observation is **open and unfulfilled**.
+It was corrected after an unsupported "completed" issue closure on
+2026-10-08. Keep firmware-specific hardware testing until software-side
+preflight/first-title readiness is established. The physical experiment
+must use the normal title-entry path, not the exploit payload entry;
+contributor permission, firmware provenance and console backups remain
+separate responsibilities.
+
+The C/V/S milestone definitions are unchanged. See the new
+`C1 software-first execution sequence` under `docs/PROJECT_PLAN.md`.
+Unknown load-bearing hardware state still prevents retail native entry.
 
 ## Current critical path: C1
 
@@ -225,32 +262,37 @@ Astraea does **not** currently claim:
 
 ## Next action
 
-1. Complete #334: prepare one exact pinned clean-room observer artifact, preserve
-   its provenance/hashes, and run that **same artifact twice**.
-2. Analyze both records offline with the merged C1A/C1B tooling. Promote only
-   repeatable selected-profile facts.
-3. Apply #333 and #335 to the exact selected entry path. If TLS/TCB or a
-   bootstrap effect is not observable before the first controlled stop, defer
-   it to C2 instead of blocking C1.
-4. Freeze the first executable selected-process profile. Any **unknown required**
-   field blocks admission; a field proved irrelevant before the selected stop
-   does not.
-5. Execute the real title entry under the supervised Linux runtime.
-6. Record #350 — **C2.0 First Retail Divergence** — by reproducing the first
-   typed deterministic post-entry boundary twice.
-7. From that point onward, let the C2.0 boundary choose the next generic
-   implementation slice.
+1. **#356:** derive a bounded manifest of exact generic/SCE module and
+   import identities from the public native-title ELF via existing
+   `GuestImage` / initialized-image string reader. Report declared,
+   unique, unresolved and malformed items separately; test under hostile
+   synthetic inputs and the pinned CI title. No invented Sony semantics.
+2. If #356 demonstrates a genuine generic pre-entry requirement, split the
+   minimum typed module graph and relocation/link-resolution test slice.
+   Resolve only independently modeled interfaces; fail closed on unknown
+   calls/objects. Keep the production supervisor boundary unchanged.
+3. Profile one lawfully held primary commercial-title executable and two
+   reserve candidates when artifacts are legally available. Rank independent
+   closure dimensions, not a fictitious percent complete. Store only lawful
+   normalized results and hashes.
+4. Keep the observer build, offline analyzer, repeat comparison and
+   cross-host CI green. Fix any real defect found by these tests.
+5. **Then**, when remaining selected-path facts are irreducibly hardware
+   dependent, perform #334's same-artifact two-run normal-title entry
+   observation using authorized reference hardware. Preserve unchanged
+   firmware, toolchain, hashes and two raw records; no assumption that
+   exploit-loader execution is title entry.
+6. Classify #312/#333/#335 on the bounded selected path, implement #348
+   only with evidence and keep `unknown_required` as a hard refusal.
+7. Complete C1 native real-title entry under the Linux worker and repeat
+   #350's C2.0 first typed post-entry divergence twice. Then let actual
+   C2 runtime/HLE/GPU behavior select the next generic patch.
 
-The portable `astraea profile <artifact>` surface is merged and may be used in
-parallel to compare lawfully owned first-title candidates by independent
-structural dimensions. It shares artifact-reading and planning-stack policy
-with the production diagnostic and never executes guest code.
+**Long-term product:** C3 boot → C4 real-title GPU evidence → C5 visible
+interaction → C6A in-game → C6B playable defined route → C6C
+reference-validated, guarded support, while S1–S5 scale regression,
+performance and user readiness. Proposed Astraea Verify diagnostics are
+not yet a demonstrated differentiator.
 
-Keep `unsupported_initial_process_abi` in production until the selected
-profile contains no unknown required pre-entry state.
-
-After C1, select the first lawful retail title by closure cost rather than
-prestige and start S1 first-divergence/coverage accounting immediately.
-
-Use `docs/research/ps5_initial_process_abi.md` as the durable evidence record
-and ADR 0012 for scale/readiness strategy.
+Full governing milestones: `docs/PROJECT_PLAN.md`. Hardware evidence
+remains pending; do not claim PS5 boot, gameplay or emulator superiority.
