@@ -105,6 +105,15 @@ TEST_CASE(
     REQUIRE(result.error().code ==
         OwnedModuleAbsolutePatchErrorCode::missing_rela_addend);
 
+    for (const auto binding : {0U, 3U, 15U}) {
+        p = plan(6U, RelocationTableKind::rela);
+        p.symbol_binding = static_cast<std::uint8_t>(binding);
+        result = astraea::execution::build_owned_x86_64_module_import_patch(p);
+        REQUIRE_FALSE(result.has_value());
+        REQUIRE(result.error().code ==
+            OwnedModuleAbsolutePatchErrorCode::unsupported_symbol_binding);
+    }
+
     p = plan(6U, RelocationTableKind::rela);
     p.provider_guest_address = astraea::memory::GuestAddress{0U};
     result = astraea::execution::build_owned_x86_64_module_import_patch(p);
