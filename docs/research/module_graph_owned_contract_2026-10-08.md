@@ -56,3 +56,25 @@ is permitted on the production retail path.
 
 **Related:** #300, #334 (hardware observations), #348 (selected-process ABI),
 #350 (first retail divergence), #356 (software-first dependency inventory).
+
+## Stage E: exact symbol-to-provider association (still data-only)
+
+`ModuleGraphImportPlan` joins one already-validated dynamic relocation and
+one exact-index `SceDynamicSymbolRecord` to a caller-specified graph
+requester/provider edge. It requires a defined-looking SCE long-form identity
+for the undefined dynamic symbol and returns only a **planning value**
+containing the original relocation target, raw type/addend, symbol index,
+ELF binding nibble, provider identity, and typed guest address.
+
+The planner refuses mismatched symbol indices, symbols defined in the caller's
+ELF, absent long-form SCE identity, and each graph-resolution failure. It
+does not infer which provider a PS5 import names, apply **any** relocation,
+dereference the returned address, determine symbol-version compatibility,
+treat a weak import as a zero value, or approve an unknown relocation type.
+Weak/strong binding differences are retained as input metadata; determining
+their runtime semantics requires separate evidence and tests.
+
+The acceptance tests are **owned modules only** and do not exercise a
+commercial PS5 title or solve the hardware ABI gate #334. They prove the
+composition of existing checked loaders, exact symbol identities and a
+fail-closed independent module graph without adding unverified Sony logic.
