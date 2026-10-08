@@ -52,6 +52,7 @@ ninja_edge CC "$observer_object" env PS5_PAYLOAD_SDK="$sdk_root" \
     PS5_CLANG="$target_compiler" USE_CCACHE="${USE_CCACHE:-1}" \
     sh "$root/tooling/prospero-clang18" \
     -x assembler-with-cpp -DASTRAEA_PS5_ENTRY_SYMBOL=_start \
+    -MD -MF "$observer_object.d" \
     -c "$native/astraea_entry.S" -o "$observer_object"
 """
 
@@ -236,6 +237,7 @@ def self_test() -> None:
     assert CRT_BLOCK not in patched
     assert patched.count("astraea_reference_crt_start") == 1
     assert "assembler-with-cpp" in patched
+    assert '-MD -MF "$observer_object.d"' in patched
     assert "\\\n        PS5_CLANG=" in CRT_BLOCK
     assert "\\\n        PS5_CLANG=" in PATCHED_CRT_BLOCK
 
