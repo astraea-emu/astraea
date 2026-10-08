@@ -132,6 +132,7 @@ add_executable(astraea_core_tests
 target_sources(astraea_core_tests PRIVATE
     "${CMAKE_SOURCE_DIR}/src/app/artifact_file.cpp"
     "${CMAKE_SOURCE_DIR}/src/app/retail_profile.cpp"
+    "${CMAKE_SOURCE_DIR}/src/app/retail_dependencies.cpp"
 )
 
 target_link_libraries(astraea_core_tests PRIVATE
