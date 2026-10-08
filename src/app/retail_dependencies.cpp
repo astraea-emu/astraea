@@ -271,6 +271,46 @@ constexpr std::uint64_t kMaxDependencyNameBytes = 256U;
                 << encode_hex(name->identity->library_id) << '\n'
                 << "symbol[" << i << "].module_id_hex="
                 << encode_hex(name->identity->module_id) << '\n';
+            if (public_sce_pack_v1) {
+                const auto link =
+                    astraea::loader::check_public_sce_symbol_link(
+                        name->identity->library_id,
+                        name->identity->module_id,
+                        public_library_ids,
+                        public_module_ids);
+                using astraea::loader::PublicSceSymbolLinkCode;
+                if (link.code != PublicSceSymbolLinkCode::matched) {
+                    switch (link.code) {
+                    case PublicSceSymbolLinkCode::malformed_id:
+                        throw std::runtime_error(
+                            "public_symbol_id_malformed");
+                    case PublicSceSymbolLinkCode::module_unregistered:
+                        throw std::runtime_error(
+                            "public_symbol_module_unregistered");
+                    case PublicSceSymbolLinkCode::library_unregistered:
+                        throw std::runtime_error(
+                            "public_symbol_library_unregistered");
+                    case PublicSceSymbolLinkCode::matched:
+                        break;
+                    }
+                }
+                const auto* module =
+                    public_module_ids.find(*link.module_local_id);
+                const auto* library =
+                    public_library_ids.find(*link.library_local_id);
+                if (module == nullptr || library == nullptr) {
+                    throw std::runtime_error(
+                        "public_symbol_unregistered_id");
+                }
+                out << "symbol[" << i << "].public_module_local_id="
+                    << *link.module_local_id << '\n'
+                    << "symbol[" << i << "].public_library_local_id="
+                    << *link.library_local_id << '\n'
+                    << "symbol[" << i << "].public_module_name_hex="
+                    << encode_hex(module->second) << '\n'
+                    << "symbol[" << i << "].public_library_name_hex="
+                    << encode_hex(library->second) << '\n';
+            }
         }
     }
     out << "dynamic_symbol_unique_nonempty_names="
