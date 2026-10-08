@@ -225,9 +225,10 @@ Astraea does **not** currently claim:
    `sceKernelGetProcParam()` vs mapped `PT_SCE_PROCPARAM`.
 3. Resolve C1C primary-thread TLS/TCB and C1D bootstrap effects only from
    evidence required by the selected workload.
-4. The host-independent static closure profiler from #316/#318 is merged and
-   may be used to compare lawfully owned first-title candidates without
-   changing execution admission.
+4. The host-independent static closure profiler from #316/#318 is merged.
+   Use `astraea profile <artifact>` on any supported host to compare lawfully
+   owned candidate titles by independent structural dimensions without
+   executing guest code.
 5. Keep `unsupported_initial_process_abi` in production until the complete
    selected profile is ready.
 
