@@ -72,6 +72,7 @@ enum class RetailArtifactClosureProfileErrorCode {
     analysis_stack_unavailable,
     guest_image_failure,
     static_profile_failure,
+    host_allocation_failure,
 };
 
 struct RetailArtifactClosureProfileError {
