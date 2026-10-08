@@ -223,13 +223,18 @@ Astraea does **not** currently claim:
 2. In that same run, emit the post-init #312 record and analyze it offline
    against the exact intermediate/final owned ELF pair to measure
    `sceKernelGetProcParam()` vs mapped `PT_SCE_PROCPARAM`.
-3. Resolve C1C primary-thread TLS/TCB and C1D bootstrap effects only from
-   evidence required by the selected workload.
-4. The host-independent static closure profiler from #316/#318 is merged.
+3. For C1C, optionally enrich those same runs with externally observed FS/GS
+   bases from an authorized debugger; Astraea compares unknown/zero/nonzero
+   state without depending on debugger transport or inventing fixed addresses.
+   Resolve any remaining TCB/TLS relationship only from evidence required by
+   the selected workload.
+4. Resolve C1D pre-entry bootstrap effects only from evidence required by the
+   selected workload.
+5. The host-independent static closure profiler from #316/#318 is merged.
    Use `astraea profile <artifact>` on any supported host to compare lawfully
    owned candidate titles by independent structural dimensions without
    executing guest code.
-5. Keep `unsupported_initial_process_abi` in production until the complete
+6. Keep `unsupported_initial_process_abi` in production until the complete
    selected profile is ready.
 
 After C1, select the first lawful retail title by closure cost rather than
