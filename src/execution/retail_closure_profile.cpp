@@ -85,42 +85,50 @@ constexpr std::uint32_t kPfExecute = 0x1U;
 
 std::optional<astraea::memory::GuestRange>
 choose_retail_analysis_stack(
-    std::span<const std::byte> artifact) {
-    const auto parsed =
-        astraea::loader::parse_elf64(
-            artifact,
-            astraea::loader::ElfParseProfile::ps5_sce);
+    std::span<const std::byte> artifact) noexcept {
+    try {
+        const auto parsed =
+            astraea::loader::parse_elf64(
+                artifact,
+                astraea::loader::ElfParseProfile::ps5_sce);
 
-    for (std::size_t index = 0U;
-         index < kRetailAnalysisStackCandidateCount;
-         ++index) {
-        const auto delta =
-            static_cast<std::uint64_t>(index) *
-            kRetailAnalysisStackStride;
-        if (delta > kRetailAnalysisStackFirstBase) {
-            break;
+        for (std::size_t index = 0U;
+             index < kRetailAnalysisStackCandidateCount;
+             ++index) {
+            const auto delta =
+                static_cast<std::uint64_t>(index) *
+                kRetailAnalysisStackStride;
+            if (delta > kRetailAnalysisStackFirstBase) {
+                break;
+            }
+
+            const auto candidate =
+                astraea::memory::GuestRange::create(
+                    astraea::memory::GuestAddress{
+                        kRetailAnalysisStackFirstBase - delta},
+                    astraea::memory::GuestSize{
+                        kRetailAnalysisStackSize});
+            if (!candidate.has_value()) {
+                continue;
+            }
+
+            // Preserve the eventual GuestImage parser error for malformed
+            // input. Any syntactically valid candidate is sufficient until
+            // build_guest_image() reports the real loader boundary.
+            if (!parsed.has_value() ||
+                !overlaps_load_segment(
+                    candidate.value(),
+                    parsed.value())) {
+                return candidate.value();
+            }
         }
 
-        const auto candidate =
-            astraea::memory::GuestRange::create(
-                astraea::memory::GuestAddress{
-                    kRetailAnalysisStackFirstBase - delta},
-                astraea::memory::GuestSize{
-                    kRetailAnalysisStackSize});
-        if (!candidate.has_value()) {
-            continue;
-        }
-
-        // Preserve the eventual GuestImage parser error for malformed input.
-        if (!parsed.has_value() ||
-            !overlaps_load_segment(
-                candidate.value(),
-                parsed.value())) {
-            return candidate.value();
-        }
+        return std::nullopt;
+    } catch (const std::bad_alloc&) {
+        return std::nullopt;
+    } catch (const std::length_error&) {
+        return std::nullopt;
     }
-
-    return std::nullopt;
 }
 
 RetailStaticClosureArtifactResult
