@@ -66,6 +66,23 @@ needed-module and four imported-library entries decode to distinct
 local IDs with source-compatible versions and readable published names.
 It also tests malformed input refusal.
 
+The first successfully tested independent public-title build
+([run 37850423653](https://github.com/astraea-emu/astraea/actions/runs/37850423653))
+produced these exact published names:
+
+| Generic SONAME family | Packed needed-module local ID | Packed import-library local ID | Version |
+| --- | ---: | ---: | ---: |
+| `libSceLibcInternal` | 1 | 0 | 1 |
+| `libSceSystemService` | 2 | 1 | 1 |
+| `libSceVideoOut` | 3 | 2 | 1 |
+| `libkernel` | 4 | 3 | 1 |
+
+In this independently authored sample, the module and library published
+name bytes happen to be identical for each row, but the generic
+`DT_NEEDED` SONAME has a `.prx` suffix. That relationship is
+**observed for this sample**, not universally stipulated. A refined
+exact-byte pinned-title CI assertion protects these particular rows.
+
 This is a **toolchain-pattern concordance check**, not a commercial-title
 fidelity claim: BlackBear's binary is independently built using a
 different pinned source toolchain that yields compatible-looking
