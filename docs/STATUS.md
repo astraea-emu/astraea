@@ -85,17 +85,23 @@ before retail native entry.
 Promote it in layers rather than as one guessed ABI:
 
 1. **C1A — entry register/parameter-block contract**
-   - corroborated RDI/startup-block prefix is merged;
-   - owned process-entry observation validator is merged (#308);
-   - remaining evidence: RSI teardown role and exact initial RSP/stack state.
+   - corroborated RDI/startup-block prefix is merged (#304);
+   - process-entry validator is merged (#308);
+   - preserving pre-CRT observer is merged (#325);
+   - pinned fail-closed native-title preparation is merged (#346);
+   - remaining work is the two-run #334 hardware observation for RSI/RSP.
 2. **C1B — process metadata**
-   - establish relationship to process/procparam metadata and ownership.
+   - startup vector and static `PT_SCE_PROCPARAM` are already distinct;
+   - post-init observation + offline identity analyzer are merged (#327);
+   - #334's same two runs decide the selected-profile
+     `sceKernelGetProcParam()` relationship.
 3. **C1C — primary-thread TLS/TCB**
-   - establish only the TLS/TCB/FS-GS state required before the first title
-     instruction.
+   - external optional FS/GS sidecar support is merged (#339);
+   - #333 decides whether TLS/TCB is even observable before the selected first
+     controlled stop; if not, defer it to C2.
 4. **C1D — pre-entry bootstrap effects**
-   - establish only the module/import/runtime effects that must precede title
-     entry.
+   - #335 admits only effects actually consumed before the selected first
+     controlled stop; all continuing runtime initialization belongs to C2.
 
 Dynamic TLS, additional guest threads, runtime module loads and continuing
 initialization after the first admitted instruction belong to C2 unless a
@@ -125,10 +131,11 @@ C1A prefix: RDI/process-parameter block, argc-like field at +0, argv-like
 vector at +8, and the original process pointer passed to runtime environment
 initialization. This prefix may be encoded as typed Astraea state.
 
-The software-side C1A evidence machinery is now merged. Still unresolved and
-entry-blocking: mandatory RSI teardown semantics, exact initial RSP/stack state,
-the runtime procparam/API relationship, primary-thread TLS/TCB/FS-GS, and
-bootstrap ordering.
+The software/tooling side of C1A and C1B is now merged, including the
+pre-CRT observer, same-run procparam analyzer, repeat comparator, and pinned
+external-checkout preparation. The remaining hard gate is the #334 controlled
+two-run observation, followed by selected-path decisions for #333/#335 rather
+than universal TLS/bootstrap reconstruction.
 
 ## Scalability / readiness axis
 
@@ -165,8 +172,10 @@ dependency:
 The durable compatibility ladder is:
 
 ```text
-C0 diagnostic -> C1 first retail instruction -> C2 post-entry runtime closure
- -> C3 boot -> C4 first headless title GPU/frame evidence
+C0 diagnostic -> C1 first retail instruction
+ -> C2.0 first deterministic post-entry divergence (#350)
+ -> C2 post-entry runtime closure -> C3 boot
+ -> C4 first headless title GPU/frame evidence
  -> C5 visible presentation/menu -> C6 in-game/playable/accuracy
 ```
 
@@ -216,27 +225,29 @@ Astraea does **not** currently claim:
 
 ## Next action
 
-1. Use the fail-closed
-   `tools/reference/ps5_process_entry_observer/prepare_blackbear_checkout.py`
-   helper against the pinned clean-room native-title checkout, build one exact
-   observer artifact, and run it twice to resolve RSI and exact initial RSP
-   **before CRT/compiler mutation**.
-2. In that same run, emit the post-init #312 record and analyze it offline
-   against the exact intermediate/final owned ELF pair to measure
-   `sceKernelGetProcParam()` vs mapped `PT_SCE_PROCPARAM`.
-3. For C1C, optionally enrich those same runs with externally observed FS/GS
-   bases from an authorized debugger; Astraea compares unknown/zero/nonzero
-   state without depending on debugger transport or inventing fixed addresses.
-   Resolve any remaining TCB/TLS relationship only from evidence required by
-   the selected workload.
-4. Resolve C1D pre-entry bootstrap effects only from evidence required by the
-   selected workload.
-5. Use the portable `astraea profile <artifact>` surface to compare lawfully
-   owned first-title candidates by independent structural dimensions. It shares
-   artifact-reading and planning-stack policy with the production diagnostic
-   path and never executes guest code.
-6. Keep `unsupported_initial_process_abi` in production until the complete
-   selected profile is ready.
+1. Complete #334: prepare one exact pinned clean-room observer artifact, preserve
+   its provenance/hashes, and run that **same artifact twice**.
+2. Analyze both records offline with the merged C1A/C1B tooling. Promote only
+   repeatable selected-profile facts.
+3. Apply #333 and #335 to the exact selected entry path. If TLS/TCB or a
+   bootstrap effect is not observable before the first controlled stop, defer
+   it to C2 instead of blocking C1.
+4. Freeze the first executable selected-process profile. Any **unknown required**
+   field blocks admission; a field proved irrelevant before the selected stop
+   does not.
+5. Execute the real title entry under the supervised Linux runtime.
+6. Record #350 — **C2.0 First Retail Divergence** — by reproducing the first
+   typed deterministic post-entry boundary twice.
+7. From that point onward, let the C2.0 boundary choose the next generic
+   implementation slice.
+
+The portable `astraea profile <artifact>` surface is merged and may be used in
+parallel to compare lawfully owned first-title candidates by independent
+structural dimensions. It shares artifact-reading and planning-stack policy
+with the production diagnostic and never executes guest code.
+
+Keep `unsupported_initial_process_abi` in production until the selected
+profile contains no unknown required pre-entry state.
 
 After C1, select the first lawful retail title by closure cost rather than
 prestige and start S1 first-divergence/coverage accounting immediately.
