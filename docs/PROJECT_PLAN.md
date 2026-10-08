@@ -304,9 +304,72 @@ executed yet.
 
 ### C1 — evidenced PS5 process-entry ABI / first retail instruction — active
 
-C1 is the current critical path (#300).
+C1 is the current critical path (#300). **The execution order is software-first:
+retire independently testable closure dependencies before scheduling the
+reference-console observation (#334).** No completed PC-only task substitutes
+for actual PS5 hardware entry evidence.
 
-Promote it in layers:
+### C1 software-first execution sequence — 2026-10-08
+
+This is an execution order **within C1**, not a new architectural gate or
+permission to relax #348's ABI admission rules.
+
+1. **Frozen public input (complete):** PR #355 compiles an independently
+   generated, GPL-3.0-or-later PS5-native title at pinned
+   `blackbearreloaded/ps5-native-app-boilerplate@2f672d1c`.
+   `astraea profile` succeeds; `astraea diagnose` safely stops at
+   `unsupported_dynamic_dependencies`. The input has four generic
+   `DT_NEEDED` records, four SCE needed-module records, four SCE
+   import-library records, forty RELA relocations and a zero-byte TLS
+   template/header. **The diagnostic's 12 records are not 12 distinct
+   dependency modules; no guest instruction ran.** Reproduce this in CI;
+   see `docs/research/public_native_title_closure_2026-10-08.md`.
+2. **Dependency identity (#356; first implementation):** using the existing
+   validated `GuestImage`, string bounds checking and SCE metadata,
+   classify exact raw module/library/import identities and unresolved
+   references. Preserve entry/source indices, duplicates and uncertainty.
+   Reject malformed strings; escape untrusted terminal output. Distinguish
+   declared, uniquely identified, resolved, called and semantically correct.
+   Acceptance: repeatable, bounded local manifest from the pinned public
+   image plus malformed/synthetic negative fixtures; no private artifacts.
+3. **Link/relocation closure (conditional follow-on):** only after the
+   manifest is accepted, introduce the smallest generic `ModuleGraph`,
+   mapping lifetime and HLE-vs-LLE resolution contracts that can be tested
+   with independently authored modules. Make strong/weak unresolved imports,
+   version/identity conflicts, relocation failures and initialization
+   ordering explicit. A missing PS5 library is *not* automatically resolved
+   by inventing an address or returning zero from an HLE.
+4. **Owned execution experiments (optional and isolated):** the supervisor
+   may run independently authored workloads under explicitly labelled
+   synthetic/research-only process state to validate safe transitions,
+   import dispatch and first-stop classification. This is a test harness,
+   not verified retail ABI emulation; it never changes production retail
+   admission and never counts as a C1 title-instruction milestone.
+5. **First-title and launch-readiness check:** select one lawful primary
+   retail workload using comparable closure profiles, with two reserve
+   workloads from meaningfully different engines. Establish its static
+   dependency graph, mapped entry, first bounded control-flow slice,
+   needed metadata and an exact-build reproducibility record.
+6. **Reference hardware only for irreducible unknowns (#334):** on an
+   authorized normal native-title PS5 environment, preserve one exact
+   observer binary and collect two complete pre-CRT observations, hashes,
+   toolchain/firmware/launcher provenance, per-run JSON and structural
+   comparison. A payload-loader entry or public emulator startup guess
+   is not equivalent. The research console remains untouched until
+   software closure and the native-title launch/log path are ready.
+7. **Hardware-informed entry (#312/#333/#335/#348) then C2.0 (#350):**
+   classify every selected-path load-bearing entry field as required,
+   irrelevant_before_stop or unknown_required. Admit no unknown required
+   state. Run a lawful real-title entry in the Linux supervisor and
+   reproduce the first typed post-entry divergence twice.
+
+**Sequencing rule:** steps 2–5 may occur in parallel with research, but do
+not turn speculative services, giant SDK catalogs or general GPU work into
+the critical path. Schedule step 6 only when it would resolve the earliest
+remaining selected-path uncertainty. Every accepted generic fix needs a
+reproducer, negative case, source provenance and exact-head CI.
+
+Promote the actual initial-process ABI in layers:
 
 #### C1A — entry registers and parameter block
 
@@ -703,6 +766,48 @@ retail bytes:
 
 Never commit game data, keys, decrypted system modules, or proprietary
 artifacts merely to reproduce compatibility.
+
+## 12.1. Competitive positioning and proof standard
+
+The product goal is reliable, broadly compatible and performant PS5
+emulation, not just an academically correct emulator or an impressive
+single screenshot. Existing public competitors (SharpEmu, KytyPS5,
+prosper and others) already demonstrate substantial real-title progression.
+Astraea must first earn comparable *selected-title* functionality before
+a user has a reason to choose it.
+
+The proposed product differentiator is **Astraea Verify**: reproducible
+compatibility reports that connect an exact emulator build, test route,
+host CPU/GPU/driver, first typed divergence, frame/input progression,
+and sanitized diagnostic evidence. It must remain a future product
+hypothesis until it proves useful against existing competitor diagnostics.
+
+Measure success through independently repeatable gates:
+
+- first genuine retail guest instruction and repeatable first failure;
+- generic blockers removed with zero regressions in verified routes;
+- at least one deterministic visible/menu route, then a defined playable
+  route, then a second independently selected engine;
+- semantic correctness and explicitly unsupported calls (never default
+  success from unknown service behavior);
+- scene-specific p50/p95/99th-percentile frame times and rendering
+  correctness once games produce representative frames;
+- user-quality: reproducible installs, meaningful safe crash reports and
+  clearly labelled support matrices, when S5 becomes active.
+
+No compatibility percentages based only on import/shader counts, no
+unsupported claims of superiority, and no compatibility score inferred
+from other emulators' screenshots. Keep CPU/GPU performance claims tied
+to measured comparable scenes, builds and hardware.
+
+Use public emulator and independently console-measured research as an
+**experiment queue and provenance map**, not an automatic code source.
+Check licenses per file, distinguish measured behavior from source-level
+assumptions, and never vendor no-license/GPLv2-only implementations into
+Astraea's GPLv3-or-later tree absent permission and legal review. Prefer
+official AMD/Khronos specifications, source-attributed open SDK interfaces,
+and testable independently authored examples. Do not commit commercial
+content, firmware, keys or private hardware artifacts.
 
 ## 13. Issue selection rule
 
