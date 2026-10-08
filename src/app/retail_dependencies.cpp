@@ -17,6 +17,8 @@
 #include <astraea/execution/retail_closure_profile.hpp>
 #include <astraea/loader/dynamic_metadata.hpp>
 #include <astraea/loader/dynamic_string.hpp>
+#include <astraea/loader/dynamic_symbols.hpp>
+#include <astraea/loader/sce_symbol_identity.hpp>
 #include <astraea/loader/guest_image.hpp>
 
 namespace astraea::app {
@@ -157,7 +159,72 @@ constexpr std::uint64_t kMaxDependencyNameBytes = 256U;
     out << "sce_needed_module_records=" << needed_records << '\n'
         << "sce_needed_module_unique_raw=" << needed_raw.size() << '\n'
         << "sce_import_library_records=" << library_records << '\n'
-        << "sce_import_library_unique_raw=" << libraries_raw.size() << '\n'
+        << "sce_import_library_unique_raw=" << libraries_raw.size() << '\n';
+
+    // Stage B: inventory symbols using existing checked ELF symbol and SCE
+    // long-form parsers. Do not resolve an import, infer a symbol's SDK name,
+    // or convert a symbol table row into a called function.
+    const auto symbol_count = image.dynamic_symbols.has_value()
+        ? image.dynamic_symbols->symbol_count : 0U;
+    if (symbol_count > kMaxManifestRecords) {
+        throw std::runtime_error("too_many_dynamic_symbols");
+    }
+    std::set<std::string> symbol_names;
+    out << "dynamic_symbol_records=" << symbol_count << '\n';
+    for (std::uint64_t i = 0; i < symbol_count; ++i) {
+        auto symbol = astraea::loader::parse_dynamic_symbol(
+            image.dynamic_symbols.value(), i, view.value());
+        if (!symbol.has_value()) {
+            throw std::runtime_error("dynamic_symbol_unreadable");
+        }
+        std::string raw_name;
+        if (symbol->name_offset != 0U) {
+            if (!strings.has_value() ||
+                !strings->string_table.has_value()) {
+                throw std::runtime_error("symbol_string_table_unavailable");
+            }
+            const astraea::loader::DynamicStringRef name_ref{
+                .offset = symbol->name_offset,
+                .source_entry_index =
+                    image.dynamic_symbols->symtab_source_entry_index,
+            };
+            raw_name = read_bounded_name(
+                strings->string_table.value(), name_ref, view.value());
+        }
+        const auto name = astraea::loader::parse_sce_dynamic_symbol_name(
+            raw_name);
+        if (!name.has_value()) {
+            throw std::runtime_error("malformed_sce_symbol_identity");
+        }
+        bool duplicate = false;
+        if (!raw_name.empty()) {
+            const auto [iter, fresh] = symbol_names.insert(raw_name);
+            (void)iter;
+            duplicate = !fresh;
+        }
+        out << "symbol[" << i << "].name_hex="
+            << encode_hex(raw_name) << '\n'
+            << "symbol[" << i << "].undefined="
+            << (symbol->section_index_raw == 0U ? 1 : 0) << '\n'
+            << "symbol[" << i << "].binding="
+            << static_cast<unsigned int>(symbol->binding()) << '\n'
+            << "symbol[" << i << "].type="
+            << static_cast<unsigned int>(symbol->type()) << '\n'
+            << "symbol[" << i << "].name_duplicate="
+            << (duplicate ? 1 : 0) << '\n'
+            << "symbol[" << i << "].sce_longform="
+            << (name->identity.has_value() ? 1 : 0) << '\n';
+        if (name->identity.has_value()) {
+            out << "symbol[" << i << "].nid_hex="
+                << encode_hex(name->identity->nid) << '\n'
+                << "symbol[" << i << "].library_id_hex="
+                << encode_hex(name->identity->library_id) << '\n'
+                << "symbol[" << i << "].module_id_hex="
+                << encode_hex(name->identity->module_id) << '\n';
+        }
+    }
+    out << "dynamic_symbol_unique_nonempty_names="
+        << symbol_names.size() << '\n'
         << "resolution=not_attempted\n"
         << "guest_instructions=0\n";
     return out.str();
