@@ -388,6 +388,31 @@ jobs:
                   if bytes.fromhex(name_hex) != exact_published_names[i].encode("ascii"):
                       raise SystemExit(f"pinned public ELF published-name bytes changed: {prefix}")
 
+          # Independent public linker source spells import IDs as
+          # NID#encoded-local-library-ID#encoded-local-module-ID.
+          # Verify this exact pinned title, NOT every retail PS5 title.
+          long_form_count = 0
+          for i in range(26):
+              prefix = f"symbol[{i}]"
+              if fields[f"{prefix}.sce_longform"] != "1":
+                  if any(key.startswith(f"{prefix}.public_") for key in fields):
+                      raise SystemExit(f"unclassified symbol gained a public binding: {prefix}")
+                  continue
+              long_form_count += 1
+              module_id = int(fields[f"{prefix}.public_module_local_id"])
+              library_id = int(fields[f"{prefix}.public_library_local_id"])
+              if not 1 <= module_id <= 4:
+                  raise SystemExit(f"unregistered published module: {prefix}")
+              if library_id != module_id - 1:
+                  raise SystemExit(f"pinned title local library/module mismatch: {prefix}")
+              expected_name = exact_published_names[module_id - 1].encode("ascii")
+              for component in ("module", "library"):
+                  if bytes.fromhex(fields[f"{prefix}.public_{component}_name_hex"]) != expected_name:
+                      raise SystemExit(f"published {component} name changed for {prefix}")
+          if long_form_count != 25:
+              raise SystemExit(f"expected 25 independently emitted import names, got {long_form_count}")
+          print("PUBLIC SYMBOL ID CROSSCHECK PASS: 25 long-form SCE records match")
+          print("the separately decoded module/library local IDs and names.")
           invalid = root / "bad-public-pack-title.bin"
           invalid.write_bytes(b"not-an-elf")
           refused = subprocess.run(
