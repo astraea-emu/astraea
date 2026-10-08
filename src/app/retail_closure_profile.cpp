@@ -110,6 +110,9 @@ using ArtifactReadResult =
     case RetailArtifactClosureProfileErrorCode::
         static_profile_failure:
         return "static_profile_failure";
+    case RetailArtifactClosureProfileErrorCode::
+        host_allocation_failure:
+        return "host_allocation_failure";
     }
     return "unknown";
 }
