@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <cstddef>
 #include <map>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -65,6 +66,12 @@ public:
         return PublicSceLocalIdRecordResult::inserted;
     }
 
+    [[nodiscard]] const std::pair<std::uint16_t, std::string>* find(
+        std::uint16_t local_id) const noexcept {
+        const auto it = records_.find(local_id);
+        return it == records_.end() ? nullptr : &it->second;
+    }
+
     [[nodiscard]] std::size_t size() const noexcept {
         return records_.size();
     }
@@ -72,5 +79,87 @@ public:
 private:
     std::map<std::uint16_t, std::pair<std::uint16_t, std::string>> records_;
 };
+
+// Both reviewed public native-title linkers encode their *numeric local*
+// IDs in SCE symbol suffixes using this alphabet. This is deliberately
+// separate from an 11-character NID, which has different semantics.
+// Source: BlackBear SCE writer at 2f672d1c; ps5link-sdk at ea771e53.
+// Only the explicitly selected public-toolchain profile may use this rule.
+[[nodiscard]] constexpr std::optional<std::uint16_t>
+decode_public_sce_symbol_local_id(std::string_view encoded) noexcept {
+    constexpr std::string_view alphabet =
+        "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+-";
+    // A special single A represents zero. Leading zero digits are not
+    // canonical; local IDs in this public profile are only 16 bits.
+    if (encoded.empty() || encoded.size() > 3U ||
+        (encoded.size() > 1U && encoded.front() == 'A')) {
+        return std::nullopt;
+    }
+
+    std::uint32_t value = 0U;
+    for (const char letter : encoded) {
+        const auto digit = alphabet.find(letter);
+        if (digit == std::string_view::npos) {
+            return std::nullopt;
+        }
+        value = (value * 64U) + static_cast<std::uint32_t>(digit);
+        if (value > 0xffffU) {
+            return std::nullopt;
+        }
+    }
+    return static_cast<std::uint16_t>(value);
+}
+
+enum class PublicSceSymbolLinkCode {
+    matched,
+    malformed_id,
+    module_unregistered,
+    library_unregistered,
+};
+
+struct PublicSceSymbolLink {
+    PublicSceSymbolLinkCode code = PublicSceSymbolLinkCode::malformed_id;
+    std::optional<std::uint16_t> module_local_id;
+    std::optional<std::uint16_t> library_local_id;
+
+    auto operator<=>(const PublicSceSymbolLink&) const = default;
+};
+
+// Structural consistency ONLY. The public source describes the encoded
+// suffixes as local IDs. A matching ledger name/version does not prove that
+// the named Sony module exists, that it exports the requested function, or
+// that Astraea has implemented HLE behavior.
+[[nodiscard]] inline PublicSceSymbolLink check_public_sce_symbol_link(
+    std::string_view encoded_library_id,
+    std::string_view encoded_module_id,
+    const PublicSceLocalIdLedger& libraries,
+    const PublicSceLocalIdLedger& modules) noexcept {
+    const auto library_id =
+        decode_public_sce_symbol_local_id(encoded_library_id);
+    const auto module_id =
+        decode_public_sce_symbol_local_id(encoded_module_id);
+    if (!library_id.has_value() || !module_id.has_value()) {
+        return {.code = PublicSceSymbolLinkCode::malformed_id};
+    }
+    if (modules.find(*module_id) == nullptr) {
+        return {
+            .code = PublicSceSymbolLinkCode::module_unregistered,
+            .module_local_id = *module_id,
+            .library_local_id = *library_id,
+        };
+    }
+    if (libraries.find(*library_id) == nullptr) {
+        return {
+            .code = PublicSceSymbolLinkCode::library_unregistered,
+            .module_local_id = *module_id,
+            .library_local_id = *library_id,
+        };
+    }
+    return {
+        .code = PublicSceSymbolLinkCode::matched,
+        .module_local_id = *module_id,
+        .library_local_id = *library_id,
+    };
+}
 
 }  // namespace astraea::loader
