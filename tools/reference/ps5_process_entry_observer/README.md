@@ -99,6 +99,17 @@ The external checkout is intentionally left dirty after preparation so its
 mutation is visible. Do not commit that prepared checkout unless you are
 deliberately maintaining a separate attributed research fork.
 
+Preparation also writes `.astraea-ps5-entry-observer-v0` in the external
+checkout. Preserve that file with the experiment record. It contains:
+
+- the pinned upstream revision;
+- the exact Astraea Git revision whose preparation/observer sources were used;
+- SHA-256 digests of `entry.S`, `capture.h`, and `emit_observation.cpp`.
+
+The preparation script refuses locally modified/untracked Astraea observer or
+preparation sources, so those identifiers correspond to the files actually
+copied into the external checkout.
+
 ### Required build delta
 
 For one controlled experiment:
