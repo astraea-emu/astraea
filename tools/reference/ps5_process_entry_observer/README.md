@@ -67,6 +67,38 @@ clean-room title build; it does not depend on a private runtime symbol.
 Astraea does not vendor that project. Keep the hardware experiment in a
 separate local checkout.
 
+### Preferred pinned-checkout preparation
+
+Use a fresh local checkout of the reviewed external project at:
+
+```text
+2f672d1c2f508e26f82ce6e27cef289a0861413c
+```
+
+Then run, from the Astraea checkout:
+
+```sh
+python3 tools/reference/ps5_process_entry_observer/prepare_blackbear_checkout.py \
+  --checkout /path/to/ps5-native-app-boilerplate
+```
+
+The script performs **no network or console operation**. It fails closed unless
+the external checkout is at the pinned revision, is clean, and still contains
+the exact reviewed build-script anchors. It then:
+
+- copies Astraea's observer assembly/capture/emitter into that local checkout;
+- compiles the ordinary project-owned CRT with `_start` renamed;
+- compiles the observer as preprocessed x86-64 assembly and makes it the
+  linked `_start`;
+- adds a small constructor hook that emits one record after the normal CRT
+  has completed `_init_env` and entered constructor processing;
+- leaves `build/llvm-pie.elf` and `build/eboot.elf` as the exact offline
+  analyzer inputs.
+
+The external checkout is intentionally left dirty after preparation so its
+mutation is visible. Do not commit that prepared checkout unless you are
+deliberately maintaining a separate attributed research fork.
+
 ### Required build delta
 
 For one controlled experiment:
