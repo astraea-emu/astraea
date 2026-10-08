@@ -22,6 +22,7 @@ ELFCLASS64 = 2
 ELFDATA2LSB = 1
 EM_X86_64 = 0x3E
 SHT_SYMTAB = 2
+SHT_NOBITS = 8
 PT_LOAD = 1
 PT_SCE_PROCPARAM = 0x61000001
 ANCHOR_SYMBOL = "astraea_ps5_entry_capture_v0"
@@ -142,7 +143,9 @@ def _section_headers(data: bytes, header: ElfHeader, label: str) -> list[Section
             _align,
             entsize,
         ) = _unpack_from("<IIQQQQIIQQ", data, at, f"{label} section {index}")
-        if size:
+        # SHT_NOBITS (for example .bss) occupies memory, not file bytes.
+        # Keep strict bounds checks for every file-backed section.
+        if size and section_type != SHT_NOBITS:
             _checked_slice(data, offset, size, f"{label} section {index} contents")
         result.append(
             SectionHeader(
@@ -588,7 +591,11 @@ def _elf_header(*, phoff: int, phnum: int, shoff: int, shnum: int) -> bytearray:
     return data
 
 
-def _synthetic_intermediate(*, duplicate_symbol: bool = False) -> bytes:
+def _synthetic_intermediate(
+    *,
+    duplicate_symbol: bool = False,
+    unbacked_section_type: int | None = None,
+) -> bytes:
     shoff = 0x100
     strtab_offset = 0x240
     symtab_offset = 0x280
@@ -596,8 +603,13 @@ def _synthetic_intermediate(*, duplicate_symbol: bool = False) -> bytes:
     strings = b"\0" + symbol_name + b"\0"
     symbol_count = 3 if duplicate_symbol else 2
     symtab_size = symbol_count * 24
-    total = max(shoff + 3 * 0x40, strtab_offset + len(strings), symtab_offset + symtab_size)
-    data = _elf_header(phoff=0, phnum=0, shoff=shoff, shnum=3)
+    section_count = 4 if unbacked_section_type is not None else 3
+    total = max(
+        shoff + section_count * 0x40,
+        strtab_offset + len(strings),
+        symtab_offset + symtab_size,
+    )
+    data = _elf_header(phoff=0, phnum=0, shoff=shoff, shnum=section_count)
     data.extend(b"\0" * (total - len(data)))
 
     # Section 1: string table.
@@ -634,9 +646,22 @@ def _synthetic_intermediate(*, duplicate_symbol: bool = False) -> bytes:
         8,
         24,
     )
-    struct.pack_into("<IBBHQQ", data, symtab_offset + 24, 1, 0x11, 0, 1, 0x5000, 0xA0)
+    capture_section = 3 if unbacked_section_type == SHT_NOBITS else 1
+    struct.pack_into(
+        "<IBBHQQ", data, symtab_offset + 24,
+        1, 0x11, 0, capture_section, 0x5000, 0xA0,
+    )
     if duplicate_symbol:
         struct.pack_into("<IBBHQQ", data, symtab_offset + 48, 1, 0x11, 0, 1, 0x6000, 0xA0)
+    if unbacked_section_type is not None:
+        # An unbacked .bss section is valid; a same-sized PROGBITS section
+        # pointing beyond EOF must still be rejected.
+        struct.pack_into(
+            "<IIQQQQIIQQ",
+            data,
+            shoff + 3 * 0x40,
+            0, unbacked_section_type, 0, 0, total, 0xA0, 0, 0, 16, 0,
+        )
     return bytes(data)
 
 
@@ -729,6 +754,26 @@ class SelfTests(unittest.TestCase):
         self.assertTrue(result["prefix_available"])
         self.assertTrue(result["prefix_match"])
         self.assertEqual(result["load_bias"], "0x0000000010000000")
+
+    def test_unbacked_nobits_capture_is_valid(self) -> None:
+        final = _synthetic_final()
+        result = analyze(
+            _synthetic_intermediate(unbacked_section_type=SHT_NOBITS),
+            final,
+            capture_runtime=0x10005000,
+            api_procparam_runtime=0x10007000,
+            api_procparam_prefix=final[0x180 : 0x190],
+        )
+        self.assertTrue(result["pointer_match"])
+        self.assertTrue(result["prefix_match"])
+
+    def test_truncated_file_backed_section_remains_rejected(self) -> None:
+        with self.assertRaisesRegex(AnalysisError, "section 3 contents"):
+            find_defined_symbol(
+                _synthetic_intermediate(unbacked_section_type=1),
+                ANCHOR_SYMBOL,
+                "intermediate ELF",
+            )
 
     def test_pointer_mismatch_is_observation(self) -> None:
         final = _synthetic_final()
