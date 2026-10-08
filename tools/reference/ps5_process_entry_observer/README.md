@@ -110,6 +110,40 @@ The preparation script refuses locally modified/untracked Astraea observer or
 preparation sources, so those identifiers correspond to the files actually
 copied into the external checkout.
 
+### Exact build step after preparation
+
+At the pinned external revision, `app` is the canonical normal folder-build
+target and the Makefile default. After Astraea preparation succeeds, change
+into the **prepared external checkout** and run:
+
+```sh
+make app
+```
+
+Do not run `make clean`, re-run project initialization, or rebuild from a
+different source revision between hardware run 1 and run 2.
+
+The pinned build may fetch/verify its declared public build dependencies on
+first use; that network/bootstrap behavior belongs to the external project and
+is intentionally separate from Astraea's offline preparation helper.
+
+Before deployment/run 1, preserve locally:
+
+```text
+.astraea-ps5-entry-observer-v0
+build/llvm-pie.elf
+build/eboot.elf
+dist/<TITLE_ID>/eboot.bin
+```
+
+Record SHA-256 for the three binary artifacts. Run 2 must use the same
+`dist/<TITLE_ID>/eboot.bin` bytes and the same intermediate/final ELF pair used
+by the offline analyzer.
+
+The final signed `eboot.bin` is the deployment artifact. The analyzer inputs
+remain the unsigned/intermediate `build/llvm-pie.elf` and final converted
+`build/eboot.elf` exactly as emitted by that same build.
+
 ### Required build delta
 
 For one controlled experiment:
