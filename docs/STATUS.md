@@ -216,10 +216,11 @@ Astraea does **not** currently claim:
 
 ## Next action
 
-1. Integrate the repository-owned observer in
-   `tools/reference/ps5_process_entry_observer/` into the validated owned
-   native-title toolchain and run the exact artifact twice to resolve RSI and
-   exact initial RSP **before CRT/compiler mutation**.
+1. Use the fail-closed
+   `tools/reference/ps5_process_entry_observer/prepare_blackbear_checkout.py`
+   helper against the pinned clean-room native-title checkout, build one exact
+   observer artifact, and run it twice to resolve RSI and exact initial RSP
+   **before CRT/compiler mutation**.
 2. In that same run, emit the post-init #312 record and analyze it offline
    against the exact intermediate/final owned ELF pair to measure
    `sceKernelGetProcParam()` vs mapped `PT_SCE_PROCPARAM`.
