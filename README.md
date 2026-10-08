@@ -97,12 +97,15 @@ The full architecture and gate definitions are in
 Astraea tracks three orthogonal axes:
 
 - **V — graphics technology:** bounded graphics integration and controlled differential validation;
-- **C — compatibility:** diagnostic -> first retail instruction -> post-entry runtime closure -> boot -> headless frame -> presentation -> in-game/playable -> reference-guarded support;
+- **C — compatibility:** diagnostic -> first retail instruction -> first deterministic post-entry divergence -> runtime closure -> boot -> headless frame -> presentation -> in-game/playable -> reference-guarded support;
 - **S — scalability/readiness:** first-divergence coverage, cross-title regression guards, architecture ratchets, measured performance, and eventual release quality.
 
-The current critical path is **C1**. The software-side observation machinery is
-merged; the next load-bearing work is controlled process-entry evidence, not
-speculative HLE or GPU breadth.
+The current critical path is **C1**. The software-side observer, analyzer,
+repeat comparison, optional FS/GS sidecar, and pinned external-checkout
+preparation are merged. The next load-bearing work is the controlled two-run
+hardware evidence in #334, followed by selected-path C1C/C1D decisions. The
+first post-entry milestone is C2.0: a typed reproducible retail divergence, not
+'boot'.
 
 See [`docs/README.md`](docs/README.md) for the documentation map.
 
