@@ -78,3 +78,30 @@ The acceptance tests are **owned modules only** and do not exercise a
 commercial PS5 title or solve the hardware ABI gate #334. They prove the
 composition of existing checked loaders, exact symbol identities and a
 fail-closed independent module graph without adding unverified Sony logic.
+
+## Stage F: standard x86-64 owned absolute import encoding
+
+For independently authored modules, `build_owned_x86_64_module_import_patch`
+turns an already accepted stage-E provider association into eight deterministic
+little-endian bytes. It accepts only:
+
+- `R_X86_64_GLOB_DAT` (6) in a general RELA table: 64-bit `S`;
+- `R_X86_64_JUMP_SLOT` (7) in a PLT RELA table: 64-bit `S`.
+
+Here `S` is the exactly selected provider's **guest virtual address**.
+Both types ignore the RELA addend when computing the value; the raw addend is
+retained for diagnostics. The implementation follows the published AMD64
+System V psABI, not an inferred Sony runtime-loader contract:
+https://gitlab.com/x86-psABIs/x86-64-ABI
+
+All other types and unsupported table encodings fail explicitly. The caller
+must supply a RELA addend, an initialized nonzero export address, and a
+non-overflowing eight-byte relocation target range. The output contains
+**bytes only**. It does not modify guest memory, check mapping ownership or
+write permissions, invoke HLE, establish provider lifetime, derive a Sony
+module ID, or admit a commercial guest title.
+
+Do not call this a PS5 relocation engine. Future integration requires a
+separate audited memory-application boundary using exact mapped/owned address
+ranges and conflict/rollback policies, with observed relocation types from
+the selected lawful workload and evidence for any PS5-specific differences.
