@@ -256,9 +256,15 @@ Do not modify the title entry shim to execute `RDFSBASE` or `RDGSBASE` unless
 that userspace mechanism is independently established for the selected
 environment.
 
-When an authorized external debugger can freeze/read the same title thread,
-record initial FS/GS bases externally and pass them to the offline analyzer.
-Astraea does not depend on the debugger transport.
+When an authorized external debugger can freeze/read the same **primary title
+thread at the pre-CRT boundary**, record initial FS/GS bases externally and pass
+them to the offline analyzer. The debugger observation must correspond to the
+loader entry / observer snapshot before handoff into the ordinary CRT. A value
+read later from `main` or after `_init_env` is not C1C entry evidence.
+
+Astraea does not depend on the debugger transport. If the external environment
+cannot stop the correct thread at that boundary, leave FS/GS unknown rather
+than substituting a later value.
 
 Single-run example:
 
