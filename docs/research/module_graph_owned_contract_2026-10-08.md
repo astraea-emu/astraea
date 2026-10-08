@@ -129,3 +129,28 @@ state, runtime service semantics, or safe arbitrary retail execution. Any
 future batch API requires explicit conflict/overlap policy and tested
 preflight of every target before the first write. No actual PS5 hardware
 was accessed to construct or test this feature.
+
+## Stage H: bounded preflight-first owned patch batch
+
+`apply_owned_module_import_batch` accepts no more than **256** already
+validated eight-byte owned import patches. Before writing **any** target it
+checks that *every* target is fully mapped, writable, and available through
+the existing prepared `GuestMemoryAccess` interface. It then rejects exact
+or partially overlapping target spans, even if the supplied values agree.
+Each failure reports the patch index, any overlapping earlier index, the
+typed guest-memory cause when applicable, and `applied_count=0`.
+Allocation of the batch result vector happens before the first write.
+
+Once all preflight checks pass, patches are applied sequentially by the
+already checked single-patch API and readback is testable. If a mapping
+or permission changes, or a write otherwise fails after preflight, the
+result explicitly contains the failed index and the **number already
+applied**. **There is no rollback and no atomicity guarantee.** Do not
+use this API on concurrently mutable guest mappings without additional
+synchronization and provider lifetime validation.
+
+Independently owned tests cover empty batches, over-cap refusal, two
+disjoint writable targets with exact readback, overlap refusal before
+mutation, and a later unmapped target causing whole-batch preflight
+rejection without changing the earlier valid target. There is no
+retail-title admission, Sony import resolution or PS5 hardware proof.
