@@ -94,3 +94,9 @@ jobs:
               print(f'{hashlib.sha256(path.read_bytes()).hexdigest()}  {path.relative_to(checkout)}')
           print('HOST BUILD ONLY; no hardware execution or C1 ABI promotion')
           PY
+
+      - name: Exercise real-ELF offline analysis with labelled synthetic logs
+        run: |
+          python3 tools/reference/ps5_process_entry_observer/offline_pipeline_smoke.py \
+            --intermediate "$RUNNER_TEMP/ps5-native-app-boilerplate/build/llvm-pie.elf" \
+            --final "$RUNNER_TEMP/ps5-native-app-boilerplate/build/eboot.elf"
