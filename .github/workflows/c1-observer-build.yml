@@ -100,3 +100,41 @@ jobs:
           python3 tools/reference/ps5_process_entry_observer/offline_pipeline_smoke.py \
             --intermediate "$RUNNER_TEMP/ps5-native-app-boilerplate/build/llvm-pie.elf" \
             --final "$RUNNER_TEMP/ps5-native-app-boilerplate/build/eboot.elf"
+
+      - name: Build Astraea's production read-only diagnostics
+        run: |
+          cmake -S . -B "$RUNNER_TEMP/astraea-native-title-smoke" -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DBUILD_TESTING=OFF \
+            -DASTRAEA_WARNINGS_AS_ERRORS=ON
+          cmake --build "$RUNNER_TEMP/astraea-native-title-smoke" \
+            --target astraea --parallel 3
+
+      - name: Probe public independent PS5-format title with Astraea
+        run: |
+          python3 - <<'PY'
+          import pathlib
+          import subprocess
+          import os
+
+          root = pathlib.Path(os.environ["RUNNER_TEMP"])
+          astr = root / "astraea-native-title-smoke/astraea"
+          homebrew = root / "ps5-native-app-boilerplate"
+          assert astr.is_file() and astr.stat().st_size > 0
+          target = homebrew / "build/eboot.elf"
+          assert target.is_file() and target.stat().st_size > 0
+          for command in ("profile", "diagnose"):
+              result = subprocess.run(
+                  [str(astr), command, str(target)],
+                  capture_output=True,
+                  text=True,
+                  timeout=30,
+                  check=False,
+              )
+              print(f"ASTRAEA_{command.upper()}_RC={result.returncode}")
+              print(result.stdout[:6000])
+              print(result.stderr[:6000])
+              if result.returncode < 0:
+                  raise SystemExit(f"{command} terminated by signal {-result.returncode}")
+          print("NO PS5 HARDWARE OBSERVATION; public clean-room title only.")
+          PY
