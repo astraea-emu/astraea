@@ -310,8 +310,9 @@ Promote it in layers:
 
 #### C1A — entry registers and parameter block
 
-The independently corroborated startup prefix and the transport-neutral
-process-entry observation validator are merged.
+The independently corroborated startup prefix, transport-neutral validator,
+preserving pre-CRT observer, repeat comparator, and pinned fail-closed external
+native-title preparation are merged.
 
 Promoted prefix:
 
@@ -321,42 +322,63 @@ Promoted prefix:
 - the original startup-block pointer reaches runtime environment
   initialization.
 
-Remaining C1A evidence is intentionally narrow: establish RSI teardown
-semantics and exact initial RSP/stack state from an owned pre-CRT observation.
+Remaining C1A evidence is intentionally narrow: #334 runs one exact prepared
+owned title artifact twice to establish the selected-profile RSI/RSP behavior.
 Do not manufacture those fields from comparative emulator behavior.
 
 #### C1B — process metadata
 
-Establish required process/procparam metadata and its relationship to the
-loader-provided entry state.
+The loader-built startup vector and static ELF `PT_SCE_PROCPARAM` are
+separate concepts. The post-init observer and offline identity analyzer are
+merged; #334's same two runs establish the selected-profile relationship among
+the startup vector, `sceKernelGetProcParam()`, and mapped
+`PT_SCE_PROCPARAM`.
 
 #### C1C — primary-thread TLS/TCB
 
-Establish only the TLS/TCB state that must already exist **before the first
-title instruction**: initial image placement/identity as required, initial
-FS/GS bases, and the minimum primary-thread control state.
+C1C is a **selected-path dependency**, not a universal prerequisite. Inspect
+the exact path from entry to Astraea's first controlled stop.
+
+If that path cannot observe FS/GS/TLS/TCB, mark those facts irrelevant before
+the selected stop and defer them to C2. If it does observe them, measure only
+the exact first required relationship. Optional external FS/GS sidecar support
+is already available without coupling Astraea to debugger transport.
 
 Dynamic TLS, additional guest threads, TLS module growth and runtime thread
-lifecycle belong to C2 unless the selected title proves one of them is a
-pre-entry requirement.
+lifecycle belong to C2 unless the selected path proves otherwise.
 
 #### C1D — pre-entry bootstrap effects
 
-Establish only which module/import/runtime effects must be complete **before
-title entry** for the selected workload.
+C1D is also selected-path driven. Promote only module/import/runtime effects
+actually consumed before the selected first controlled stop.
 
-C1D does not require implementing every runtime module or continuing
-initialization after entry. Those first post-entry dependencies define C2.
+C1D does not require implementing every runtime module, `_init_env`,
+constructors, dynamic TLS, later threads, or continuing initialization merely
+because they are startup-adjacent. Those first post-entry dependencies define
+C2 unless the selected path proves otherwise.
 
 **C1 completion criterion:** one selected legally obtained or independently
 owned title/profile may execute its first native retail instructions without
 using Astraea's synthetic owned-probe stack and without inventing unknown entry
 state.
 
+### C2.0 — first deterministic post-entry retail divergence
+
+Immediately after C1, run the selected title until the first **typed,
+reproducible post-entry boundary** (#350).
+
+C2.0 does not require boot or a minimum instruction count. It requires:
+
+- real title entry through the evidenced selected profile;
+- guest RIP/context for the first post-entry stop;
+- a typed boundary/fault classification;
+- repeat-run agreement on the normalized first boundary.
+
+That boundary chooses the first C2 implementation slice.
+
 ### C2 — post-entry runtime closure
 
-Advance from the first admitted title instruction through the first real
-post-entry runtime dependencies:
+Advance from C2.0 through the real post-entry dependencies one at a time:
 
 - module graph / runtime linker;
 - relocation/import completion beyond the pre-entry minimum;
@@ -757,6 +779,9 @@ compatibility:
        C1A corroborated startup prefix            MERGED
        C1A observation validator                  MERGED (#308)
        C1B procparam relationship                 RESEARCH (#312)
+     |
+     v
+    C2.0 first deterministic retail divergence
      |
      v
     C2 post-entry runtime/modules/HLE
