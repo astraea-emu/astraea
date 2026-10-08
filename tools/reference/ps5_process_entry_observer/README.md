@@ -250,6 +250,54 @@ proves:
 Other CI platforms compile the portable record-layout test but do not assemble
 or execute the x86-64 shim.
 
+## Optional C1C FS/GS sidecar evidence
+
+Do not modify the title entry shim to execute `RDFSBASE` or `RDGSBASE` unless
+that userspace mechanism is independently established for the selected
+environment.
+
+When an authorized external debugger can freeze/read the same **primary title
+thread at the pre-CRT boundary**, record initial FS/GS bases externally and pass
+them to the offline analyzer. The debugger observation must correspond to the
+loader entry / observer snapshot before handoff into the ordinary CRT. A value
+read later from `main` or after `_init_env` is not C1C entry evidence.
+
+Astraea does not depend on the debugger transport. If the external environment
+cannot stop the correct thread at that boundary, leave FS/GS unknown rather
+than substituting a later value.
+
+Single-run example:
+
+```sh
+python3 tools/reference/ps5_process_entry_observer/procparam_identity.py \
+  --intermediate /path/to/build/llvm-pie.elf \
+  --final /path/to/build/eboot.elf \
+  --log-file /path/to/run1.log \
+  --fs-base 0x... \
+  --gs-base 0x...
+```
+
+Two-run structural comparison:
+
+```sh
+python3 tools/reference/ps5_process_entry_observer/procparam_identity.py \
+  --intermediate /path/to/build/llvm-pie.elf \
+  --final /path/to/build/eboot.elf \
+  --compare-log-files run1.log run2.log \
+  --compare-fs-bases 0x... 0x... \
+  --compare-gs-bases unknown unknown
+```
+
+`unknown`, observed zero, and observed nonzero are distinct states. Raw FS/GS
+addresses are retained in each run's output but excluded from repeat equality;
+only the optional zero/nonzero state is compared.
+
+Public experiment-design references include FreeBSD's debugger-visible
+`PT_GETFSBASE`/`PT_GETGSBASE` requests and public PS5 debugging tooling with
+a dedicated external FS/GS-base read. These justify an external observation
+route only; they do not establish any PS5 entry value or make debugger
+transport part of Astraea.
+
 ## Provenance boundary
 
 Do not commit:
