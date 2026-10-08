@@ -29,6 +29,9 @@ artifact_profile_error_name(
     case RetailStaticClosureArtifactErrorCode::
         profile_failure:
         return "profile_failure";
+    case RetailStaticClosureArtifactErrorCode::
+        host_allocation_failure:
+        return "host_allocation_failure";
     }
     return "unknown";
 }
