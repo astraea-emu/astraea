@@ -95,8 +95,10 @@ System V psABI, not an inferred Sony runtime-loader contract:
 https://gitlab.com/x86-psABIs/x86-64-ABI
 
 All other types and unsupported table encodings fail explicitly. The caller
-must supply a RELA addend, an initialized nonzero export address, and a
-non-overflowing eight-byte relocation target range. The output contains
+must supply a RELA addend, an initialized nonzero export address, a generic ELF
+global (1) or weak (2) symbol binding, and a non-overflowing eight-byte
+relocation target range. Weak import **fallback behavior** is not inferred;
+only an already resolved, explicitly selected weak symbol is acceptable. The output contains
 **bytes only**. It does not modify guest memory, check mapping ownership or
 write permissions, invoke HLE, establish provider lifetime, derive a Sony
 module ID, or admit a commercial guest title.
