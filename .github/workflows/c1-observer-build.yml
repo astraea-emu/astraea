@@ -123,7 +123,7 @@ jobs:
           assert astr.is_file() and astr.stat().st_size > 0
           target = homebrew / "build/eboot.elf"
           assert target.is_file() and target.stat().st_size > 0
-          for command in ("profile", "diagnose"):
+          def run_and_report(command):
               result = subprocess.run(
                   [str(astr), command, str(target)],
                   capture_output=True,
@@ -134,7 +134,47 @@ jobs:
               print(f"ASTRAEA_{command.upper()}_RC={result.returncode}")
               print(result.stdout[:6000])
               print(result.stderr[:6000])
-              if result.returncode < 0:
-                  raise SystemExit(f"{command} terminated by signal {-result.returncode}")
-          print("NO PS5 HARDWARE OBSERVATION; public clean-room title only.")
+              if result.returncode != 0:
+                  raise SystemExit(f"{command} did not return its typed success report")
+              if result.stderr.strip():
+                  raise SystemExit(f"{command} unexpectedly emitted stderr")
+              fields = {}
+              for line in result.stdout.splitlines()[1:]:
+                  if "=" not in line:
+                      continue
+                  key, value = line.split("=", 1)
+                  if key in fields:
+                      raise SystemExit(f"{command} repeated output field {key}")
+                  fields[key] = value
+              return fields
+
+          profile = run_and_report("profile")
+          for key, expected in {
+              "program_headers": "14",
+              "load_segments": "5",
+              "sce_needed_modules": "4",
+              "sce_import_libraries": "4",
+              "total_relocations": "40",
+              "tls_present": "1",
+          }.items():
+              if profile.get(key) != expected:
+                  raise SystemExit(
+                      f"pinned public ELF {key}: expected {expected}, "
+                      f"observed {profile.get(key)}"
+                  )
+
+          diagnosis = run_and_report("diagnose")
+          for key, expected in {
+              "boundary": "unsupported_dynamic_dependencies",
+              "stage": "pre_entry",
+              "guest_rip": "0x10",
+              "detail0": "12",
+          }.items():
+              if diagnosis.get(key) != expected:
+                  raise SystemExit(
+                      f"pinned public ELF {key}: expected {expected}, "
+                      f"observed {diagnosis.get(key)}"
+                  )
+          print("REAL CLEAN-ROOM ELF PROFILE/DIAGNOSTIC REGRESSION PASS.")
+          print("NO GUEST INSTRUCTIONS EXECUTED; NO PS5 HARDWARE OBSERVATION.")
           PY
