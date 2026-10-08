@@ -1,5 +1,7 @@
 #include "linux_retail_diagnostic.hpp"
 
+#include "artifact_file.hpp"
+
 #include <algorithm>
 #include <array>
 #include <bit>
@@ -8,13 +10,10 @@
 #include <cstdint>
 #include <cstdlib>
 #include <filesystem>
-#include <fstream>
 #include <iostream>
 #include <limits>
-#include <new>
 #include <optional>
 #include <span>
-#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <system_error>
@@ -27,6 +26,7 @@
 #include <astraea/execution/guest_worker_protocol.hpp>
 #include <astraea/execution/guest_worker_wire.hpp>
 #include <astraea/execution/linux_retail_diagnostic.hpp>
+#include <astraea/execution/retail_closure_profile.hpp>
 #include <astraea/loader/elf64.hpp>
 #include <astraea/memory/guest_address.hpp>
 
@@ -41,16 +41,6 @@ namespace astraea::app {
 namespace {
 
 #if defined(__linux__) && defined(__x86_64__)
-
-constexpr std::size_t kMaxRetailArtifactBytes =
-    1024ULL * 1024ULL * 1024ULL;
-constexpr std::uint64_t kPlanningStackSize =
-    2ULL * 1024ULL * 1024ULL;
-constexpr std::uint64_t kPlanningStackFirstBase =
-    0x00007fff00000000ULL;
-constexpr std::uint64_t kPlanningStackStride =
-    0x01000000ULL;
-constexpr std::size_t kPlanningStackCandidateCount = 256U;
 
 constexpr astraea::execution::GuestWorkerId kWorkerId{
     .value = 1U,
@@ -180,78 +170,6 @@ bind_worker_lifetime_to_controller() noexcept {
 #else
     return false;
 #endif
-}
-
-[[nodiscard]] bool overlaps_load_segment(
-    astraea::memory::GuestRange candidate,
-    const astraea::loader::ElfImage& elf) noexcept {
-    constexpr std::uint32_t kPtLoad = 1U;
-
-    for (const auto& header :
-         elf.program_headers) {
-        if (header.type != kPtLoad ||
-            header.memory_size == 0U) {
-            continue;
-        }
-
-        const auto range =
-            astraea::memory::GuestRange::create(
-                astraea::memory::GuestAddress{
-                    header.virtual_address},
-                astraea::memory::GuestSize{
-                    header.memory_size});
-        if (!range.has_value() ||
-            candidate.overlaps(range.value())) {
-            return true;
-        }
-    }
-    return false;
-}
-
-[[nodiscard]] std::optional<
-    astraea::memory::GuestRange>
-choose_planning_stack(
-    std::span<const std::byte> artifact) {
-    using namespace astraea;
-
-    const auto parsed =
-        loader::parse_elf64(
-            artifact,
-            loader::ElfParseProfile::ps5_sce);
-
-    for (std::size_t index = 0U;
-         index < kPlanningStackCandidateCount;
-         ++index) {
-        const auto delta =
-            static_cast<std::uint64_t>(index) *
-            kPlanningStackStride;
-        if (delta > kPlanningStackFirstBase) {
-            break;
-        }
-
-        const auto candidate =
-            memory::GuestRange::create(
-                memory::GuestAddress{
-                    kPlanningStackFirstBase -
-                    delta},
-                memory::GuestSize{
-                    kPlanningStackSize});
-        if (!candidate.has_value()) {
-            continue;
-        }
-
-        // If parsing already failed, the preflight will preserve that loader
-        // error before stack-overlap validation. Any well-formed candidate is
-        // therefore sufficient.
-        if (!parsed.has_value() ||
-            !overlaps_load_segment(
-                candidate.value(),
-                parsed.value())) {
-            return candidate.value();
-        }
-    }
-
-    return std::nullopt;
 }
 
 [[nodiscard]] astraea::execution::
@@ -431,146 +349,6 @@ diagnostic_from_preflight(
     return "unknown";
 }
 
-enum class ArtifactReadErrorCode {
-    open_failed,
-    size_query_failed,
-    empty_artifact,
-    artifact_too_large,
-    read_failed,
-    artifact_changed_during_read,
-    host_allocation_failure,
-};
-
-using ArtifactReadResult =
-    astraea::core::Result<
-        std::vector<std::byte>,
-        ArtifactReadErrorCode>;
-
-[[nodiscard]] std::string_view
-artifact_read_error_name(
-    ArtifactReadErrorCode code) noexcept {
-    switch (code) {
-    case ArtifactReadErrorCode::open_failed:
-        return "open_failed";
-    case ArtifactReadErrorCode::size_query_failed:
-        return "size_query_failed";
-    case ArtifactReadErrorCode::empty_artifact:
-        return "empty_artifact";
-    case ArtifactReadErrorCode::artifact_too_large:
-        return "artifact_too_large";
-    case ArtifactReadErrorCode::read_failed:
-        return "read_failed";
-    case ArtifactReadErrorCode::
-        artifact_changed_during_read:
-        return "artifact_changed_during_read";
-    case ArtifactReadErrorCode::
-        host_allocation_failure:
-        return "host_allocation_failure";
-    }
-    return "unknown";
-}
-
-[[nodiscard]] ArtifactReadResult
-read_artifact_file(
-    std::string_view artifact_path) {
-    try {
-        const std::filesystem::path path{
-            std::string{artifact_path}};
-
-        // Size and read through the same opened file object. Do not stat a
-        // path and then reopen it: that creates a path-replacement race and
-        // can turn a growing file into a silently truncated diagnostic
-        // artifact.
-        std::ifstream input(
-            path,
-            std::ios::binary |
-                std::ios::ate);
-        if (!input) {
-            return ArtifactReadResult::failure(
-                ArtifactReadErrorCode::
-                    open_failed);
-        }
-
-        const auto end = input.tellg();
-        if (end < std::streampos{0}) {
-            return ArtifactReadResult::failure(
-                ArtifactReadErrorCode::
-                    size_query_failed);
-        }
-        if (end == std::streampos{0}) {
-            return ArtifactReadResult::failure(
-                ArtifactReadErrorCode::
-                    empty_artifact);
-        }
-
-        const auto byte_count =
-            static_cast<std::uintmax_t>(
-                static_cast<std::streamoff>(end));
-        if (byte_count >
-                static_cast<std::uintmax_t>(
-                    kMaxRetailArtifactBytes) ||
-            byte_count >
-                static_cast<std::uintmax_t>(
-                    std::numeric_limits<
-                        std::size_t>::max()) ||
-            byte_count >
-                static_cast<std::uintmax_t>(
-                    std::numeric_limits<
-                        std::streamsize>::max())) {
-            return ArtifactReadResult::failure(
-                ArtifactReadErrorCode::
-                    artifact_too_large);
-        }
-
-        input.seekg(0, std::ios::beg);
-        if (!input) {
-            return ArtifactReadResult::failure(
-                ArtifactReadErrorCode::
-                    read_failed);
-        }
-
-        const auto host_size =
-            static_cast<std::size_t>(
-                byte_count);
-        std::vector<std::byte> bytes(
-            host_size);
-        input.read(
-            reinterpret_cast<char*>(
-                bytes.data()),
-            static_cast<std::streamsize>(
-                host_size));
-        if (!input ||
-            static_cast<std::size_t>(
-                input.gcount()) !=
-                host_size) {
-            return ArtifactReadResult::failure(
-                ArtifactReadErrorCode::
-                    read_failed);
-        }
-
-        // Refuse a file that grew after sizing instead of silently diagnosing
-        // a prefix of a moving target.
-        char trailing = '\0';
-        input.read(&trailing, 1);
-        if (input.gcount() != 0) {
-            return ArtifactReadResult::failure(
-                ArtifactReadErrorCode::
-                    artifact_changed_during_read);
-        }
-
-        return ArtifactReadResult::success(
-            std::move(bytes));
-    } catch (const std::bad_alloc&) {
-        return ArtifactReadResult::failure(
-            ArtifactReadErrorCode::
-                host_allocation_failure);
-    } catch (const std::length_error&) {
-        return ArtifactReadResult::failure(
-            ArtifactReadErrorCode::
-                host_allocation_failure);
-    }
-}
-
 [[nodiscard]] std::optional<std::string>
 current_executable_path() {
     std::error_code error;
@@ -645,7 +423,7 @@ int run_linux_retail_diagnostic_worker() {
     }
 
     const auto stack =
-        choose_planning_stack(
+        choose_retail_analysis_stack(
             artifact.value());
     if (!stack.has_value()) {
         return 78;
