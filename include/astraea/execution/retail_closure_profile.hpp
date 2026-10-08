@@ -24,7 +24,7 @@ inline constexpr std::size_t
 
 [[nodiscard]] std::optional<astraea::memory::GuestRange>
 choose_retail_analysis_stack(
-    std::span<const std::byte> artifact);
+    std::span<const std::byte> artifact) noexcept;
 
 struct RetailStaticClosureProfile {
     std::uint64_t program_header_count = 0;
