@@ -217,6 +217,7 @@ add_executable(astraea
     src/app/artifact_file.cpp
     src/app/linux_retail_diagnostic.cpp
     src/app/retail_profile.cpp
+    src/app/retail_dependencies.cpp
 )
 target_link_libraries(astraea PRIVATE Astraea::core)
 astraea_set_project_warnings(astraea)
