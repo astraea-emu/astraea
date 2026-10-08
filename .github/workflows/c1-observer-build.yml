@@ -49,8 +49,6 @@ jobs:
             USE_CCACHE=0 app
 
       - name: Verify build outputs and selected entry symbol
-        env:
-          C1_CHECKOUT: \${{ runner.temp }}/ps5-native-app-boilerplate
         run: |
           python3 - <<'PY'
           import pathlib
@@ -59,7 +57,7 @@ jobs:
           import os
           import hashlib
 
-          checkout = pathlib.Path(os.environ['C1_CHECKOUT'])
+          checkout = pathlib.Path(os.environ['RUNNER_TEMP']) / 'ps5-native-app-boilerplate'
           source = pathlib.Path('tools/reference/ps5_process_entry_observer/procparam_identity.py')
           analyzer = runpy.run_path(str(source))
           intermediate_path = checkout / 'build/llvm-pie.elf'
