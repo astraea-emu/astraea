@@ -12,10 +12,12 @@ void write_u16(
     std::vector<std::byte>& bytes,
     std::size_t offset,
     std::uint16_t value) {
+    const auto widened =
+        static_cast<std::uint32_t>(value);
     for (std::size_t i = 0; i < 2; ++i) {
         bytes[offset + i] =
             static_cast<std::byte>(
-                (value >> (i * 8U)) & 0xffU);
+                (widened >> (i * 8U)) & 0xffU);
     }
 }
 
