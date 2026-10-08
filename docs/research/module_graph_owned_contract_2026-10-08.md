@@ -1,0 +1,58 @@
+# Owned module-graph contract (C1 software-first, stage D)
+
+**Status:** exploratory until PR #361's complete CI gate passes.
+
+## Purpose and evidence
+
+PRs #358–#360 classified the public native title's needed modules, opaque
+SCE dynamic symbols, and relocation-to-symbol references without executing
+guest code. A static identity is not sufficient to bind or call a system
+service. This stage provides a deliberately minimal, generic **data-only**
+module dependency graph that can be verified using *independently authored*
+modules on PC hosts.
+
+The graph accepts exact **caller-supplied** module keys, each declared
+dependency key, and (where known) exported `SceSymbolIdentity` to typed
+**guest addresses**. The graph **does not derive** any module key from
+the raw SCE packed `DT_SCE_NEEDED_MODULE` records, guess IDs, bind NIDs to
+Sony functions, perform HLE/LLE dispatch, apply relocations, or construct
+initial PS5 process state. Caller-provided keys remain opaque until an
+independent identity-mapping contract is evidenced.
+
+## Structural and resolution rules
+
+- Maximum 64 module declarations; per declaration maximum 64 dependencies
+  and 512 exports; each key limited to 256 bytes.
+- Duplicate module identities, duplicate dependency edges, invalid opaque
+  keys, duplicate exported `nid/library_id/module_id` triplets, invalid
+  export names and zero guest addresses fail graph creation.
+- Resolution is exact and restricted to a requester-declared provider edge.
+  Cross-provider fallback and global symbol scans are intentionally absent.
+- A missing requester, undeclared dependency, unavailable provider,
+  invalid symbol identity, or missing export yields a distinct typed
+  **failure without a guest address**.
+- Different explicit providers may export identical symbol triplets without
+  conflict: the requesting module must select which provider to target.
+- All returned addresses are typed guest virtual addresses and are **never**
+  dereferenced or invoked by this graph. Import strong/weak binding policy,
+  version matching, provider lifetime and relocation application require
+  later separately evidenced work.
+
+## Tests and limits
+
+`tests/execution/module_graph_tests.cpp` uses owned, dummy modules and
+opaque identities; tests exact resolution, unrelated providers, missing
+dependencies, unregistered providers, duplicate edges/modules/exports and
+invalid export addresses/identities. The tests make no claim about an
+actual PS5 dynamic linker and are not evidence for firmware 13.00.
+
+Before using this abstraction with commercial executable inputs, the
+following must be independently demonstrated: mapping SCE long-form
+symbol module/library IDs to a particular provider module identity,
+relocation types and addends, weak/strong binding, mapping lifetime,
+and the first guest-visible control transfer. Unknown fields remain
+explicitly unsupported; no fake-success HLE or synthetic startup ABI
+is permitted on the production retail path.
+
+**Related:** #300, #334 (hardware observations), #348 (selected-process ABI),
+#350 (first retail divergence), #356 (software-first dependency inventory).
