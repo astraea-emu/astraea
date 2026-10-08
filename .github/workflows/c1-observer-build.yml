@@ -273,6 +273,42 @@ jobs:
               raise SystemExit("impossible unique symbol count")
           print(f"SYMBOL CENSUS PASS: 26 records, {named} named, "
                 f"{undefined} undefined, {longform} long-form SCE identities.")
+          if fields.get("relocation_records") != "40":
+              raise SystemExit("pinned public ELF relocation count changed")
+          symbols = set()
+          counts = {}
+          for i in range(40):
+              prefix = f"relocation[{i}]"
+              kind = fields[f"{prefix}.table"]
+              if kind not in ("rel", "rela", "plt_rel", "plt_rela"):
+                  raise SystemExit(f"invalid relocation kind {kind!r}")
+              counts[kind] = counts.get(kind, 0) + 1
+              if not re.fullmatch(r"0x[0-9a-f]+", fields[f"{prefix}.target"]):
+                  raise SystemExit(f"invalid relocation target for {prefix}")
+              if not re.fullmatch(r"0x[0-9a-f]+", fields[f"{prefix}.raw_info"]):
+                  raise SystemExit(f"invalid raw relocation info for {prefix}")
+              if not 0 <= int(fields[f"{prefix}.type"]) < 2**32:
+                  raise SystemExit(f"invalid relocation type for {prefix}")
+              si = int(fields[f"{prefix}.symbol_index"])
+              if not 0 <= si < 26:
+                  raise SystemExit(f"symbol reference out of range for {prefix}")
+              symbols.add(si)
+              has_addend = fields[f"{prefix}.has_addend"]
+              if has_addend != ("1" if kind.endswith("rela") else "0"):
+                  raise SystemExit(f"addend marker mismatches record kind {prefix}")
+              if has_addend == "1":
+                  int(fields[f"{prefix}.addend"])
+              else:
+                  if f"{prefix}.addend" in fields:
+                      raise SystemExit(f"REL record unexpectedly has addend {prefix}")
+          if counts != {"rela": 40}:
+              raise SystemExit(f"unexpected relocation kinds in pinned title: {counts}")
+          if int(fields["relocation_unique_symbol_indices"]) != len(symbols):
+              raise SystemExit("unique relocation symbol count inconsistent")
+          if fields.get("relocation_application") != "not_attempted":
+              raise SystemExit("static manifest claimed relocation application")
+          print(f"RELOCATION CENSUS PASS: 40 RELA records; "
+                f"{len(symbols)} distinct referenced symbol indices.")
           malformed = root / "astraea-invalid-dependency-input.bin"
           malformed.write_bytes(b"not-an-elf")
           rejected = subprocess.run(

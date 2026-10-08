@@ -18,6 +18,7 @@
 #include <astraea/loader/dynamic_metadata.hpp>
 #include <astraea/loader/dynamic_string.hpp>
 #include <astraea/loader/dynamic_symbols.hpp>
+#include <astraea/loader/dynamic_relocations.hpp>
 #include <astraea/loader/sce_symbol_identity.hpp>
 #include <astraea/loader/guest_image.hpp>
 
@@ -224,7 +225,71 @@ constexpr std::uint64_t kMaxDependencyNameBytes = 256U;
         }
     }
     out << "dynamic_symbol_unique_nonempty_names="
-        << symbol_names.size() << '\n'
+        << symbol_names.size() << '\n';
+
+    // Stage C: use the existing validated relocation reader for a static
+    // census. A relocation symbol index is a reference, not a resolved HLE.
+    // The loader's x86-64 relocation semantics are NOT applied by this path.
+    std::size_t total_relocations = 0U;
+    std::set<std::uint32_t> relocation_symbols;
+    const auto read_table = [&](
+        const std::optional<
+            astraea::loader::DynamicRelocationTableDescriptor>& descriptor,
+        std::string_view kind) {
+        if (!descriptor.has_value()) {
+            return;
+        }
+        if (descriptor->count > kMaxManifestRecords ||
+            total_relocations >
+                kMaxManifestRecords -
+                    static_cast<std::size_t>(descriptor->count)) {
+            throw std::runtime_error("too_many_relocations");
+        }
+        if (!image.dynamic_symbols.has_value()) {
+            throw std::runtime_error("relocations_missing_symbol_table");
+        }
+        for (std::uint64_t i = 0; i < descriptor->count; ++i) {
+            const auto relocation = astraea::loader::parse_dynamic_relocation(
+                descriptor.value(),
+                i,
+                image.dynamic_symbols.value(),
+                view.value());
+            if (!relocation.has_value()) {
+                throw std::runtime_error("relocation_unreadable");
+            }
+            relocation_symbols.insert(relocation->symbol_index);
+            const auto row = total_relocations++;
+            out << "relocation[" << row << "].table="
+                << kind << '\n'
+                << "relocation[" << row << "].table_index="
+                << relocation->table_index << '\n'
+                << "relocation[" << row << "].target=0x"
+                << std::hex << relocation->target.value() << std::dec << '\n'
+                << "relocation[" << row << "].type="
+                << relocation->relocation_type << '\n'
+                << "relocation[" << row << "].symbol_index="
+                << relocation->symbol_index << '\n'
+                << "relocation[" << row << "].raw_info=0x"
+                << std::hex << relocation->raw_info << std::dec << '\n'
+                << "relocation[" << row << "].has_addend="
+                << (relocation->addend.has_value() ? 1 : 0) << '\n';
+            if (relocation->addend.has_value()) {
+                out << "relocation[" << row << "].addend="
+                    << relocation->addend.value() << '\n';
+            }
+        }
+    };
+    read_table(image.general_relocations.rel, "rel");
+    read_table(image.general_relocations.rela, "rela");
+    read_table(image.plt_relocations,
+        image.plt_relocations.has_value() &&
+        image.plt_relocations->kind ==
+            astraea::loader::RelocationTableKind::plt_rel
+        ? "plt_rel" : "plt_rela");
+    out << "relocation_records=" << total_relocations << '\n'
+        << "relocation_unique_symbol_indices="
+        << relocation_symbols.size() << '\n'
+        << "relocation_application=not_attempted\n"
         << "resolution=not_attempted\n"
         << "guest_instructions=0\n";
     return out.str();
