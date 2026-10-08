@@ -100,3 +100,81 @@ jobs:
           python3 tools/reference/ps5_process_entry_observer/offline_pipeline_smoke.py \
             --intermediate "$RUNNER_TEMP/ps5-native-app-boilerplate/build/llvm-pie.elf" \
             --final "$RUNNER_TEMP/ps5-native-app-boilerplate/build/eboot.elf"
+
+      - name: Build Astraea's production read-only diagnostics
+        run: |
+          cmake -S . -B "$RUNNER_TEMP/astraea-native-title-smoke" -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DBUILD_TESTING=OFF \
+            -DASTRAEA_WARNINGS_AS_ERRORS=ON
+          cmake --build "$RUNNER_TEMP/astraea-native-title-smoke" \
+            --target astraea --parallel 3
+
+      - name: Probe public independent PS5-format title with Astraea
+        run: |
+          python3 - <<'PY'
+          import pathlib
+          import subprocess
+          import os
+
+          root = pathlib.Path(os.environ["RUNNER_TEMP"])
+          astr = root / "astraea-native-title-smoke/astraea"
+          homebrew = root / "ps5-native-app-boilerplate"
+          assert astr.is_file() and astr.stat().st_size > 0
+          target = homebrew / "build/eboot.elf"
+          assert target.is_file() and target.stat().st_size > 0
+          def run_and_report(command):
+              result = subprocess.run(
+                  [str(astr), command, str(target)],
+                  capture_output=True,
+                  text=True,
+                  timeout=30,
+                  check=False,
+              )
+              print(f"ASTRAEA_{command.upper()}_RC={result.returncode}")
+              print(result.stdout[:6000])
+              print(result.stderr[:6000])
+              if result.returncode != 0:
+                  raise SystemExit(f"{command} did not return its typed success report")
+              if result.stderr.strip():
+                  raise SystemExit(f"{command} unexpectedly emitted stderr")
+              fields = {}
+              for line in result.stdout.splitlines()[1:]:
+                  if "=" not in line:
+                      continue
+                  key, value = line.split("=", 1)
+                  if key in fields:
+                      raise SystemExit(f"{command} repeated output field {key}")
+                  fields[key] = value
+              return fields
+
+          profile = run_and_report("profile")
+          for key, expected in {
+              "program_headers": "14",
+              "load_segments": "5",
+              "sce_needed_modules": "4",
+              "sce_import_libraries": "4",
+              "total_relocations": "40",
+              "tls_present": "1",
+          }.items():
+              if profile.get(key) != expected:
+                  raise SystemExit(
+                      f"pinned public ELF {key}: expected {expected}, "
+                      f"observed {profile.get(key)}"
+                  )
+
+          diagnosis = run_and_report("diagnose")
+          for key, expected in {
+              "boundary": "unsupported_dynamic_dependencies",
+              "stage": "pre_entry",
+              "guest_rip": "0x10",
+              "detail0": "12",
+          }.items():
+              if diagnosis.get(key) != expected:
+                  raise SystemExit(
+                      f"pinned public ELF {key}: expected {expected}, "
+                      f"observed {diagnosis.get(key)}"
+                  )
+          print("REAL CLEAN-ROOM ELF PROFILE/DIAGNOSTIC REGRESSION PASS.")
+          print("NO GUEST INSTRUCTIONS EXECUTED; NO PS5 HARDWARE OBSERVATION.")
+          PY
