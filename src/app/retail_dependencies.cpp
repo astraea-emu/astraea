@@ -17,6 +17,7 @@
 #include <astraea/execution/retail_closure_profile.hpp>
 #include <astraea/loader/dynamic_metadata.hpp>
 #include <astraea/loader/dynamic_string.hpp>
+#include <astraea/loader/public_sce_packed_fields.hpp>
 #include <astraea/loader/dynamic_symbols.hpp>
 #include <astraea/loader/dynamic_relocations.hpp>
 #include <astraea/loader/sce_symbol_identity.hpp>
@@ -73,11 +74,15 @@ constexpr std::uint64_t kMaxDependencyNameBytes = 256U;
 }
 
 [[nodiscard]] std::string manifest_for(
-    const astraea::loader::GuestImage& image) {
+    const astraea::loader::GuestImage& image,
+    bool public_sce_pack_v1) {
     std::ostringstream out;
     out << "Astraea dependency manifest v0\n"
         << "execution=none\n"
         << "identity_policy=opaque\n";
+    if (public_sce_pack_v1) {
+        out << "experimental_public_sce_pack_v1=1\n";
+    }
     const auto view = image.initialized_image_view();
     if (!view.has_value()) {
         throw std::runtime_error("initialized_image_unavailable");
@@ -116,6 +121,8 @@ constexpr std::uint64_t kMaxDependencyNameBytes = 256U;
 
     std::set<std::uint64_t> needed_raw;
     std::set<std::uint64_t> libraries_raw;
+    astraea::loader::PublicSceLocalIdLedger public_module_ids;
+    astraea::loader::PublicSceLocalIdLedger public_library_ids;
     std::size_t needed_records = 0U;
     std::size_t library_records = 0U;
 
@@ -155,7 +162,49 @@ constexpr std::uint64_t kMaxDependencyNameBytes = 256U;
                 << std::dec << '\n'
                 << key << "[" << i << "].duplicate_raw="
                 << (fresh ? 0 : 1) << '\n';
+            if (public_sce_pack_v1) {
+                const auto fields =
+                    astraea::loader::decode_public_sce_packed_fields(
+                        record.raw_value);
+                if (!strings.has_value() ||
+                    !strings->string_table.has_value()) {
+                    throw std::runtime_error(
+                        "public_pack_string_table_unavailable");
+                }
+                const astraea::loader::DynamicStringRef ref{
+                    .offset = fields.name_offset,
+                    .source_entry_index = record.source_entry_index,
+                };
+                const auto name = read_bounded_name(
+                    strings->string_table.value(), ref, view.value());
+                if (name.empty()) {
+                    throw std::runtime_error(
+                        "public_pack_empty_published_name");
+                }
+                auto& ledger =
+                    is_needed ? public_module_ids : public_library_ids;
+                if (ledger.record(fields, name) ==
+                    astraea::loader::PublicSceLocalIdRecordResult::
+                        conflicting_reuse) {
+                    throw std::runtime_error(
+                        "public_pack_conflicting_local_id");
+                }
+                out << key << "[" << i << "].public_local_id="
+                    << fields.local_id << '\n'
+                    << key << "[" << i << "].public_version="
+                    << fields.version << '\n'
+                    << key << "[" << i << "].public_name_offset="
+                    << fields.name_offset << '\n'
+                    << key << "[" << i << "].public_name_hex="
+                    << encode_hex(name) << '\n';
+            }
         }
+    }
+    if (public_sce_pack_v1) {
+        out << "public_sce_module_unique_local_ids="
+            << public_module_ids.size() << '\n'
+            << "public_sce_library_unique_local_ids="
+            << public_library_ids.size() << '\n';
     }
     out << "sce_needed_module_records=" << needed_records << '\n'
         << "sce_needed_module_unique_raw=" << needed_raw.size() << '\n'
@@ -297,7 +346,9 @@ constexpr std::uint64_t kMaxDependencyNameBytes = 256U;
 
 }  // namespace
 
-int run_retail_dependency_manifest(std::string_view artifact_path) {
+int run_retail_dependency_manifest(
+    std::string_view artifact_path,
+    bool public_sce_pack_v1) {
     auto artifact = read_artifact_file(artifact_path);
     if (!artifact.has_value()) {
         std::cerr << "Astraea dependency manifest v0\n"
@@ -330,7 +381,7 @@ int run_retail_dependency_manifest(std::string_view artifact_path) {
         }
         // Construct the whole report before emitting any of it, so a
         // malformed later record cannot leave a misleading partial manifest.
-        const auto report = manifest_for(image.value());
+        const auto report = manifest_for(image.value(), public_sce_pack_v1);
         std::cout << report;
         return 0;
     } catch (const std::bad_alloc&) {

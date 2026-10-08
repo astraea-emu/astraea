@@ -18,6 +18,7 @@ void print_usage() {
         << "  astraea diagnose <ps5-elf-or-eboot>\n"
         << "  astraea profile <ps5-elf-or-eboot>\n"
         << "  astraea dependencies <ps5-elf-or-eboot>\n"
+        << "  astraea dependencies --public-sce-pack-v1 <ps5-elf-or-eboot>\n"
         << "\n"
         << "The profile command is read-only structural analysis. "
            "The retail diagnostic is currently Linux x86-64 only. "
@@ -56,6 +57,13 @@ int main(int argc, char** argv) {
             "dependencies") {
         return astraea::app::
             run_retail_dependency_manifest(argv[2]);
+    }
+
+    if (argc == 4 &&
+        std::string_view{argv[1]} == "dependencies" &&
+        std::string_view{argv[2]} == "--public-sce-pack-v1") {
+        return astraea::app::run_retail_dependency_manifest(
+            argv[3], true);
     }
 
     print_usage();
