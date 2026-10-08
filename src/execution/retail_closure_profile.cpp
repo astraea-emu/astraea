@@ -314,6 +314,8 @@ profile_retail_artifact(
                 .code =
                     RetailArtifactClosureProfileErrorCode::
                         host_allocation_failure,
+                .guest_image_error = std::nullopt,
+                .static_profile_error = std::nullopt,
             });
     }
 }
