@@ -18,7 +18,7 @@ from pathlib import Path
 PINNED_REVISION = "2f672d1c2f508e26f82ce6e27cef289a0861413c"
 MARKER = ".astraea-ps5-entry-observer-v0"
 
-CRT_BLOCK = """for name in app_crt app_cpp_runtime; do
+CRT_BLOCK = r"""for name in app_crt app_cpp_runtime; do
     object="$build/obj/$name.o"
     ninja_inputs=("$native/$name.cpp" "$root/tooling/prospero-clang18" "$target_compiler")
     ninja_edge CXX "$object" env PS5_PAYLOAD_SDK="$sdk_root" \
@@ -30,7 +30,7 @@ CRT_BLOCK = """for name in app_crt app_cpp_runtime; do
 done
 """
 
-PATCHED_CRT_BLOCK = """for name in app_crt app_cpp_runtime; do
+PATCHED_CRT_BLOCK = r"""for name in app_crt app_cpp_runtime; do
     object="$build/obj/$name.o"
     crt_definitions=()
     if [[ $name == app_crt ]]; then
@@ -191,6 +191,8 @@ def self_test() -> None:
     assert CRT_BLOCK not in patched
     assert patched.count("astraea_reference_crt_start") == 1
     assert "assembler-with-cpp" in patched
+    assert "\\\n        PS5_CLANG=" in CRT_BLOCK
+    assert "\\\n        PS5_CLANG=" in PATCHED_CRT_BLOCK
 
     try:
         patch_build_script(patched)
