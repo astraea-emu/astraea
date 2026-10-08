@@ -174,3 +174,41 @@ TEST_CASE(
     REQUIRE(second.kind == ModuleGraphResolutionKind::resolved);
     REQUIRE(first.guest_address != second.guest_address);
 }
+
+TEST_CASE(
+    "module graph limits and invalid keys fail before module registration",
+    "[execution][module-graph][limits]") {
+    std::vector<ModuleGraphDeclaration> too_many(65);
+    auto size_error = ModuleGraph::create(too_many);
+    REQUIRE_FALSE(size_error.has_value());
+    REQUIRE(size_error.error().code ==
+        ModuleGraphErrorCode::too_many_modules);
+
+    auto modules = owned_modules();
+    modules[0].module_key.clear();
+    auto missing_key = ModuleGraph::create(modules);
+    REQUIRE_FALSE(missing_key.has_value());
+    REQUIRE(missing_key.error().code ==
+        ModuleGraphErrorCode::invalid_module_key);
+
+    modules = owned_modules();
+    modules[0].dependency_keys[0].clear();
+    auto bad_dependency = ModuleGraph::create(modules);
+    REQUIRE_FALSE(bad_dependency.has_value());
+    REQUIRE(bad_dependency.error().code ==
+        ModuleGraphErrorCode::invalid_dependency_key);
+
+    modules = owned_modules();
+    modules[0].dependency_keys.assign(65, "owned-provider");
+    auto too_many_deps = ModuleGraph::create(modules);
+    REQUIRE_FALSE(too_many_deps.has_value());
+    REQUIRE(too_many_deps.error().code ==
+        ModuleGraphErrorCode::too_many_dependencies);
+
+    modules = owned_modules();
+    modules[1].exports.assign(513, modules[1].exports[0]);
+    auto too_many_exports = ModuleGraph::create(modules);
+    REQUIRE_FALSE(too_many_exports.has_value());
+    REQUIRE(too_many_exports.error().code ==
+        ModuleGraphErrorCode::too_many_exports);
+}
