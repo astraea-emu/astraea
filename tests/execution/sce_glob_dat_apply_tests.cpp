@@ -758,3 +758,169 @@ TEST_CASE(
 }
 
 #endif
+
+
+TEST_CASE(
+    "empty owned import batch succeeds without prepared guest memory",
+    "[execution][module-graph][owned-batch]") {
+    auto image = make_empty_image();
+    astraea::execution::LinuxPreparedMemory prepared;
+    GuestMemoryAccess memory{image, prepared};
+    const std::span<const astraea::execution::OwnedModuleAbsolutePatch>
+        empty{};
+    const auto result =
+        astraea::execution::apply_owned_module_import_batch(empty, memory);
+    REQUIRE(result.has_value());
+    REQUIRE(result->empty());
+}
+
+TEST_CASE(
+    "owned import batch is explicitly bounded before memory preflight",
+    "[execution][module-graph][owned-batch]") {
+    auto image = make_empty_image();
+    astraea::execution::LinuxPreparedMemory prepared;
+    GuestMemoryAccess memory{image, prepared};
+    std::vector<astraea::execution::OwnedModuleAbsolutePatch> patches(257);
+    const auto result =
+        astraea::execution::apply_owned_module_import_batch(patches, memory);
+    REQUIRE_FALSE(result.has_value());
+    REQUIRE(result.error().code ==
+        astraea::execution::OwnedModuleImportBatchErrorCode::
+            too_many_patches);
+    REQUIRE(result.error().applied_count == 0U);
+}
+
+#if defined(__linux__) && defined(__x86_64__) && defined(MAP_FIXED_NOREPLACE)
+
+TEST_CASE(
+    "owned batch writes two disjoint prepared guest patch targets",
+    "[execution][module-graph][owned-batch]") {
+    constexpr auto read = static_cast<std::uint8_t>(GuestPermission::read);
+    constexpr auto write = static_cast<std::uint8_t>(GuestPermission::write);
+    auto layout = make_layout(permissions(read | write), 16);
+    auto prepared =
+        astraea::execution::prepare_linux_guest_memory(layout.image);
+    REQUIRE(prepared.has_value());
+    GuestMemoryAccess memory{layout.image, prepared.value()};
+
+    const auto a = make_patch(layout.data_base, 0x12345678U);
+    const auto b = make_patch(layout.data_base + 8U, 0x23456789U);
+    const std::array patches{
+        astraea::execution::OwnedModuleAbsolutePatch{
+            .target = a.relocation_target,
+            .source_symbol_address = a.gate_destination,
+            .raw_relocation_type = 6U,
+            .raw_addend = std::int64_t{0},
+            .bytes = a.bytes,
+        },
+        astraea::execution::OwnedModuleAbsolutePatch{
+            .target = b.relocation_target,
+            .source_symbol_address = b.gate_destination,
+            .raw_relocation_type = 7U,
+            .raw_addend = std::int64_t{0},
+            .bytes = b.bytes,
+        },
+    };
+    const auto result =
+        astraea::execution::apply_owned_module_import_batch(patches, memory);
+    REQUIRE(result.has_value());
+    REQUIRE(result->size() == 2U);
+    std::array<std::byte, 8> first{};
+    std::array<std::byte, 8> second{};
+    REQUIRE(memory.read(GuestAddress{layout.data_base}, first).has_value());
+    REQUIRE(memory.read(GuestAddress{layout.data_base + 8U}, second).has_value());
+    REQUIRE(first == patches[0].bytes);
+    REQUIRE(second == patches[1].bytes);
+}
+
+TEST_CASE(
+    "owned import batch rejects overlap before changing any target",
+    "[execution][module-graph][owned-batch]") {
+    constexpr auto read = static_cast<std::uint8_t>(GuestPermission::read);
+    constexpr auto write = static_cast<std::uint8_t>(GuestPermission::write);
+    auto layout = make_layout(permissions(read | write), 16);
+    auto prepared =
+        astraea::execution::prepare_linux_guest_memory(layout.image);
+    REQUIRE(prepared.has_value());
+    GuestMemoryAccess memory{layout.image, prepared.value()};
+    const auto a = make_patch(layout.data_base, 0x12345678U);
+    const auto b = make_patch(layout.data_base + 4U, 0x23456789U);
+    const std::array patches{
+        astraea::execution::OwnedModuleAbsolutePatch{
+            .target = a.relocation_target,
+            .source_symbol_address = a.gate_destination,
+            .raw_relocation_type = 6U,
+            .raw_addend = std::int64_t{0},
+            .bytes = a.bytes,
+        },
+        astraea::execution::OwnedModuleAbsolutePatch{
+            .target = b.relocation_target,
+            .source_symbol_address = b.gate_destination,
+            .raw_relocation_type = 6U,
+            .raw_addend = std::int64_t{0},
+            .bytes = b.bytes,
+        },
+    };
+    std::array<std::byte, 16> before{};
+    REQUIRE(memory.read(GuestAddress{layout.data_base}, before).has_value());
+    const auto result =
+        astraea::execution::apply_owned_module_import_batch(patches, memory);
+    REQUIRE_FALSE(result.has_value());
+    REQUIRE(result.error().code ==
+        astraea::execution::OwnedModuleImportBatchErrorCode::
+            conflicting_target);
+    REQUIRE(result.error().patch_index == 1U);
+    REQUIRE(result.error().conflicting_patch_index == 0U);
+    REQUIRE(result.error().applied_count == 0U);
+    std::array<std::byte, 16> after{};
+    REQUIRE(memory.read(GuestAddress{layout.data_base}, after).has_value());
+    REQUIRE(after == before);
+}
+
+TEST_CASE(
+    "owned import batch preflights every target before any guest write",
+    "[execution][module-graph][owned-batch]") {
+    constexpr auto read = static_cast<std::uint8_t>(GuestPermission::read);
+    constexpr auto write = static_cast<std::uint8_t>(GuestPermission::write);
+    auto layout = make_layout(permissions(read | write), 16);
+    auto prepared =
+        astraea::execution::prepare_linux_guest_memory(layout.image);
+    REQUIRE(prepared.has_value());
+    GuestMemoryAccess memory{layout.image, prepared.value()};
+    const auto a = make_patch(layout.data_base, 0x12345678U);
+    const auto b = make_patch(layout.unmapped_base, 0x23456789U);
+    const std::array patches{
+        astraea::execution::OwnedModuleAbsolutePatch{
+            .target = a.relocation_target,
+            .source_symbol_address = a.gate_destination,
+            .raw_relocation_type = 6U,
+            .raw_addend = std::int64_t{0},
+            .bytes = a.bytes,
+        },
+        astraea::execution::OwnedModuleAbsolutePatch{
+            .target = b.relocation_target,
+            .source_symbol_address = b.gate_destination,
+            .raw_relocation_type = 6U,
+            .raw_addend = std::int64_t{0},
+            .bytes = b.bytes,
+        },
+    };
+    std::array<std::byte, 8> before{};
+    REQUIRE(memory.read(GuestAddress{layout.data_base}, before).has_value());
+    const auto result =
+        astraea::execution::apply_owned_module_import_batch(patches, memory);
+    REQUIRE_FALSE(result.has_value());
+    REQUIRE(result.error().code ==
+        astraea::execution::OwnedModuleImportBatchErrorCode::
+            preflight_failure);
+    REQUIRE(result.error().patch_index == 1U);
+    REQUIRE(result.error().applied_count == 0U);
+    REQUIRE(result.error().memory_error.has_value());
+    REQUIRE(result.error().memory_error->code ==
+        GuestMemoryErrorCode::guest_memory_unmapped);
+    std::array<std::byte, 8> after{};
+    REQUIRE(memory.read(GuestAddress{layout.data_base}, after).has_value());
+    REQUIRE(after == before);
+}
+
+#endif

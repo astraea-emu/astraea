@@ -1,6 +1,10 @@
 #pragma once
 
 #include <compare>
+#include <cstddef>
+#include <optional>
+#include <span>
+#include <vector>
 
 #include <astraea/core/result.hpp>
 #include <astraea/execution/guest_memory.hpp>
@@ -28,5 +32,36 @@ using OwnedModuleImportApplyResultType =
 apply_owned_module_import_patch(
     const OwnedModuleAbsolutePatch& patch,
     const GuestMemoryAccess& guest_memory) noexcept;
+
+
+enum class OwnedModuleImportBatchErrorCode {
+    too_many_patches,
+    conflicting_target,
+    preflight_failure,
+    apply_failure,
+    host_allocation_failure,
+};
+
+struct OwnedModuleImportBatchError {
+    OwnedModuleImportBatchErrorCode code =
+        OwnedModuleImportBatchErrorCode::host_allocation_failure;
+    std::size_t patch_index = 0;
+    std::optional<std::size_t> conflicting_patch_index;
+    std::size_t applied_count = 0;
+    std::optional<GuestMemoryError> memory_error;
+};
+
+using OwnedModuleImportBatchResult =
+    astraea::core::Result<
+        std::vector<OwnedModuleImportApplyResult>,
+        OwnedModuleImportBatchError>;
+
+// Bounded owned-module batch. Validates every target and rejects overlaps
+// BEFORE the first mutation. A post-preflight write failure can still leave
+// earlier patches applied: rollback/transactional atomicity is NOT promised.
+[[nodiscard]] OwnedModuleImportBatchResult
+apply_owned_module_import_batch(
+    std::span<const OwnedModuleAbsolutePatch> patches,
+    const GuestMemoryAccess& guest_memory);
 
 }  // namespace astraea::execution
