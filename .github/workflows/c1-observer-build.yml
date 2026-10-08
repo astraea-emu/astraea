@@ -238,6 +238,41 @@ jobs:
               value = int(fields[field])
               if not 1 <= value <= 4:
                   raise SystemExit(f"invalid unique count: {field}={value}")
+          if fields.get("dynamic_symbol_records") != "26":
+              raise SystemExit("public independent title symbol census changed")
+          named = 0
+          undefined = 0
+          longform = 0
+          for i in range(26):
+              prefix = f"symbol[{i}]"
+              raw_name = fields[f"{prefix}.name_hex"]
+              if raw_name:
+                  if not re.fullmatch(r"(?:[0-9a-f]{2})+", raw_name):
+                      raise SystemExit(f"nonhex symbol name: {prefix}")
+                  named += 1
+              if fields[f"{prefix}.undefined"] == "1":
+                  undefined += 1
+              elif fields[f"{prefix}.undefined"] != "0":
+                  raise SystemExit(f"invalid undefined field: {prefix}")
+              if fields[f"{prefix}.sce_longform"] == "1":
+                  longform += 1
+                  for item in ("nid_hex", "library_id_hex", "module_id_hex"):
+                      if not re.fullmatch(
+                          r"(?:[0-9a-f]{2})+",
+                          fields[f"{prefix}.{item}"],
+                      ):
+                          raise SystemExit(f"malformed identity bytes: {prefix}/{item}")
+              elif fields[f"{prefix}.sce_longform"] != "0":
+                  raise SystemExit(f"invalid identity classification: {prefix}")
+              for item in ("binding", "type"):
+                  if not 0 <= int(fields[f"{prefix}.{item}"]) <= 15:
+                      raise SystemExit(f"invalid ELF symbol field: {prefix}/{item}")
+          if not (named > 0 and undefined > 0 and longform > 0):
+              raise SystemExit("expected public title to exercise named imports and SCE identities")
+          if int(fields["dynamic_symbol_unique_nonempty_names"]) > named:
+              raise SystemExit("impossible unique symbol count")
+          print(f"SYMBOL CENSUS PASS: 26 records, {named} named, "
+                f"{undefined} undefined, {longform} long-form SCE identities.")
           malformed = root / "astraea-invalid-dependency-input.bin"
           malformed.write_bytes(b"not-an-elf")
           rejected = subprocess.run(
