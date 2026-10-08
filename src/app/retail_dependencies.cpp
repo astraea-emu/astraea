@@ -31,7 +31,8 @@ constexpr std::uint64_t kMaxDependencyNameBytes = 256U;
     static constexpr char digits[] = "0123456789abcdef";
     std::string encoded;
     encoded.reserve(bytes.size() * 2U);
-    for (unsigned char byte : bytes) {
+    for (char raw_byte : bytes) {
+        const auto byte = static_cast<unsigned char>(raw_byte);
         encoded.push_back(digits[byte >> 4U]);
         encoded.push_back(digits[byte & 0x0fU]);
     }
