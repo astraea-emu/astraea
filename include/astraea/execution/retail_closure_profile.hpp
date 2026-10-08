@@ -3,12 +3,28 @@
 #include <compare>
 #include <cstdint>
 #include <optional>
+#include <span>
+#include <vector>
 
 #include <astraea/core/result.hpp>
 #include <astraea/loader/dynamic_metadata.hpp>
 #include <astraea/loader/guest_image.hpp>
+#include <astraea/memory/guest_address.hpp>
 
 namespace astraea::execution {
+
+inline constexpr std::uint64_t
+    kRetailAnalysisStackSize = 2ULL * 1024ULL * 1024ULL;
+inline constexpr std::uint64_t
+    kRetailAnalysisStackFirstBase = 0x00007fff00000000ULL;
+inline constexpr std::uint64_t
+    kRetailAnalysisStackStride = 0x01000000ULL;
+inline constexpr std::size_t
+    kRetailAnalysisStackCandidateCount = 256U;
+
+[[nodiscard]] std::optional<astraea::memory::GuestRange>
+choose_retail_analysis_stack(
+    std::span<const std::byte> artifact);
 
 struct RetailStaticClosureProfile {
     std::uint64_t program_header_count = 0;
@@ -55,6 +71,34 @@ using RetailStaticClosureProfileResult =
     astraea::core::Result<
         RetailStaticClosureProfile,
         RetailStaticClosureProfileError>;
+
+enum class RetailStaticClosureArtifactErrorCode {
+    planning_stack_unavailable,
+    guest_image_failure,
+    profile_failure,
+    host_allocation_failure,
+};
+
+struct RetailStaticClosureArtifactError {
+    RetailStaticClosureArtifactErrorCode code =
+        RetailStaticClosureArtifactErrorCode::
+            planning_stack_unavailable;
+    std::optional<astraea::loader::GuestImageError>
+        guest_image_error;
+    std::optional<RetailStaticClosureProfileError>
+        profile_error;
+};
+
+using RetailStaticClosureArtifactResult =
+    astraea::core::Result<
+        RetailStaticClosureProfile,
+        RetailStaticClosureArtifactError>;
+
+// Builds a validated PS5/SCE GuestImage only for structural analysis and then
+// returns the same data-only closure profile. No guest instruction executes.
+[[nodiscard]] RetailStaticClosureArtifactResult
+profile_retail_artifact(
+    std::vector<std::byte> artifact_bytes);
 
 // Produces a data-only structural pressure profile from an already validated
 // GuestImage. The profile is intended for comparing candidate workloads and
