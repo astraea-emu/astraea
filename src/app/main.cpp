@@ -4,6 +4,7 @@
 #include <string_view>
 
 #include "linux_retail_diagnostic.hpp"
+#include "retail_closure_profile.hpp"
 
 namespace {
 
@@ -14,7 +15,9 @@ void print_usage() {
         << "\n"
         << "Usage:\n"
         << "  astraea diagnose <ps5-elf-or-eboot>\n"
+        << "  astraea profile <ps5-elf-or-eboot>\n"
         << "\n"
+        << "The static closure profile is portable and never executes guest code.\n"
         << "The retail diagnostic is currently Linux x86-64 only. "
            "It reports the first verified unsupported boundary; "
            "it is not a game-compatibility or playability claim.\n";
@@ -35,6 +38,14 @@ int main(int argc, char** argv) {
             "diagnose") {
         return astraea::app::
             run_linux_retail_diagnostic(
+                argv[2]);
+    }
+
+    if (argc == 3 &&
+        std::string_view{argv[1]} ==
+            "profile") {
+        return astraea::app::
+            run_retail_closure_profile(
                 argv[2]);
     }
 
