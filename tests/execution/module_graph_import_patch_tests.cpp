@@ -5,6 +5,7 @@
 #include <cstdint>
 #include <limits>
 #include <optional>
+#include <utility>
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -49,10 +50,11 @@ TEST_CASE(
     REQUIRE(result->source_symbol_address == p.provider_guest_address);
     REQUIRE(result->raw_addend == p.raw_addend);
     REQUIRE(result->raw_relocation_type == 6U);
-    REQUIRE(result->bytes == std::array<std::byte, 8>{
+    const std::array<std::byte, 8> expected{
         std::byte{0xef}, std::byte{0xcd}, std::byte{0xab}, std::byte{0x90},
         std::byte{0x78}, std::byte{0x56}, std::byte{0x34}, std::byte{0x12},
-    });
+    };
+    REQUIRE(result->bytes == expected);
 }
 
 TEST_CASE(
