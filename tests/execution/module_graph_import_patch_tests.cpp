@@ -129,3 +129,83 @@ TEST_CASE(
     REQUIRE(result.error().code ==
         OwnedModuleAbsolutePatchErrorCode::target_range_overflow);
 }
+
+TEST_CASE(
+    "owned graph to relocation association to patch bytes composes without writes",
+    "[execution][module-graph][import-patch][composition]") {
+    using astraea::execution::ModuleGraph;
+    using astraea::execution::ModuleGraphDeclaration;
+    using astraea::execution::ModuleGraphExport;
+
+    const std::array declarations{
+        ModuleGraphDeclaration{
+            .module_key = "client",
+            .dependency_keys = {"provider"},
+            .exports = {},
+        },
+        ModuleGraphDeclaration{
+            .module_key = "provider",
+            .dependency_keys = {},
+            .exports = {
+                ModuleGraphExport{
+                    .identity = {
+                        .nid = "ABCDEFGHIJK",
+                        .library_id = "test-library",
+                        .module_id = "test-module",
+                    },
+                    .guest_address = astraea::memory::GuestAddress{
+                        0x1234567890abcdefULL},
+                },
+            },
+        },
+    };
+    const auto graph = ModuleGraph::create(declarations);
+    REQUIRE(graph.has_value());
+
+    const astraea::loader::DynamicRelocation relocation{
+        .table_kind = RelocationTableKind::plt_rela,
+        .table_index = 2U,
+        .target = astraea::memory::GuestAddress{0x40001000U},
+        .raw_info = 0x500000007ULL,
+        .symbol_index = 5U,
+        .relocation_type = 7U,
+        .addend = std::int64_t{13},
+    };
+    const astraea::loader::SceDynamicSymbolRecord symbol{
+        .symbol = {
+            .index = 5U,
+            .name_offset = 3U,
+            .info = 0x12U,
+            .other = 0U,
+            .section_index_raw = 0U,
+            .value = 0U,
+            .size = 0U,
+        },
+        .name = {
+            .raw = "ABCDEFGHIJK#test-library#test-module",
+            .identity = {
+                .nid = "ABCDEFGHIJK",
+                .library_id = "test-library",
+                .module_id = "test-module",
+            },
+        },
+    };
+    const auto association =
+        astraea::execution::plan_module_graph_import(
+            relocation, symbol, graph.value(), "client", "provider");
+    REQUIRE(association.has_value());
+    REQUIRE(association->symbol_binding == 1U);
+
+    const auto encoded =
+        astraea::execution::build_owned_x86_64_module_import_patch(
+            association.value());
+    REQUIRE(encoded.has_value());
+    REQUIRE(encoded->source_symbol_address ==
+        astraea::memory::GuestAddress{0x1234567890abcdefULL});
+    REQUIRE(encoded->raw_addend == std::optional<std::int64_t>{13});
+    const std::array<std::byte, 8> expected{
+        std::byte{0xef}, std::byte{0xcd}, std::byte{0xab}, std::byte{0x90},
+        std::byte{0x78}, std::byte{0x56}, std::byte{0x34}, std::byte{0x12},
+    };
+    REQUIRE(encoded->bytes == expected);
+}
