@@ -126,6 +126,12 @@ FS/GS-base read. Astraea therefore accepts optional FS/GS values produced by
 an authorized external debugger without importing or depending on that
 debugger transport.
 
+The debugger must observe the same primary thread at the loader-entry /
+pre-CRT snapshot boundary. A value read later from `main` or after
+`_init_env` is post-entry runtime state and must not be promoted as C1C.
+When exact timing cannot be established, omit the value and preserve
+`unknown`.
+
 The offline analyzer preserves three states independently for each base:
 
 - unavailable/unknown;
