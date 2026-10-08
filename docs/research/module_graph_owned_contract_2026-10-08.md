@@ -107,3 +107,25 @@ Do not call this a PS5 relocation engine. Future integration requires a
 separate audited memory-application boundary using exact mapped/owned address
 ranges and conflict/rollback policies, with observed relocation types from
 the selected lawful workload and evidence for any PS5-specific differences.
+
+## Stage G: checked single-patch application on independently owned memory
+
+`apply_owned_module_import_patch` accepts only an already materialized
+eight-byte `OwnedModuleAbsolutePatch` and `GuestMemoryAccess`, invokes
+`preflight_write` on the complete guest target range, then calls the
+existing checked `write` function. It does not construct or dereference
+guest host pointers itself. The memory facade checks guest mapping coverage,
+write permissions, prepared-memory availability, and overflow.
+
+The current API applies **one** previously verified patch; there is no batch
+atomicity or rollback promise. Positive owned Linux x86-64 tests read back the
+exact bytes from a prepared guest mapping. Other tests check unavailable
+prepared memory, read-only target, wholly unmapped target, and an eight-byte
+write extending beyond a four-byte guest mapping. Negative tests verify no
+target bytes change on preflight refusal.
+
+This still does **not** establish a Sony module provider, initial thread
+state, runtime service semantics, or safe arbitrary retail execution. Any
+future batch API requires explicit conflict/overlap policy and tested
+preflight of every target before the first write. No actual PS5 hardware
+was accessed to construct or test this feature.
