@@ -18,6 +18,7 @@ enum class OwnedModuleAbsolutePatchErrorCode {
     unsupported_table_kind,
     unsupported_relocation_type,
     invalid_export_address,
+    unsupported_symbol_binding,
     target_range_overflow,
     missing_rela_addend,
 };
