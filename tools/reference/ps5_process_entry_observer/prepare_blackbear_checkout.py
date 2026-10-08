@@ -59,7 +59,12 @@ PATCHED_LINK_INPUTS = 'link_inputs=("$build/obj/astraea_entry.o" "$build/obj/app
 
 AUTO_EMIT = """extern "C" void astraea_emit_ps5_entry_observation_v0() noexcept;
 
-__attribute__((constructor))
+/*
+ * _init_env runs before the CRT enters _init(). Priority 101 is the earliest
+ * user-reserved constructor priority, so capture emission precedes ordinary
+ * default-priority application constructors without becoming pre-entry work.
+ */
+__attribute__((constructor(101)))
 static void astraea_emit_process_entry_observation() noexcept
 {
     astraea_emit_ps5_entry_observation_v0();
@@ -209,9 +214,10 @@ def self_test() -> None:
             AUTO_EMIT,
             encoding="utf-8",
         )
-        assert "constructor" in (
+        auto_emit = (
             root / "src/astraea_observer/auto_emit.cpp"
         ).read_text(encoding="utf-8")
+        assert "constructor(101)" in auto_emit
 
         shell = root / "patched-build-fragment.sh"
         shell.write_text(
