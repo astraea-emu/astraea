@@ -232,6 +232,66 @@ def self_test() -> None:
             text=True,
         )
 
+    # Exercise the complete mutation transaction against a synthetic real Git
+    # checkout. Temporarily pin to the synthetic commit so revision and
+    # cleanliness gates are tested without network access.
+    with tempfile.TemporaryDirectory() as directory:
+        checkout = Path(directory) / "external"
+        (checkout / "tools").mkdir(parents=True)
+        (checkout / "tooling/native").mkdir(parents=True)
+        (checkout / "src").mkdir(parents=True)
+        (checkout / "tools/build.sh").write_text(
+            "#!/usr/bin/env bash\n"
+            + CRT_BLOCK
+            + "\n"
+            + LINK_INPUTS
+            + "\n",
+            encoding="utf-8",
+        )
+
+        subprocess.run(["git", "init", str(checkout)], check=True, capture_output=True)
+        subprocess.run(
+            ["git", "-C", str(checkout), "config", "user.email", "astraea@example.invalid"],
+            check=True,
+        )
+        subprocess.run(
+            ["git", "-C", str(checkout), "config", "user.name", "Astraea Self Test"],
+            check=True,
+        )
+        subprocess.run(
+            ["git", "-C", str(checkout), "add", "."],
+            check=True,
+        )
+        subprocess.run(
+            ["git", "-C", str(checkout), "commit", "-m", "fixture"],
+            check=True,
+            capture_output=True,
+        )
+        fixture_revision = run_git(checkout, "rev-parse", "HEAD")
+
+        global PINNED_REVISION
+        original_revision = PINNED_REVISION
+        try:
+            PINNED_REVISION = fixture_revision
+            prepare(checkout)
+            prepared = (checkout / "tools/build.sh").read_text(encoding="utf-8")
+            assert PATCHED_CRT_BLOCK in prepared
+            assert PATCHED_LINK_INPUTS in prepared
+            assert (checkout / MARKER).is_file()
+            assert (checkout / "tooling/native/astraea_entry.S").is_file()
+            assert (checkout / "src/astraea_observer/capture.h").is_file()
+            assert (checkout / "src/astraea_observer/emit_observation.cpp").is_file()
+            assert (checkout / "src/astraea_observer/auto_emit.cpp").is_file()
+
+            try:
+                prepare(checkout)
+            except PreparationError:
+                pass
+            else:
+                raise AssertionError("second preparation of dirty checkout was not rejected")
+        finally:
+            PINNED_REVISION = original_revision
+
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
