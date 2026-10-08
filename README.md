@@ -100,12 +100,19 @@ Astraea tracks three orthogonal axes:
 - **C — compatibility:** diagnostic -> first retail instruction -> first deterministic post-entry divergence -> runtime closure -> boot -> headless frame -> presentation -> in-game/playable -> reference-guarded support;
 - **S — scalability/readiness:** first-divergence coverage, cross-title regression guards, architecture ratchets, measured performance, and eventual release quality.
 
-The current critical path is **C1**. The software-side observer, analyzer,
-repeat comparison, optional FS/GS sidecar, and pinned external-checkout
-preparation are merged. The next load-bearing work is the controlled two-run
-hardware evidence in #334, followed by selected-path C1C/C1D decisions. The
-first post-entry milestone is C2.0: a typed reproducible retail divergence, not
-'boot'.
+The current critical path is **C1, software-first**. A pinned public
+independently generated PS5 native title now builds and passes Astraea's own
+read-only `profile` and supervised `diagnose` regression checks. Its first
+typed boundary is `unsupported_dynamic_dependencies`, before the ABI gate.
+Issue #356 identifies the next PC-only dependency-inventory work; this is
+not yet guest instruction execution or commercial-title boot.
+
+The #334 two-run real-PS5 normal-title startup observation remains required
+later, before promoting the selected real-title process-entry profile (#348).
+The first post-entry milestone is C2.0: a typed reproducible retail
+divergence, not 'boot'. See [current status](docs/STATUS.md), the
+[governing C1 sequence](docs/PROJECT_PLAN.md), and
+[public native-title closure evidence](docs/research/public_native_title_closure_2026-10-08.md).
 
 See [`docs/README.md`](docs/README.md) for the documentation map.
 
