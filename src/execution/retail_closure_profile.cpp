@@ -254,6 +254,8 @@ profile_retail_artifact(
                     .code =
                         RetailArtifactClosureProfileErrorCode::
                             analysis_stack_unavailable,
+                    .guest_image_error = std::nullopt,
+                    .static_profile_error = std::nullopt,
                 });
         }
 
@@ -278,6 +280,7 @@ profile_retail_artifact(
                         RetailArtifactClosureProfileErrorCode::
                             guest_image_failure,
                     .guest_image_error = image.error(),
+                    .static_profile_error = std::nullopt,
                 });
         }
 
@@ -289,6 +292,7 @@ profile_retail_artifact(
                     .code =
                         RetailArtifactClosureProfileErrorCode::
                             static_profile_failure,
+                    .guest_image_error = std::nullopt,
                     .static_profile_error = profile.error(),
                 });
         }
@@ -301,6 +305,8 @@ profile_retail_artifact(
                 .code =
                     RetailArtifactClosureProfileErrorCode::
                         host_allocation_failure,
+                .guest_image_error = std::nullopt,
+                .static_profile_error = std::nullopt,
             });
     } catch (const std::length_error&) {
         return RetailArtifactClosureProfileResult::failure(
