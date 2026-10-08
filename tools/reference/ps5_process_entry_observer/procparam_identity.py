@@ -325,6 +325,12 @@ def parse_u64(text: str, label: str) -> int:
     return value
 
 
+def parse_optional_u64(text: str | None, label: str) -> int | None:
+    if text is None or text == "unknown":
+        return None
+    return parse_u64(text, label)
+
+
 def parse_prefix(text: str, label: str = "prefix") -> bytes:
     if len(text) != PREFIX_SIZE * 2:
         raise AnalysisError(
@@ -420,6 +426,8 @@ def analyze(
     api_procparam_prefix: bytes | None,
     *,
     entry_observation: dict[str, object] | None = None,
+    fs_base: int | None = None,
+    gs_base: int | None = None,
 ) -> dict[str, object]:
     capture_link = find_defined_symbol(intermediate, ANCHOR_SYMBOL, "intermediate ELF")
     procparam, static_prefix = find_procparam(final, "final ELF")
@@ -464,6 +472,10 @@ def analyze(
             if api_procparam_prefix is None
             else api_procparam_prefix == static_prefix
         ),
+        "external_thread_state": {
+            "fs_base": None if fs_base is None else f"0x{fs_base:016x}",
+            "gs_base": None if gs_base is None else f"0x{gs_base:016x}",
+        },
     }
     if entry_observation is not None:
         startup_rdi = int(entry_observation["rdi"])
@@ -479,6 +491,8 @@ def analyze(
             "rsi_nonzero": int(entry_observation["rsi"]) != 0,
             "rbp_zero": int(entry_observation["rbp"]) == 0,
             "rsp_mod16": int(entry_observation["rsp"]) & 0xF,
+            "fs_base_nonzero": None if fs_base is None else fs_base != 0,
+            "gs_base_nonzero": None if gs_base is None else gs_base != 0,
         }
         result["entry_observation"] = {
             "rdi": f"0x{startup_rdi:016x}",
@@ -503,6 +517,8 @@ def structural_projection(result: dict[str, object]) -> dict[str, object]:
         "rsi_nonzero": entry["rsi_nonzero"],
         "rbp_zero": entry["rbp_zero"],
         "rsp_mod16": entry["rsp_mod16"],
+        "fs_base_nonzero": entry["fs_base_nonzero"],
+        "gs_base_nonzero": entry["gs_base_nonzero"],
         "api_return_nonzero": result["api_return_nonzero"],
         "pointer_match": result["pointer_match"],
         "prefix_available": result["prefix_available"],
@@ -525,6 +541,8 @@ def compare_structural_results(
         "rsi_nonzero",
         "rbp_zero",
         "rsp_mod16",
+        "fs_base_nonzero",
+        "gs_base_nonzero",
         "api_return_nonzero",
         "pointer_match",
         "prefix_available",
@@ -816,6 +834,8 @@ class SelfTests(unittest.TestCase):
                 "rsi_nonzero": True,
                 "rbp_zero": False,
                 "rsp_mod16": 8,
+                "fs_base_nonzero": None,
+                "gs_base_nonzero": None,
             },
         )
         self.assertEqual(
@@ -970,6 +990,109 @@ class SelfTests(unittest.TestCase):
             {"field": "rsp_mod16", "first": 8, "second": 0},
         )
 
+    def test_external_segment_bases_preserve_unknown_zero_and_nonzero(self) -> None:
+        observed = {
+            "rdi": 0x10001111,
+            "rsi": 0x10002222,
+            "rbp": 0,
+            "rsp": 0x10004448,
+            "process_prefix": bytes(range(16)),
+        }
+        unknown = analyze(
+            _synthetic_intermediate(),
+            _synthetic_final(),
+            capture_runtime=0x10005000,
+            api_procparam_runtime=0x10007000,
+            api_procparam_prefix=_synthetic_final()[0x180 : 0x190],
+            entry_observation=observed,
+        )
+        explicit = analyze(
+            _synthetic_intermediate(),
+            _synthetic_final(),
+            capture_runtime=0x10005000,
+            api_procparam_runtime=0x10007000,
+            api_procparam_prefix=_synthetic_final()[0x180 : 0x190],
+            entry_observation=observed,
+            fs_base=0,
+            gs_base=0x12345000,
+        )
+        self.assertIsNone(unknown["entry_projection"]["fs_base_nonzero"])
+        self.assertIsNone(unknown["entry_projection"]["gs_base_nonzero"])
+        self.assertFalse(explicit["entry_projection"]["fs_base_nonzero"])
+        self.assertTrue(explicit["entry_projection"]["gs_base_nonzero"])
+        self.assertEqual(explicit["external_thread_state"]["fs_base"], "0x0000000000000000")
+        self.assertEqual(explicit["external_thread_state"]["gs_base"], "0x0000000012345000")
+
+    def test_repeat_comparison_ignores_changed_nonzero_segment_base_addresses(self) -> None:
+        observed = {
+            "rdi": 0x10001111,
+            "rsi": 0x10002222,
+            "rbp": 0,
+            "rsp": 0x10004448,
+            "process_prefix": bytes(range(16)),
+        }
+        first = analyze(
+            _synthetic_intermediate(),
+            _synthetic_final(),
+            capture_runtime=0x10005000,
+            api_procparam_runtime=0x10007000,
+            api_procparam_prefix=_synthetic_final()[0x180 : 0x190],
+            entry_observation=observed,
+            fs_base=0x11110000,
+            gs_base=0,
+        )
+        second = analyze(
+            _synthetic_intermediate(),
+            _synthetic_final(),
+            capture_runtime=0x20005000,
+            api_procparam_runtime=0x20007000,
+            api_procparam_prefix=_synthetic_final()[0x180 : 0x190],
+            entry_observation={
+                **observed,
+                "rdi": 0x20001111,
+                "rsi": 0x20002222,
+                "rsp": 0x20004448,
+            },
+            fs_base=0x22220000,
+            gs_base=0,
+        )
+        comparison = compare_structural_results(first, second)
+        self.assertTrue(comparison["equivalent"])
+        self.assertIsNone(comparison["first_difference"])
+
+    def test_repeat_comparison_reports_segment_base_state_change(self) -> None:
+        observed = {
+            "rdi": 0x10001111,
+            "rsi": 0x10002222,
+            "rbp": 0,
+            "rsp": 0x10004448,
+            "process_prefix": bytes(range(16)),
+        }
+        first = analyze(
+            _synthetic_intermediate(),
+            _synthetic_final(),
+            capture_runtime=0x10005000,
+            api_procparam_runtime=0x10007000,
+            api_procparam_prefix=_synthetic_final()[0x180 : 0x190],
+            entry_observation=observed,
+            fs_base=0,
+        )
+        second = analyze(
+            _synthetic_intermediate(),
+            _synthetic_final(),
+            capture_runtime=0x10005000,
+            api_procparam_runtime=0x10007000,
+            api_procparam_prefix=_synthetic_final()[0x180 : 0x190],
+            entry_observation=observed,
+            fs_base=0x33330000,
+        )
+        comparison = compare_structural_results(first, second)
+        self.assertFalse(comparison["equivalent"])
+        self.assertEqual(
+            comparison["first_difference"],
+            {"field": "fs_base_nonzero", "first": False, "second": True},
+        )
+
     def test_malformed_elf_is_rejected(self) -> None:
         with self.assertRaisesRegex(AnalysisError, "bad ELF magic"):
             find_defined_symbol(b"not-an-elf" + b"\0" * 64, ANCHOR_SYMBOL, "bad")
@@ -983,6 +1106,14 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--api-procparam-runtime")
     parser.add_argument("--api-procparam-prefix")
     parser.add_argument(
+        "--fs-base",
+        help="optional externally observed initial FS base; omit or use unknown",
+    )
+    parser.add_argument(
+        "--gs-base",
+        help="optional externally observed initial GS base; omit or use unknown",
+    )
+    parser.add_argument(
         "--log-file",
         type=Path,
         help="read capture/procparam observations from one emitted log record",
@@ -993,6 +1124,18 @@ def _build_parser() -> argparse.ArgumentParser:
         type=Path,
         metavar=("RUN1", "RUN2"),
         help="analyze two emitted log records and compare only structural facts",
+    )
+    parser.add_argument(
+        "--compare-fs-bases",
+        nargs=2,
+        metavar=("RUN1_FS", "RUN2_FS"),
+        help="optional external FS bases for the two compared runs; use unknown when absent",
+    )
+    parser.add_argument(
+        "--compare-gs-bases",
+        nargs=2,
+        metavar=("RUN1_GS", "RUN2_GS"),
+        help="optional external GS bases for the two compared runs; use unknown when absent",
     )
     parser.add_argument("--self-test", action="store_true")
     return parser
@@ -1025,6 +1168,8 @@ def main(argv: list[str] | None = None) -> int:
                 args.capture_runtime,
                 args.api_procparam_runtime,
                 args.api_procparam_prefix,
+                args.fs_base,
+                args.gs_base,
             )
         ):
             raise AnalysisError(
@@ -1033,8 +1178,24 @@ def main(argv: list[str] | None = None) -> int:
 
         intermediate = args.intermediate.read_bytes()
         final = args.final_elf.read_bytes()
+        fs_bases = (
+            [None, None]
+            if args.compare_fs_bases is None
+            else [
+                parse_optional_u64(value, f"run {index + 1} FS base")
+                for index, value in enumerate(args.compare_fs_bases)
+            ]
+        )
+        gs_bases = (
+            [None, None]
+            if args.compare_gs_bases is None
+            else [
+                parse_optional_u64(value, f"run {index + 1} GS base")
+                for index, value in enumerate(args.compare_gs_bases)
+            ]
+        )
         results = []
-        for path in args.compare_log_files:
+        for index, path in enumerate(args.compare_log_files):
             observed = parse_observation_log(
                 path.read_text(encoding="utf-8")
             )
@@ -1047,6 +1208,8 @@ def main(argv: list[str] | None = None) -> int:
                     int(observed["api_procparam_runtime"]),
                     None if raw_prefix is None else bytes(raw_prefix),
                     entry_observation=observed,
+                    fs_base=fs_bases[index],
+                    gs_base=gs_bases[index],
                 )
             )
         print(
@@ -1057,6 +1220,14 @@ def main(argv: list[str] | None = None) -> int:
             )
         )
         return 0
+
+    if args.compare_fs_bases is not None or args.compare_gs_bases is not None:
+        raise AnalysisError(
+            "comparison-only segment-base arguments require --compare-log-files"
+        )
+
+    fs_base = parse_optional_u64(args.fs_base, "FS base")
+    gs_base = parse_optional_u64(args.gs_base, "GS base")
 
     entry_observation = None
     if args.log_file is not None:
@@ -1126,6 +1297,8 @@ def main(argv: list[str] | None = None) -> int:
         api_procparam_runtime,
         api_procparam_prefix,
         entry_observation=entry_observation,
+        fs_base=fs_base,
+        gs_base=gs_base,
     )
     print(json.dumps(result, sort_keys=True, separators=(",", ":")))
     return 0
