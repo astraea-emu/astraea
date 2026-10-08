@@ -58,16 +58,16 @@ ModuleGraph::CreateResult ModuleGraph::create(
     }
 
     try {
-        std::vector<ModuleGraphDeclaration> modules{
-            declarations.begin(), declarations.end()};
-        for (std::size_t i = 0; i < modules.size(); ++i) {
-            const auto& module = modules[i];
+        // Validate the caller's spans before copying potentially large
+        // untrusted vectors or export strings into graph-owned storage.
+        for (std::size_t i = 0; i < declarations.size(); ++i) {
+            const auto& module = declarations[i];
             if (!valid_key(module.module_key)) {
                 return CreateResult::failure(make_error(
                     ModuleGraphErrorCode::invalid_module_key, i));
             }
             for (std::size_t previous = 0; previous < i; ++previous) {
-                if (modules[previous].module_key == module.module_key) {
+                if (declarations[previous].module_key == module.module_key) {
                     return CreateResult::failure(make_error(
                         ModuleGraphErrorCode::duplicate_module_key,
                         i, std::nullopt, previous));
@@ -115,6 +115,8 @@ ModuleGraph::CreateResult ModuleGraph::create(
                 }
             }
         }
+        std::vector<ModuleGraphDeclaration> modules{
+            declarations.begin(), declarations.end()};
         return CreateResult::success(ModuleGraph{std::move(modules)});
     } catch (const std::bad_alloc&) {
         return CreateResult::failure(make_error(
