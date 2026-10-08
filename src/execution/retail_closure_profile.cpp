@@ -4,6 +4,11 @@
 #include <cstddef>
 #include <cstdint>
 #include <limits>
+#include <new>
+#include <optional>
+#include <stdexcept>
+#include <span>
+#include <utility>
 
 namespace astraea::execution {
 namespace {
@@ -48,6 +53,77 @@ constexpr std::uint32_t kPfExecute = 0x1U;
     const auto raw =
         static_cast<std::uint64_t>(tag);
     return (raw & 0xffff0000ULL) == 0x61000000ULL;
+}
+
+constexpr std::uint64_t kAnalysisStackSize =
+    2ULL * 1024ULL * 1024ULL;
+constexpr std::uint64_t kAnalysisStackFirstBase =
+    0x00007fff00000000ULL;
+constexpr std::uint64_t kAnalysisStackStride =
+    0x01000000ULL;
+constexpr std::size_t kAnalysisStackCandidateCount = 256U;
+
+[[nodiscard]] bool overlaps_load(
+    astraea::memory::GuestRange candidate,
+    const astraea::loader::ElfImage& elf) noexcept {
+    for (const auto& header : elf.program_headers) {
+        if (header.type != kPtLoad ||
+            header.memory_size == 0U) {
+            continue;
+        }
+        const auto range =
+            astraea::memory::GuestRange::create(
+                astraea::memory::GuestAddress{
+                    header.virtual_address},
+                astraea::memory::GuestSize{
+                    header.memory_size});
+        if (!range.has_value() ||
+            candidate.overlaps(range.value())) {
+            return true;
+        }
+    }
+    return false;
+}
+
+[[nodiscard]] std::optional<astraea::memory::GuestRange>
+choose_analysis_stack(
+    std::span<const std::byte> artifact) {
+    const auto parsed =
+        astraea::loader::parse_elf64(
+            artifact,
+            astraea::loader::ElfParseProfile::ps5_sce);
+
+    for (std::size_t index = 0U;
+         index < kAnalysisStackCandidateCount;
+         ++index) {
+        const auto delta =
+            static_cast<std::uint64_t>(index) *
+            kAnalysisStackStride;
+        if (delta > kAnalysisStackFirstBase) {
+            break;
+        }
+
+        const auto candidate =
+            astraea::memory::GuestRange::create(
+                astraea::memory::GuestAddress{
+                    kAnalysisStackFirstBase - delta},
+                astraea::memory::GuestSize{
+                    kAnalysisStackSize});
+        if (!candidate.has_value()) {
+            continue;
+        }
+
+        // Preserve the real parser error later in build_guest_image(). For
+        // malformed input any valid synthetic stack is sufficient.
+        if (!parsed.has_value() ||
+            !overlaps_load(
+                candidate.value(),
+                parsed.value())) {
+            return candidate.value();
+        }
+    }
+
+    return std::nullopt;
 }
 
 }  // namespace
@@ -164,6 +240,82 @@ profile_retail_guest_image(
     }
 
     return RetailStaticClosureProfileResult::success(profile);
+}
+
+RetailArtifactClosureProfileResult
+profile_retail_artifact(
+    std::vector<std::byte> artifact_bytes) {
+    try {
+        const auto stack =
+            choose_analysis_stack(artifact_bytes);
+        if (!stack.has_value()) {
+            return RetailArtifactClosureProfileResult::failure(
+                RetailArtifactClosureProfileError{
+                    .code =
+                        RetailArtifactClosureProfileErrorCode::
+                            analysis_stack_unavailable,
+                    .guest_image_error = std::nullopt,
+                    .static_profile_error = std::nullopt,
+                });
+        }
+
+        auto image =
+            astraea::loader::build_guest_image(
+                astraea::loader::GuestImageRequest{
+                    .image_bytes = std::move(artifact_bytes),
+                    .initial_stack =
+                        astraea::loader::InitialStackRequest{
+                            .storage = stack.value(),
+                            .arguments = {"astraea-profile"},
+                            .environment = {},
+                            .auxiliary_vector = {},
+                        },
+                    .elf_profile =
+                        astraea::loader::ElfParseProfile::ps5_sce,
+                });
+        if (!image.has_value()) {
+            return RetailArtifactClosureProfileResult::failure(
+                RetailArtifactClosureProfileError{
+                    .code =
+                        RetailArtifactClosureProfileErrorCode::
+                            guest_image_failure,
+                    .guest_image_error = image.error(),
+                    .static_profile_error = std::nullopt,
+                });
+        }
+
+        const auto profile =
+            profile_retail_guest_image(image.value());
+        if (!profile.has_value()) {
+            return RetailArtifactClosureProfileResult::failure(
+                RetailArtifactClosureProfileError{
+                    .code =
+                        RetailArtifactClosureProfileErrorCode::
+                            static_profile_failure,
+                    .guest_image_error = std::nullopt,
+                    .static_profile_error = profile.error(),
+                });
+        }
+
+        return RetailArtifactClosureProfileResult::success(
+            profile.value());
+    } catch (const std::bad_alloc&) {
+        return RetailArtifactClosureProfileResult::failure(
+            RetailArtifactClosureProfileError{
+                .code =
+                    RetailArtifactClosureProfileErrorCode::
+                        host_allocation_failure,
+                .guest_image_error = std::nullopt,
+                .static_profile_error = std::nullopt,
+            });
+    } catch (const std::length_error&) {
+        return RetailArtifactClosureProfileResult::failure(
+            RetailArtifactClosureProfileError{
+                .code =
+                    RetailArtifactClosureProfileErrorCode::
+                        host_allocation_failure,
+            });
+    }
 }
 
 }  // namespace astraea::execution
