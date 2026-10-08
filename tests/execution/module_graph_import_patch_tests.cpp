@@ -80,7 +80,7 @@ TEST_CASE(
             OwnedModuleAbsolutePatchErrorCode::unsupported_relocation_type);
     }
 
-    for (const auto [type, kind] :
+    for (const auto& [type, kind] :
          {std::pair{6U, RelocationTableKind::plt_rela},
           std::pair{7U, RelocationTableKind::rela},
           std::pair{6U, RelocationTableKind::rel},
