@@ -3,6 +3,7 @@
 #include <compare>
 #include <cstdint>
 #include <optional>
+#include <vector>
 
 #include <astraea/core/result.hpp>
 #include <astraea/loader/dynamic_metadata.hpp>
@@ -63,5 +64,32 @@ using RetailStaticClosureProfileResult =
 [[nodiscard]] RetailStaticClosureProfileResult
 profile_retail_guest_image(
     const astraea::loader::GuestImage& image) noexcept;
+
+// Builds a validated PS5/SCE GuestImage using an analysis-only synthetic
+// non-overlapping stack and returns the static closure dimensions. No guest
+// instruction is executed.
+enum class RetailArtifactClosureProfileErrorCode {
+    analysis_stack_unavailable,
+    guest_image_failure,
+    static_profile_failure,
+    host_allocation_failure,
+};
+
+struct RetailArtifactClosureProfileError {
+    RetailArtifactClosureProfileErrorCode code =
+        RetailArtifactClosureProfileErrorCode::guest_image_failure;
+    std::optional<astraea::loader::GuestImageError> guest_image_error;
+    std::optional<RetailStaticClosureProfileError> static_profile_error;
+
+};
+
+using RetailArtifactClosureProfileResult =
+    astraea::core::Result<
+        RetailStaticClosureProfile,
+        RetailArtifactClosureProfileError>;
+
+[[nodiscard]] RetailArtifactClosureProfileResult
+profile_retail_artifact(
+    std::vector<std::byte> artifact_bytes);
 
 }  // namespace astraea::execution
