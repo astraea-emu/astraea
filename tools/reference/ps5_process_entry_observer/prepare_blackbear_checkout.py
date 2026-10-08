@@ -213,6 +213,25 @@ def self_test() -> None:
             root / "src/astraea_observer/auto_emit.cpp"
         ).read_text(encoding="utf-8")
 
+        shell = root / "patched-build-fragment.sh"
+        shell.write_text(
+            "#!/usr/bin/env bash\n"
+            "build=build\nroot=.\nnative=tooling/native\n"
+            "target_compiler=clang\nsdk_root=sdk\n"
+            "objects=()\n"
+            + PATCHED_CRT_BLOCK
+            + "\n"
+            + PATCHED_LINK_INPUTS
+            + "\n",
+            encoding="utf-8",
+        )
+        subprocess.run(
+            ["bash", "-n", str(shell)],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
