@@ -6,7 +6,6 @@
 #include <cstddef>
 #include <cstdint>
 #include <iostream>
-#include <map>
 #include <new>
 #include <set>
 #include <sstream>
@@ -122,10 +121,8 @@ constexpr std::uint64_t kMaxDependencyNameBytes = 256U;
 
     std::set<std::uint64_t> needed_raw;
     std::set<std::uint64_t> libraries_raw;
-    std::map<std::uint16_t, std::pair<std::uint16_t, std::string>>
-        public_module_ids;
-    std::map<std::uint16_t, std::pair<std::uint16_t, std::string>>
-        public_library_ids;
+    astraea::loader::PublicSceLocalIdLedger public_module_ids;
+    astraea::loader::PublicSceLocalIdLedger public_library_ids;
     std::size_t needed_records = 0U;
     std::size_t library_records = 0U;
 
@@ -186,17 +183,11 @@ constexpr std::uint64_t kMaxDependencyNameBytes = 256U;
                 }
                 auto& ledger =
                     is_needed ? public_module_ids : public_library_ids;
-                const auto found = ledger.find(fields.local_id);
-                if (found != ledger.end()) {
-                    if (found->second.first != fields.version ||
-                        found->second.second != name) {
-                        throw std::runtime_error(
-                            "public_pack_conflicting_local_id");
-                    }
-                } else {
-                    ledger.emplace(
-                        fields.local_id,
-                        std::pair{fields.version, name});
+                if (ledger.record(fields, name) ==
+                    astraea::loader::PublicSceLocalIdRecordResult::
+                        conflicting_reuse) {
+                    throw std::runtime_error(
+                        "public_pack_conflicting_local_id");
                 }
                 out << key << "[" << i << "].public_local_id="
                     << fields.local_id << '\n'
