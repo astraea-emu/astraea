@@ -115,13 +115,26 @@ compiler's own prologue rather than the loader boundary.
 
 ### FS/GS follow-up
 
-Do not add `RDFSBASE`/`RDGSBASE` to the first observer merely because the Zen 2
-CPU supports those instructions. Whether userspace execution of those
-instructions is enabled is itself a platform fact. Treat FS/GS-base capture as
-a separate controlled probe using an independently evidenced safe mechanism.
-Until then, the v0 Astraea observation should omit those fields when they are
-not captured. It must never encode "unknown" as zero or turn either state into
-a PS5 rule.
+Do not add `RDFSBASE`/`RDGSBASE` to the title observer merely because the Zen 2
+CPU supports those instructions. Whether userspace execution is enabled is
+itself a platform fact.
+
+The preferred C1C route is now an **external thread-state sidecar**. FreeBSD
+debugger interfaces expose FS/GS base separately from ordinary GPR state, and
+current public PS5 debugging tooling likewise exposes a dedicated external
+FS/GS-base read. Astraea therefore accepts optional FS/GS values produced by
+an authorized external debugger without importing or depending on that
+debugger transport.
+
+The offline analyzer preserves three states independently for each base:
+
+- unavailable/unknown;
+- observed zero;
+- observed nonzero.
+
+Raw values remain provenance/evidence. Cross-run structural comparison uses
+only the optional zero/nonzero state, so ASLR-sensitive or allocation-sensitive
+base changes do not become fake ABI constants.
 
 ### Repetition and provenance
 
