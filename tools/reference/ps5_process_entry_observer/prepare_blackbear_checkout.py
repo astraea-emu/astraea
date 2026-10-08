@@ -9,6 +9,7 @@ edits required to compile Astraea's pre-CRT observer.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import shutil
 import subprocess
 import sys
@@ -107,6 +108,37 @@ def patch_build_script(text: str) -> str:
     return text
 
 
+def verified_astraea_revision() -> str:
+    root = astraea_root()
+    tracked = (
+        "tools/reference/ps5_process_entry_observer/entry.S",
+        "tools/reference/ps5_process_entry_observer/capture.h",
+        "tools/reference/ps5_process_entry_observer/emit_observation.cpp",
+        "tools/reference/ps5_process_entry_observer/prepare_blackbear_checkout.py",
+    )
+    status = run_git(
+        root,
+        "status",
+        "--porcelain",
+        "--untracked-files=all",
+        "--",
+        *tracked,
+    )
+    if status:
+        raise PreparationError(
+            "Astraea observer/preparation sources are modified or untracked"
+        )
+    return run_git(root, "rev-parse", "HEAD")
+
+
+def file_sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as stream:
+        for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
 def copy_observer_sources(checkout: Path) -> None:
     source = astraea_root() / "tools/reference/ps5_process_entry_observer"
     native = checkout / "tooling/native"
@@ -141,6 +173,8 @@ def prepare(checkout: Path) -> None:
     if not (checkout / ".git").exists():
         raise PreparationError("checkout is not a Git working tree")
 
+    astraea_revision = verified_astraea_revision()
+
     revision = run_git(checkout, "rev-parse", "HEAD")
     if revision != PINNED_REVISION:
         raise PreparationError(
@@ -173,8 +207,14 @@ def prepare(checkout: Path) -> None:
     build_script.write_text(patched, encoding="utf-8")
     try:
         copy_observer_sources(checkout)
+        source_root = astraea_root() / "tools/reference/ps5_process_entry_observer"
         marker.write_text(
-            f"astraea.ps5.process-entry/v0\nupstream={PINNED_REVISION}\n",
+            "astraea.ps5.process-entry/v0\n"
+            f"upstream={PINNED_REVISION}\n"
+            f"astraea={astraea_revision}\n"
+            f"entry_sha256={file_sha256(source_root / 'entry.S')}\n"
+            f"capture_sha256={file_sha256(source_root / 'capture.h')}\n"
+            f"emitter_sha256={file_sha256(source_root / 'emit_observation.cpp')}\n",
             encoding="utf-8",
         )
     except Exception:
@@ -284,6 +324,12 @@ def self_test() -> None:
             assert PATCHED_CRT_BLOCK in prepared
             assert PATCHED_LINK_INPUTS in prepared
             assert (checkout / MARKER).is_file()
+            marker_text = (checkout / MARKER).read_text(encoding="utf-8")
+            assert "upstream=" + fixture_revision in marker_text
+            assert "astraea=" in marker_text
+            assert "entry_sha256=" in marker_text
+            assert "capture_sha256=" in marker_text
+            assert "emitter_sha256=" in marker_text
             assert (checkout / "tooling/native/astraea_entry.S").is_file()
             assert (checkout / "src/astraea_observer/capture.h").is_file()
             assert (checkout / "src/astraea_observer/emit_observation.cpp").is_file()
