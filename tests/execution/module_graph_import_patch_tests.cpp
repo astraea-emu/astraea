@@ -183,7 +183,7 @@ TEST_CASE(
         },
         .name = {
             .raw = "ABCDEFGHIJK#test-library#test-module",
-            .identity = {
+            .identity = astraea::loader::SceSymbolIdentity{
                 .nid = "ABCDEFGHIJK",
                 .library_id = "test-library",
                 .module_id = "test-module",
