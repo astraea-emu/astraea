@@ -94,3 +94,38 @@ from `nid#library#module` import IDs to provider identities.
 
 Related: #356, #367, #334. Sony firmware, proprietary binaries,
 hardware jailbreaks and commercial executables are absent.
+
+## Public native-symbol ID cross-check (stage J)
+
+The two independently authored, reviewed public title linkers encode
+numeric **local library/module IDs** into long-form import spellings using
+the compact alphabet
+`ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+-`.
+Examples are `A = 0`, `B = 1`, `BA = 64`, and `P-- = 65535`.
+This is **not** the eleven-character NID codec.
+
+The opt-in public profile decodes each structurally valid
+`nid#library-id#module-id` suffix and requires both decoded numeric
+IDs to appear in their *own* previously validated packed metadata
+ledgers. It reports both local IDs and both published names, losslessly
+hex encoded. Invalid characters, noncanonical leading-zero spellings,
+out-of-range or unregistered local IDs cause an atomic diagnostic
+failure. No symbol is associated with a service implementation, HLE
+function or loadable Sony module; **matched means metadata agrees**.
+
+Source-derived evidence:
+- BlackBear `tooling/native/sce_module_writer.cpp` at
+  `2f672d1c2f508e26f82ce6e27cef289a0861413c`;
+- GPLv3 ps5link SDK `linker/nid.c` and `linker/linker.c` at
+  `ea771e535378740b6a058b8e5419eb8a0e0e0ec8`.
+
+A pinned independent BlackBear title check expects 25 structurally
+long-form symbol identities to identify the four published module
+names through distinct module IDs 1..4 and library IDs 0..3. The first
+symbol row is reserved and does not acquire a module association.
+
+The matching pairs here reflect this **exact public emitter** and
+cannot establish the correct provider lookup, version-compatibility
+policy, symbol-export availability, process bootstrap state or
+commercial-title compatibility on real hardware. Generalizing this
+relationship requires separate, authenticated observations.
