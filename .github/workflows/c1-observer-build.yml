@@ -1,0 +1,96 @@
+name: C1 pinned observer build proof
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - '.github/workflows/c1-observer-build.yml'
+      - 'tools/reference/ps5_process_entry_observer/**'
+
+permissions:
+  contents: read
+
+jobs:
+  pinned-native-title-build:
+    name: Pinned observer host build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - name: Check out Astraea
+        uses: actions/checkout@v7
+
+      - name: Install public host build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends \
+            clang-18 lld-18 make ninja-build ccache pkg-config python3 \
+            python3-venv curl wget unzip tar git
+
+      - name: Check out the reviewed native-title reference
+        env:
+          PINNED_BLACKBEAR: 2f672d1c2f508e26f82ce6e27cef289a0861413c
+        run: |
+          git clone https://github.com/blackbearreloaded/ps5-native-app-boilerplate.git \
+            "$RUNNER_TEMP/ps5-native-app-boilerplate"
+          git -C "$RUNNER_TEMP/ps5-native-app-boilerplate" \
+            checkout --detach "$PINNED_BLACKBEAR"
+          test "$(git -C "$RUNNER_TEMP/ps5-native-app-boilerplate" rev-parse HEAD)" = "$PINNED_BLACKBEAR"
+          test -z "$(git -C "$RUNNER_TEMP/ps5-native-app-boilerplate" status --porcelain --untracked-files=all)"
+
+      - name: Prepare exact observer without transport or console access
+        run: |
+          python3 tools/reference/ps5_process_entry_observer/prepare_blackbear_checkout.py \
+            --checkout "$RUNNER_TEMP/ps5-native-app-boilerplate"
+          test -s "$RUNNER_TEMP/ps5-native-app-boilerplate/.astraea-ps5-entry-observer-v0"
+
+      - name: Build native title using the pinned public toolchain
+        run: |
+          make --directory="$RUNNER_TEMP/ps5-native-app-boilerplate" \
+            USE_CCACHE=0 app
+
+      - name: Verify build outputs and selected entry symbol
+        run: |
+          python3 - <<'PY'
+          import pathlib
+          import runpy
+          import struct
+          import os
+          import hashlib
+
+          checkout = pathlib.Path(os.environ['RUNNER_TEMP']) / 'ps5-native-app-boilerplate'
+          source = pathlib.Path('tools/reference/ps5_process_entry_observer/procparam_identity.py')
+          analyzer = runpy.run_path(str(source))
+          intermediate_path = checkout / 'build/llvm-pie.elf'
+          final_path = checkout / 'build/eboot.elf'
+          binaries = sorted((checkout / 'dist').glob('*/eboot.bin'))
+          if len(binaries) != 1:
+              raise SystemExit(f'expected exactly one built eboot.bin, found {len(binaries)}')
+          artifacts = [intermediate_path, final_path, binaries[0]]
+          for path in artifacts:
+              if not path.is_file() or path.stat().st_size == 0:
+                  raise SystemExit(f'build artifact missing or empty: {path}')
+
+          intermediate = intermediate_path.read_bytes()
+          final = final_path.read_bytes()
+          find_symbol = analyzer['find_defined_symbol']
+          observer_entry = find_symbol(intermediate, '_start', 'intermediate ELF')
+          crt_entry = find_symbol(intermediate, 'astraea_reference_crt_start', 'intermediate ELF')
+          capture = find_symbol(intermediate, 'astraea_ps5_entry_capture_v0', 'intermediate ELF')
+          initial_entry = struct.unpack_from('<Q', intermediate, 0x18)[0]
+          final_entry = struct.unpack_from('<Q', final, 0x18)[0]
+          if observer_entry != initial_entry or observer_entry == crt_entry:
+              raise SystemExit('observer is not the selected intermediate ELF entry or aliases CRT')
+          if final_entry != observer_entry:
+              raise SystemExit('converted PS5 ELF entry does not preserve the observer entry')
+          procparam, _ = analyzer['find_procparam'](final, 'final ELF')
+          loads = analyzer['mapped_loads'](final, 'final ELF')
+          analyzer['require_unique_mapped_address'](loads, final_entry, 'converted observer entry')
+          analyzer['require_unique_mapped_address'](loads, capture, 'observer capture')
+          analyzer['require_unique_mapped_address'](loads, procparam.vaddr, 'procparam')
+
+          print(f'verified observer entry 0x{observer_entry:x}; CRT 0x{crt_entry:x}; '
+                f'capture 0x{capture:x}; procparam 0x{procparam.vaddr:x}')
+          for path in artifacts:
+              print(f'{hashlib.sha256(path.read_bytes()).hexdigest()}  {path.relative_to(checkout)}')
+          print('HOST BUILD ONLY; no hardware execution or C1 ABI promotion')
+          PY
