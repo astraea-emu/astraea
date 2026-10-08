@@ -68,3 +68,24 @@ manifest.
 
 Relevant issues: #300, #334, #348, #356. The real PS5 two-run #334
 hardware evidence remains outstanding independently of this command.
+
+## Stage C: read-only relocation references
+
+The static manifest additionally inspects the already validated REL, RELA,
+PLT-REL or PLT-RELA descriptors, in a fixed order (general REL, general RELA,
+then PLT). Each record includes the exact table kind and source-relative
+table index, guest relocation target, raw relocation encoding, numerical
+relocation type, referenced dynamic-symbol index and optional signed addend.
+
+The total number of relocation records is bounded at **4096**. All records
+must parse under the existing checked parser and refer to a symbol index
+within the validated dynamic-symbol descriptor; otherwise the command fails
+without emitting partial success. The manifest reports the number of
+distinct *referenced symbol indices*, not the number of distinct HLE calls.
+
+Crucially, `relocation_application=not_attempted` declares that the command
+does not evaluate relocation architecture-specific semantics, mutate guest
+memory, bind module exports, start system modules or attempt guest execution.
+An ELF can be structurally enumerable while still being unexecutable by
+Astraea. The first public native-title sample has **40 RELA records**;
+the reproducible integration test enumerates and checks each reference.
