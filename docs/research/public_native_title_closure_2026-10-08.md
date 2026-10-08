@@ -4,7 +4,7 @@
 
 ## Exact source identities
 
-- Astraea: PR #355; merge SHA to be attached only after six exact-head checks pass.
+- Astraea: PR #355 merged after six exact-head checks; merge commit `6062aa074708fa47ecf01d9da62b38fca84c236b`.
 - Independent public GPL-3.0-or-later source: [blackbearreloaded/ps5-native-app-boilerplate](https://github.com/blackbearreloaded/ps5-native-app-boilerplate/tree/2f672d1c2f508e26f82ce6e27cef289a0861413c), pinned at `2f672d1c2f508e26f82ce6e27cef289a0861413c`.
 - Astraea observer integration: `tools/reference/ps5_process_entry_observer/prepare_blackbear_checkout.py`; same checkout modified offline and built with `make app` using the public SDK pinned by the external project.
 - Input to Astraea diagnostics: **the host-generated** `build/eboot.elf`, never a Sony binary or downloaded retail title.
