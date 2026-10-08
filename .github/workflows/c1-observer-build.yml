@@ -364,6 +364,10 @@ jobs:
           }.items():
               if fields.get(key) != expected:
                   raise SystemExit(f"{key}: {fields.get(key)!r}, expected {expected!r}")
+          exact_published_names = (
+              "libSceLibcInternal", "libSceSystemService",
+              "libSceVideoOut", "libkernel",
+          )
           for i in range(4):
               for category, expected_id in (
                   ("sce_needed_module", i + 1),
@@ -381,6 +385,8 @@ jobs:
                       raise SystemExit(f"invalid published name for {prefix}")
                   if not 1 <= len(bytes.fromhex(name_hex)) <= 256:
                       raise SystemExit(f"published-name length violates bounds {prefix}")
+                  if bytes.fromhex(name_hex) != exact_published_names[i].encode("ascii"):
+                      raise SystemExit(f"pinned public ELF published-name bytes changed: {prefix}")
 
           invalid = root / "bad-public-pack-title.bin"
           invalid.write_bytes(b"not-an-elf")
