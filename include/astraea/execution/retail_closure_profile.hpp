@@ -81,7 +81,6 @@ struct RetailArtifactClosureProfileError {
     std::optional<astraea::loader::GuestImageError> guest_image_error;
     std::optional<RetailStaticClosureProfileError> static_profile_error;
 
-    auto operator<=>(const RetailArtifactClosureProfileError&) const = default;
 };
 
 using RetailArtifactClosureProfileResult =
