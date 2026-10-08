@@ -365,14 +365,11 @@ preflight(std::vector<std::byte> bytes) {
 }
 
 astraea::execution::
-    RetailStaticClosureProfileResult
+    RetailStaticClosureArtifactResult
 closure_profile(std::vector<std::byte> bytes) {
-    const auto planned =
-        preflight(std::move(bytes));
-    REQUIRE(planned.image.has_value());
     return astraea::execution::
-        profile_retail_guest_image(
-            planned.image.value());
+        profile_retail_artifact(
+            std::move(bytes));
 }
 
 #if defined(__linux__) && defined(__x86_64__)
@@ -644,6 +641,62 @@ TEST_CASE(
 
 
 TEST_CASE(
+    "retail artifact closure profile preserves loader rejection",
+    "[execution][analysis][retail][closure-profile][artifact][negative]") {
+    auto bytes = make_sce_fixture();
+    bytes[0] = std::byte{0};
+
+    const auto result =
+        closure_profile(std::move(bytes));
+
+    REQUIRE_FALSE(result.has_value());
+    REQUIRE(
+        result.error().code ==
+        astraea::execution::
+            RetailStaticClosureArtifactErrorCode::
+                guest_image_failure);
+    REQUIRE(result.error().guest_image_error.has_value());
+    REQUIRE(
+        result.error().guest_image_error->code ==
+        astraea::loader::
+            GuestImageErrorCode::
+                elf_parse_failure);
+}
+
+TEST_CASE(
+    "retail analysis stack skips a colliding first candidate deterministically",
+    "[execution][analysis][retail][closure-profile][stack]") {
+    auto bytes = make_sce_fixture();
+
+    write_u64(
+        bytes,
+        kProgramHeaderOffset + 16U,
+        astraea::execution::
+            kRetailAnalysisStackFirstBase);
+    write_u64(
+        bytes,
+        kProgramHeaderOffset + 40U,
+        astraea::execution::
+            kRetailAnalysisStackSize);
+
+    const auto stack =
+        astraea::execution::
+            choose_retail_analysis_stack(bytes);
+
+    REQUIRE(stack.has_value());
+    REQUIRE(
+        stack->base().value() ==
+        astraea::execution::
+            kRetailAnalysisStackFirstBase -
+        astraea::execution::
+            kRetailAnalysisStackStride);
+    REQUIRE(
+        stack->size().value() ==
+        astraea::execution::
+            kRetailAnalysisStackSize);
+}
+
+TEST_CASE(
     "retail closure profile reports independent structural pressure dimensions",
     "[execution][analysis][retail][closure-profile]") {
     const auto result =
@@ -721,14 +774,20 @@ TEST_CASE(
     REQUIRE(
         result.error().code ==
         astraea::execution::
+            RetailStaticClosureArtifactErrorCode::
+                profile_failure);
+    REQUIRE(result.error().profile_error.has_value());
+    REQUIRE(
+        result.error().profile_error->code ==
+        astraea::execution::
             RetailStaticClosureProfileErrorCode::
                 sce_dynamic_metadata_failure);
     REQUIRE(
-        result.error().sce_dynamic_metadata_error
-            .has_value());
+        result.error().profile_error->
+            sce_dynamic_metadata_error.has_value());
     REQUIRE(
-        result.error().sce_dynamic_metadata_error->
-            code ==
+        result.error().profile_error->
+            sce_dynamic_metadata_error->code ==
         astraea::loader::
             SceDynamicMetadataErrorCode::
                 conflicting_singleton_tag);
