@@ -259,6 +259,44 @@ add_test(
         "${CMAKE_CURRENT_SOURCE_DIR}/cmake/expect_command_failure.cmake"
 )
 
+set(ASTRAEA_DEPENDENCY_CLI_MALFORMED_FIXTURE
+    "${CMAKE_CURRENT_BINARY_DIR}/astraea-dependencies-malformed.bin"
+)
+file(WRITE
+    "${ASTRAEA_DEPENDENCY_CLI_MALFORMED_FIXTURE}"
+    "not-an-elf"
+)
+add_test(
+    NAME astraea_dependencies_cli_malformed
+    COMMAND
+        ${CMAKE_COMMAND}
+        "-DASTRAEA_COMMAND=$<TARGET_FILE:astraea>"
+        "-DASTRAEA_COMMAND_ARGS=dependencies;${ASTRAEA_DEPENDENCY_CLI_MALFORMED_FIXTURE}"
+        "-DASTRAEA_EXPECT_REGEX=manifest_error=guest_image_failure"
+        -P
+        "${CMAKE_CURRENT_SOURCE_DIR}/cmake/expect_command_failure.cmake"
+)
+add_test(
+    NAME astraea_dependencies_cli_empty
+    COMMAND
+        ${CMAKE_COMMAND}
+        "-DASTRAEA_COMMAND=$<TARGET_FILE:astraea>"
+        "-DASTRAEA_COMMAND_ARGS=dependencies;${ASTRAEA_PROFILE_CLI_EMPTY_FIXTURE}"
+        "-DASTRAEA_EXPECT_REGEX=artifact_error=empty_artifact"
+        -P
+        "${CMAKE_CURRENT_SOURCE_DIR}/cmake/expect_command_failure.cmake"
+)
+add_test(
+    NAME astraea_dependencies_cli_missing
+    COMMAND
+        ${CMAKE_COMMAND}
+        "-DASTRAEA_COMMAND=$<TARGET_FILE:astraea>"
+        "-DASTRAEA_COMMAND_ARGS=dependencies;${ASTRAEA_PROFILE_CLI_MISSING_FIXTURE}"
+        "-DASTRAEA_EXPECT_REGEX=artifact_error=open_failed"
+        -P
+        "${CMAKE_CURRENT_SOURCE_DIR}/cmake/expect_command_failure.cmake"
+)
+
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND
    CMAKE_SYSTEM_PROCESSOR MATCHES "^(x86_64|AMD64)$" AND
    NOT ASTRAEA_ENABLE_SANITIZERS)
