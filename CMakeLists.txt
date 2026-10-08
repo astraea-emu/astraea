@@ -111,6 +111,7 @@ add_library(astraea_core STATIC
     src/execution/hle.cpp
     src/execution/sce_import_binding.cpp
     src/execution/sce_import_resolution.cpp
+    src/execution/module_graph.cpp
     src/execution/sce_jump_slot_patch.cpp
     src/execution/sce_jump_slot_apply.cpp
     src/execution/sce_glob_dat_patch.cpp
