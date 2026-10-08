@@ -4,7 +4,9 @@
 #include <cstddef>
 #include <cstdint>
 #include <limits>
+#include <new>
 #include <optional>
+#include <stdexcept>
 #include <span>
 #include <utility>
 
@@ -243,55 +245,71 @@ profile_retail_guest_image(
 RetailArtifactClosureProfileResult
 profile_retail_artifact(
     std::vector<std::byte> artifact_bytes) {
-    const auto stack =
-        choose_analysis_stack(artifact_bytes);
-    if (!stack.has_value()) {
+    try {
+        const auto stack =
+            choose_analysis_stack(artifact_bytes);
+        if (!stack.has_value()) {
+            return RetailArtifactClosureProfileResult::failure(
+                RetailArtifactClosureProfileError{
+                    .code =
+                        RetailArtifactClosureProfileErrorCode::
+                            analysis_stack_unavailable,
+                });
+        }
+
+        auto image =
+            astraea::loader::build_guest_image(
+                astraea::loader::GuestImageRequest{
+                    .image_bytes = std::move(artifact_bytes),
+                    .initial_stack =
+                        astraea::loader::InitialStackRequest{
+                            .storage = stack.value(),
+                            .arguments = {"astraea-profile"},
+                            .environment = {},
+                            .auxiliary_vector = {},
+                        },
+                    .elf_profile =
+                        astraea::loader::ElfParseProfile::ps5_sce,
+                });
+        if (!image.has_value()) {
+            return RetailArtifactClosureProfileResult::failure(
+                RetailArtifactClosureProfileError{
+                    .code =
+                        RetailArtifactClosureProfileErrorCode::
+                            guest_image_failure,
+                    .guest_image_error = image.error(),
+                });
+        }
+
+        const auto profile =
+            profile_retail_guest_image(image.value());
+        if (!profile.has_value()) {
+            return RetailArtifactClosureProfileResult::failure(
+                RetailArtifactClosureProfileError{
+                    .code =
+                        RetailArtifactClosureProfileErrorCode::
+                            static_profile_failure,
+                    .static_profile_error = profile.error(),
+                });
+        }
+
+        return RetailArtifactClosureProfileResult::success(
+            profile.value());
+    } catch (const std::bad_alloc&) {
         return RetailArtifactClosureProfileResult::failure(
             RetailArtifactClosureProfileError{
                 .code =
                     RetailArtifactClosureProfileErrorCode::
-                        analysis_stack_unavailable,
+                        host_allocation_failure,
             });
-    }
-
-    auto image =
-        astraea::loader::build_guest_image(
-            astraea::loader::GuestImageRequest{
-                .image_bytes = std::move(artifact_bytes),
-                .initial_stack =
-                    astraea::loader::InitialStackRequest{
-                        .storage = stack.value(),
-                        .arguments = {"astraea-profile"},
-                        .environment = {},
-                        .auxiliary_vector = {},
-                    },
-                .elf_profile =
-                    astraea::loader::ElfParseProfile::ps5_sce,
-            });
-    if (!image.has_value()) {
+    } catch (const std::length_error&) {
         return RetailArtifactClosureProfileResult::failure(
             RetailArtifactClosureProfileError{
                 .code =
                     RetailArtifactClosureProfileErrorCode::
-                        guest_image_failure,
-                .guest_image_error = image.error(),
+                        host_allocation_failure,
             });
     }
-
-    const auto profile =
-        profile_retail_guest_image(image.value());
-    if (!profile.has_value()) {
-        return RetailArtifactClosureProfileResult::failure(
-            RetailArtifactClosureProfileError{
-                .code =
-                    RetailArtifactClosureProfileErrorCode::
-                        static_profile_failure,
-                .static_profile_error = profile.error(),
-            });
-    }
-
-    return RetailArtifactClosureProfileResult::success(
-        profile.value());
 }
 
 }  // namespace astraea::execution
