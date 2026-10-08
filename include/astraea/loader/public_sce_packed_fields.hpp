@@ -139,7 +139,11 @@ struct PublicSceSymbolLink {
     const auto module_id =
         decode_public_sce_symbol_local_id(encoded_module_id);
     if (!library_id.has_value() || !module_id.has_value()) {
-        return {.code = PublicSceSymbolLinkCode::malformed_id};
+        return {
+            .code = PublicSceSymbolLinkCode::malformed_id,
+            .module_local_id = std::nullopt,
+            .library_local_id = std::nullopt,
+        };
     }
     if (modules.find(*module_id) == nullptr) {
         return {
