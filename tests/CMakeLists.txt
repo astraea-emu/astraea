@@ -18,6 +18,7 @@ astraea_set_project_warnings(astraea_guest_worker_probe)
 astraea_enable_sanitizers(astraea_guest_worker_probe)
 
 add_executable(astraea_core_tests
+    app/retail_profile_tests.cpp
     core/version_tests.cpp
     core/result_tests.cpp
     loader/elf64_tests.cpp
@@ -127,7 +128,12 @@ add_executable(astraea_core_tests
     trace/diff_v0_tests.cpp
     trace/graphics_v0_tests.cpp
     trace/shader_vector_execution_v0_tests.cpp
+) 
+target_sources(astraea_core_tests PRIVATE
+    "${CMAKE_SOURCE_DIR}/src/app/artifact_file.cpp"
+    "${CMAKE_SOURCE_DIR}/src/app/retail_profile.cpp"
 )
+
 target_link_libraries(astraea_core_tests PRIVATE
     Astraea::core
     Catch2::Catch2WithMain
@@ -136,6 +142,7 @@ target_link_libraries(astraea_core_tests PRIVATE
 
 target_include_directories(astraea_core_tests PRIVATE
     "${CMAKE_SOURCE_DIR}/tools/reference/ps5_process_entry_observer"
+    "${CMAKE_SOURCE_DIR}/src/app"
 )
 
 target_compile_definitions(astraea_core_tests PRIVATE
@@ -197,6 +204,59 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
             --self-test
     )
 endif()
+
+set(ASTRAEA_PROFILE_CLI_MALFORMED_FIXTURE
+    "${CMAKE_CURRENT_BINARY_DIR}/astraea-profile-malformed.bin"
+)
+file(WRITE
+    "${ASTRAEA_PROFILE_CLI_MALFORMED_FIXTURE}"
+    "not-an-elf"
+)
+add_test(
+    NAME astraea_profile_cli_malformed
+    COMMAND
+        ${CMAKE_COMMAND}
+        "-DASTRAEA_COMMAND=$<TARGET_FILE:astraea>"
+        "-DASTRAEA_COMMAND_ARGS=profile;${ASTRAEA_PROFILE_CLI_MALFORMED_FIXTURE}"
+        "-DASTRAEA_EXPECT_REGEX=profile_error=guest_image_failure"
+        -P
+        "${CMAKE_CURRENT_SOURCE_DIR}/cmake/expect_command_failure.cmake"
+)
+
+set(ASTRAEA_PROFILE_CLI_EMPTY_FIXTURE
+    "${CMAKE_CURRENT_BINARY_DIR}/astraea-profile-empty.bin"
+)
+file(WRITE
+    "${ASTRAEA_PROFILE_CLI_EMPTY_FIXTURE}"
+    ""
+)
+add_test(
+    NAME astraea_profile_cli_empty
+    COMMAND
+        ${CMAKE_COMMAND}
+        "-DASTRAEA_COMMAND=$<TARGET_FILE:astraea>"
+        "-DASTRAEA_COMMAND_ARGS=profile;${ASTRAEA_PROFILE_CLI_EMPTY_FIXTURE}"
+        "-DASTRAEA_EXPECT_REGEX=artifact_error=empty_artifact"
+        -P
+        "${CMAKE_CURRENT_SOURCE_DIR}/cmake/expect_command_failure.cmake"
+)
+
+set(ASTRAEA_PROFILE_CLI_MISSING_FIXTURE
+    "${CMAKE_CURRENT_BINARY_DIR}/astraea-profile-does-not-exist.bin"
+)
+file(REMOVE
+    "${ASTRAEA_PROFILE_CLI_MISSING_FIXTURE}"
+)
+add_test(
+    NAME astraea_profile_cli_missing
+    COMMAND
+        ${CMAKE_COMMAND}
+        "-DASTRAEA_COMMAND=$<TARGET_FILE:astraea>"
+        "-DASTRAEA_COMMAND_ARGS=profile;${ASTRAEA_PROFILE_CLI_MISSING_FIXTURE}"
+        "-DASTRAEA_EXPECT_REGEX=artifact_error=open_failed"
+        -P
+        "${CMAKE_CURRENT_SOURCE_DIR}/cmake/expect_command_failure.cmake"
+)
 
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND
    CMAKE_SYSTEM_PROCESSOR MATCHES "^(x86_64|AMD64)$" AND
