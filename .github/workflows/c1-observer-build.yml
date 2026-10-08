@@ -323,3 +323,76 @@ jobs:
           print("raw SCE identities, bounded counts, and fail-closed malformed input.")
           print("NO ABI PROMOTION; NO GUEST EXECUTION.")
           PY
+
+      - name: Verify opt-in public SCE packed identity profile on pinned title
+        run: |
+          python3 - <<'PY'
+          import os
+          import pathlib
+          import re
+          import subprocess
+
+          root = pathlib.Path(os.environ["RUNNER_TEMP"])
+          cli = root / "astraea-native-title-smoke/astraea"
+          title = root / "ps5-native-app-boilerplate/build/eboot.elf"
+          run = subprocess.run(
+              [str(cli), "dependencies", "--public-sce-pack-v1", str(title)],
+              capture_output=True, text=True, timeout=30, check=False,
+          )
+          print(run.stdout[:10000])
+          print(run.stderr[:1000])
+          if run.returncode != 0 or run.stderr.strip():
+              raise SystemExit("opt-in public SCE field profile failed")
+          fields = {}
+          for line in run.stdout.splitlines()[1:]:
+              if "=" not in line:
+                  raise SystemExit(f"unexpected public field line {line!r}")
+              key, value = line.split("=", 1)
+              if key in fields:
+                  raise SystemExit(f"duplicate public field {key}")
+              fields[key] = value
+          for key, expected in {
+              "experimental_public_sce_pack_v1": "1",
+              "generic_needed_records": "4",
+              "sce_needed_module_records": "4",
+              "sce_import_library_records": "4",
+              "public_sce_module_unique_local_ids": "4",
+              "public_sce_library_unique_local_ids": "4",
+              "resolution": "not_attempted",
+              "relocation_application": "not_attempted",
+              "guest_instructions": "0",
+          }.items():
+              if fields.get(key) != expected:
+                  raise SystemExit(f"{key}: {fields.get(key)!r}, expected {expected!r}")
+          for i in range(4):
+              for category, expected_id in (
+                  ("sce_needed_module", i + 1),
+                  ("sce_import_library", i),
+              ):
+                  prefix = f"{category}[{i}]"
+                  if int(fields[f"{prefix}.public_local_id"]) != expected_id:
+                      raise SystemExit(f"unexpected public local ID for {prefix}")
+                  if int(fields[f"{prefix}.public_version"]) != 1:
+                      raise SystemExit(f"unexpected public version for {prefix}")
+                  if int(fields[f"{prefix}.public_name_offset"]) <= 0:
+                      raise SystemExit(f"missing published-name offset for {prefix}")
+                  name_hex = fields[f"{prefix}.public_name_hex"]
+                  if not re.fullmatch(r"(?:[0-9a-f]{2})+", name_hex):
+                      raise SystemExit(f"invalid published name for {prefix}")
+                  if not 1 <= len(bytes.fromhex(name_hex)) <= 256:
+                      raise SystemExit(f"published-name length violates bounds {prefix}")
+
+          invalid = root / "bad-public-pack-title.bin"
+          invalid.write_bytes(b"not-an-elf")
+          refused = subprocess.run(
+              [str(cli), "dependencies", "--public-sce-pack-v1", str(invalid)],
+              capture_output=True, text=True, timeout=30, check=False,
+          )
+          if refused.returncode == 0 or "manifest_error=guest_image_failure" not in refused.stderr:
+              raise SystemExit("experimental profile did not reject invalid ELF")
+          if refused.stdout:
+              raise SystemExit("experimental profile leaked partial manifest")
+          print("PUBLIC SCE PACK V1 PASS: four independently built native-title")
+          print("modules/libraries; bounded names, local IDs and versions.")
+          print("TOOLCHAIN-SCOPED READ ONLY; NO RETAIL ABI PROMOTION.")
+          PY
