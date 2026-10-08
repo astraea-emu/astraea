@@ -63,6 +63,16 @@ build_owned_x86_64_module_import_patch(
                     missing_rela_addend,
                 plan.raw_relocation_type));
     }
+    // The independently authored imported-symbol plan may describe
+    // global or weak ELF symbols. Neither local (0) nor processor-specific
+    // bindings can silently become module export patches.
+    if (plan.symbol_binding != 1U && plan.symbol_binding != 2U) {
+        return OwnedModuleAbsolutePatchResult::failure(
+            make_error(
+                OwnedModuleAbsolutePatchErrorCode::
+                    unsupported_symbol_binding,
+                plan.raw_relocation_type));
+    }
     if (plan.provider_guest_address.value() == 0U) {
         return OwnedModuleAbsolutePatchResult::failure(
             make_error(
