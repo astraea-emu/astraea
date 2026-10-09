@@ -131,4 +131,86 @@ OwnedModuleImportBatchResult apply_owned_module_import_batch(
     }
 }
 
+
+OwnedLiveJumpSlotBatchResult apply_live_owned_jump_slot_batch(
+    std::span<const OwnedModuleAbsolutePatch> patches,
+    const GuestMemoryAccess& guest_memory) {
+    constexpr std::size_t kMaxOwnedImportPatches = 256U;
+    constexpr std::uint32_t kJumpSlot = 7U;
+
+    const auto refuse = [](
+        OwnedLiveJumpSlotErrorCode code,
+        std::size_t index,
+        std::size_t applied = 0U,
+        std::optional<OwnedModuleImportBatchError> batch =
+            std::nullopt) -> OwnedLiveJumpSlotBatchResult {
+        return OwnedLiveJumpSlotBatchResult::failure(
+            OwnedLiveJumpSlotError{
+                .code = code,
+                .patch_index = index,
+                .applied_count = applied,
+                .batch_error = std::move(batch),
+            });
+    };
+
+    if (patches.size() > kMaxOwnedImportPatches) {
+        return refuse(
+            OwnedLiveJumpSlotErrorCode::too_many_patches,
+            patches.size());
+    }
+
+    // All source-side checks are done before the existing batch writer
+    // receives any patch. Source existence is deliberately distinct from
+    // a syntactically valid ModuleGraph symbol address.
+    for (std::size_t index = 0U; index < patches.size(); ++index) {
+        const auto& patch = patches[index];
+        if (patch.raw_relocation_type != kJumpSlot) {
+            return refuse(
+                OwnedLiveJumpSlotErrorCode::unsupported_relocation_type,
+                index);
+        }
+
+        if (!patch.raw_addend.has_value() ||
+            patch.source_symbol_address.value() == 0U) {
+            return refuse(
+                OwnedLiveJumpSlotErrorCode::invalid_patch_encoding,
+                index);
+        }
+        const auto source = patch.source_symbol_address.value();
+        for (std::size_t byte_index = 0U;
+             byte_index < patch.bytes.size(); ++byte_index) {
+            const auto expected = static_cast<std::byte>(
+                (source >> (8U * byte_index)) & 0xffU);
+            if (patch.bytes[byte_index] != expected) {
+                return refuse(
+                    OwnedLiveJumpSlotErrorCode::invalid_patch_encoding,
+                    index);
+            }
+        }
+
+        if (!guest_memory.is_exact_executable_address(
+                patch.source_symbol_address)) {
+            return refuse(
+                OwnedLiveJumpSlotErrorCode::
+                    provider_not_live_executable,
+                index);
+        }
+    }
+
+    // Preserve the existing full-target writable preflight and overlap
+    // rejection. Do not promise rollback if an actual write fails later.
+    auto applied = apply_owned_module_import_batch(
+        patches, guest_memory);
+    if (!applied.has_value()) {
+        const auto previous = applied.error();
+        return refuse(
+            OwnedLiveJumpSlotErrorCode::batch_failure,
+            previous.patch_index,
+            previous.applied_count,
+            previous);
+    }
+    return OwnedLiveJumpSlotBatchResult::success(
+        std::move(applied.value()));
+}
+
 }  // namespace astraea::execution
