@@ -1662,11 +1662,18 @@ int main(int argc, char** argv) {
 
     if (mode == ProbeMode::owned_two_elf_execution) {
 #if defined(__linux__) && defined(__x86_64__) && defined(MAP_FIXED_NOREPLACE)
-        // Execute the independently parsed client/provider ELF workload
-        // solely in this supervised worker, never in the controller.
+        // Consume the identical controller-owned source ELF pair through
+        // the production sealed fd 3 transfer. Validate and close it
+        // before guest mapping or execution. Never rebuild different
+        // artifact bytes or read a host pathname in this worker.
+        const auto artifact =
+            read_linux_sealed_worker_artifact(1024U * 1024U);
+        if (!artifact.has_value() || !artifact_fd_is_closed()) {
+            return 43;
+        }
         const auto stopped =
             astraea::test::run_owned_two_elf_worker(
-                kWorkerId, kThreadId);
+                kWorkerId, kThreadId, artifact.value());
         if (!stopped.has_value()) {
             return 43;
         }
