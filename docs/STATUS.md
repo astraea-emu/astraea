@@ -281,7 +281,7 @@ Astraea does **not** currently claim:
 
 ## 2026-10-09 execution map
 
-[PC-first C1 execution and reference-console readiness](research/c1_pc_first_execution_hardware_readiness_2026-10-09.md) is the scoped next-task and hardware-gate checklist. Prioritize end-to-end **owned module lifecycle and independently selected executable progression** over producing additional speculative patch encoders. Preserve #334 open until two authentic normal-title entry observations are collected.
+[PC-first C1 execution and reference-console readiness](research/c1_pc_first_execution_hardware_readiness_2026-10-09.md) is the scoped next-task and hardware-gate checklist. Prioritize [#378](https://github.com/astraea-emu/astraea/issues/378): an **end-to-end owned two-module supervised guest execution route**, not another standalone patch encoder. Only after that, prioritize lawful selected-title structural preflight and the irreducible #334 startup observation. Preserve #334 open until two authentic normal-title entry observations are collected.
 
 ## Next action
 
