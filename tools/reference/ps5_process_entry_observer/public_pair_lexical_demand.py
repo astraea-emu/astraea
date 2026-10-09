@@ -107,11 +107,13 @@ def relocation_demand(fields: dict[str, str], symbols: list[dict],
     return demanded
 
 
-def compare(title: dict[str, str], provider: dict[str, str]) -> dict:
-    title_syms = symbol_inventory(title, 26)
-    provider_syms = symbol_inventory(provider, 2669)
-    demands = relocation_demand(title, title_syms, 40)
-    relocation_demand(provider, provider_syms, 1896)  # Validate full PRX census.
+def compare(title: dict[str, str], provider: dict[str, str],
+            expected_counts: tuple[int, int, int, int] = (26, 2669, 40, 1896)) -> dict:
+    title_count, provider_count, title_relocs, provider_relocs = expected_counts
+    title_syms = symbol_inventory(title, title_count)
+    provider_syms = symbol_inventory(provider, provider_count)
+    demands = relocation_demand(title, title_syms, title_relocs)
+    relocation_demand(provider, provider_syms, provider_relocs)  # Validate all PRX rows.
     exports = [s["identity"] for s in provider_syms
                if s["defined"] and s["binding"] in (1, 2)
                and s["identity"] is not None]
@@ -148,8 +150,8 @@ def compare(title: dict[str, str], provider: dict[str, str]) -> dict:
         "policy": "read_only_lexical_comparison_no_binding",
         "resolution": "not_attempted",
         "guest_instructions": 0,
-        "title_relocation_records": 40,
-        "provider_relocation_records": 1896,
+        "title_relocation_records": title_relocs,
+        "provider_relocation_records": provider_relocs,
         "title_longform_external_relocations": len(demands),
         "title_unique_longform_external_identities": len(examples),
         "provider_defined_longform_export_rows": len(exports),
@@ -200,15 +202,34 @@ def self_test() -> None:
         return fields
 
     ident = ("414141", "6262", "6363")
-    changed = ("414141", "6464", "6565")
-    title = make([(True, None), (False, ident), (False, ("999999", "6262", "6363"))], [1, 1, 2])
-    provider = make([(True, ident), (True, changed), (False, None)], [2])
-    # The helper's pinned-count expectations must be enforced separately.
+    other_same_nid = ("414141", "7878", "7979")
+    title = make([
+        (True, None), (False, ident), (False, other_same_nid),
+        (False, ("999999", "6262", "6363")),
+    ], [1, 1, 2, 3])
+    provider = make([(True, ident), (True, ("414141", "6464", "6565")),
+                     (False, None)], [2])
+    report = compare(title, provider, (4, 3, 4, 1))
+    assert report["title_longform_external_relocations"] == 4
+    assert report["title_unique_longform_external_identities"] == 3
+    assert report["comparison_counts"] == {
+        "lexical_full_triplet": 2,
+        "lexical_nid_only": 1,
+        "no_nid_candidate": 1,
+    }
+    assert report["resolution"] == "not_attempted"
     assert bounded_int({"x": "26"}, "x", expected=26) == 26
     assert parse_report("Astraea dependency manifest v0\nexecution=none\nresolution=not_attempted\nrelocation_application=not_attempted\nguest_instructions=0\n")["execution"] == "none"
-    assert Counter([x for x in [ident, ident, changed]])[ident] == 2
-    assert title["relocation[0].symbol_index"] == "1"
-    assert provider["symbol[1].nid_hex"] == ident[0]
+    for damaged in (
+        {**title, "relocation[0].symbol_index": "5000"},
+        {**title, "symbol[1].nid_hex": "not-hex"},
+    ):
+        try:
+            compare(damaged, provider, (4, 3, 4, 1))
+        except InventoryError:
+            pass
+        else:
+            raise AssertionError("out-of-range/malformed public manifest accepted")
     for malformed in (
         "Astraea dependency manifest v0\nexecution=none\nexecution=none\n",
         "Astraea dependency manifest v0\nexecution=none\nresolution=resolved\n",
