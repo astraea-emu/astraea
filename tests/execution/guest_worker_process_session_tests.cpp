@@ -175,6 +175,59 @@ TEST_CASE(
 }
 
 TEST_CASE(
+    "isolated Linux worker executes two source-owned ELF modules to a repeatable typed stop",
+    "[execution][c1][two-elf][process][linux]") {
+#if defined(__linux__) && defined(__x86_64__)
+    // This is an independently authored research-only process. The
+    // controller does not execute native guest instructions. The worker
+    // internally requires exit_code=42, the exact graph-resolved provider
+    // control transfer, a single synthetic exit gate and zero HLE output.
+    auto settings = config({"--owned-two-elf-execution"}, 15000U);
+    settings.resource_policy =
+        astraea::execution::GuestWorkerResourcePolicy{
+            .process_memory_limit_bytes = std::nullopt,
+            .process_cpu_time_seconds = 5U,
+            .linux_max_open_files = 64U,
+            .linux_disable_core_dumps = true,
+            .linux_disable_file_growth = true,
+        };
+
+    const auto first =
+        astraea::execution::run_guest_worker_process_session(settings);
+    REQUIRE(first.has_value());
+    const auto second =
+        astraea::execution::run_guest_worker_process_session(settings);
+    REQUIRE(second.has_value());
+
+    const auto check = [](const auto& result) {
+        REQUIRE(result.child_exit_code == 0);
+        REQUIRE(result.syscall_request_count == 0U);
+        REQUIRE_FALSE(result.terminal_fault.has_value());
+        REQUIRE_FALSE(result.terminal_diagnostic.has_value());
+        REQUIRE(result.stop.reason ==
+            astraea::execution::GuestWorkerStopReason::
+                normal_guest_return);
+        REQUIRE(result.stop.guest_rip.value() != 0U);
+        REQUIRE(result.stop.worker_id == result.ready.worker_id);
+        REQUIRE(result.stop.thread_id.value == 1U);
+    };
+    check(first.value());
+    check(second.value());
+
+    // Compare normalized protocol evidence. Absolute native guest RIPs
+    // are intentionally ASLR-dependent and must not be matched bytewise.
+    REQUIRE(first->stop.reason == second->stop.reason);
+    REQUIRE(first->stop.worker_id == second->stop.worker_id);
+    REQUIRE(first->stop.thread_id == second->stop.thread_id);
+    REQUIRE(first->child_exit_code == second->child_exit_code);
+    REQUIRE(first->syscall_request_count ==
+        second->syscall_request_count);
+#else
+    SUCCEED();
+#endif
+}
+
+TEST_CASE(
     "Linux sealed artifact handoff reaches worker as immutable fd 3 bytes",
     "[execution][c0][process][artifact][linux]") {
 #if defined(__linux__)
