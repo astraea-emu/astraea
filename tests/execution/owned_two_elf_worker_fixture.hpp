@@ -475,7 +475,7 @@ run_owned_two_elf_worker(
             memory::GuestAddress{provider_address}))
         return std::nullopt;
     const std::array patches{patch.value()};
-    if (!execution::apply_owned_module_import_batch(
+    if (!execution::apply_live_owned_jump_slot_batch(
             patches, guest_memory).has_value())
         return std::nullopt;
     std::array<std::byte, 8> got_bytes{};
@@ -506,12 +506,34 @@ run_owned_two_elf_worker(
     // The protocol carries a real (ASLR-dependent) guest RIP, not a
     // fabricated fixed address. Controller-side comparisons normalize
     // away this address and retain exact typed reason and thread identity.
-    return execution::GuestWorkerStop{
+    const auto stop = execution::GuestWorkerStop{
         .worker_id = worker_id,
         .thread_id = thread_id,
         .reason = execution::GuestWorkerStopReason::normal_guest_return,
         .guest_rip = memory::GuestAddress{session->events[1].rip},
     };
+
+    // Explicit teardown in the *supervised worker*: the source module
+    // graph remains a declaration, but releasing prepared host mappings
+    // must make the provider uncallable and its GOT unwritable. These
+    // checks never dereference an unmapped guest pointer.
+    prepared.value() = execution::LinuxPreparedMemory{};
+    if (guest_memory.is_exact_executable_address(
+            memory::GuestAddress{provider_address}) ||
+        guest_memory.preflight_write(
+            memory::GuestAddress{got}, 8U).has_value())
+        return std::nullopt;
+    auto after_release =
+        execution::apply_live_owned_jump_slot_batch(
+            patches, guest_memory);
+    if (after_release.has_value() ||
+        after_release.error().code !=
+            execution::OwnedLiveJumpSlotErrorCode::
+                provider_not_live_executable ||
+        after_release.error().applied_count != 0U)
+        return std::nullopt;
+
+    return stop;
 #endif
 }
 
