@@ -152,8 +152,16 @@ Unknown load-bearing hardware state still prevents retail native entry.
   **0 exact literal NID/library/module triples**, **8 NID-only lexical
   candidates**, and **17 without an equal NID**. No binding/relocation was
   attempted; guest instruction count was **zero**. The accompanying
-  analyzer's self-test also passed. This pinned workflow result alone does not
-  waive the separate required five-platform merge checks for PR #389.
+  analyzer's self-test also passed. All six exact-head checks for
+  PR #389 have since passed, and #389 merged as
+  ee06f4d9db882cd0a8b6c5dd0a74ce710a4281e3.
+- PR #391's additional pinned source-build workflow independently verified
+  an ELF64 relocation *in the compiled authored CRT entry* to undefined
+  _init_env: one type-41 record at object-section offset 0x15, with
+  object SHA-256
+  72b7838f3e7595002fb8b7a23803f877c7da54d0db117fb7305832301c00823c.
+  This is not the final PS5-format provider identity or an executed call.
+  Preserve its exact-head six-check merge gate separately.
 - See docs/research/public_pinned_title_prx_lexical_closure_2026-10-09.md
   for the exact source/artifact hashes and boundary. **Even an equal NID is
   not a compatible service or a verified defining module**: the encoded
