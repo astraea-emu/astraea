@@ -551,35 +551,63 @@ jobs:
               print(result.stdout[:4000])
               print("ERROR PREFIX:")
               print(result.stderr[:2000])
-              if result.returncode < 0:
-                  raise SystemExit(f"Astraea {command} crashed on independently built PRX")
-              if result.returncode == 0:
-                  if command == "profile" and not result.stdout.startswith(
-                      "Astraea retail closure profile\n"
-                  ):
-                      raise SystemExit("successful PRX profile had an unstructured header")
-                  if command == "dependencies" and not result.stdout.startswith(
-                      "Astraea dependency manifest v0\n"
-                  ):
-                      raise SystemExit("successful PRX manifest had an unstructured header")
-                  if result.stderr.strip():
-                      raise SystemExit("successful PRX diagnostic emitted stderr")
-                  if command == "dependencies":
-                      fields = dict(line.split("=", 1) for line in
-                                    result.stdout.splitlines()[1:] if "=" in line)
-                      for field, expected_value in (
-                          ("execution", "none"),
-                          ("resolution", "not_attempted"),
-                          ("guest_instructions", "0"),
-                      ):
-                          if fields.get(field) != expected_value:
-                              raise SystemExit(f"PRX manifest overclaimed {field}")
-                      print("RAW PRX RELOCATIONS:", fields.get("relocation_records"),
-                            "SYMBOL ROWS:", fields.get("dynamic_symbol_records"))
-              elif "profile_error=" not in result.stderr and (
-                  "manifest_error=" not in result.stderr
-              ):
-                  raise SystemExit(f"PRX {command} failure lacked typed boundary")
+              if result.returncode != 0 or result.stderr.strip():
+                  raise SystemExit(f"verified public PRX {command} baseline regressed")
+              expected_header = (
+                  "Astraea retail closure profile\n" if command == "profile"
+                  else "Astraea dependency manifest v0\n"
+              )
+              if not result.stdout.startswith(expected_header):
+                  raise SystemExit(f"public PRX {command} report header changed")
+              fields = {}
+              for line in result.stdout.splitlines()[1:]:
+                  if "=" not in line:
+                      raise SystemExit(f"malformed PRX report line: {line[:100]!r}")
+                  key, value = line.split("=", 1)
+                  if key in fields:
+                      raise SystemExit(f"duplicate PRX report field: {key}")
+                  fields[key] = value
+              expected_fields = (
+                  {
+                      "program_headers": "14",
+                      "load_segments": "5",
+                      "load_memory_bytes": "1294514",
+                      "executable_load_segments": "1",
+                      "generic_needed": "3",
+                      "sce_needed_modules": "3",
+                      "sce_import_libraries": "3",
+                      "sce_unknown_dynamic_records": "0",
+                      "dynamic_symbols": "2669",
+                      "rel_relocations": "0",
+                      "rela_relocations": "1796",
+                      "plt_relocations": "100",
+                      "total_relocations": "1896",
+                      "tls_present": "1",
+                      "tls_initialized_bytes": "384",
+                      "tls_total_bytes": "1128",
+                      "tls_alignment": "16",
+                  } if command == "profile"
+                  else {
+                      "execution": "none",
+                      "identity_policy": "opaque",
+                      "generic_needed_records": "3",
+                      "sce_needed_module_records": "3",
+                      "sce_import_library_records": "3",
+                      "dynamic_symbol_records": "2669",
+                      "relocation_records": "1896",
+                      "resolution": "not_attempted",
+                      "relocation_application": "not_attempted",
+                      "guest_instructions": "0",
+                  }
+              )
+              for key, expected_value in expected_fields.items():
+                  if fields.get(key) != expected_value:
+                      raise SystemExit(
+                          f"pinned raw PRX {command} {key} changed: "
+                          f"{fields.get(key)!r} vs {expected_value!r}"
+                      )
+              print(f"PINNED CLEAN-ROOM PRX {command.upper()} BASELINE PASS.")
+
 
           print("PUBLIC SECOND-ARTIFACT DIAGNOSTIC PROBE COMPLETE.")
           print("Host-only raw independently generated ELF; no PS5, no gameplay.")
