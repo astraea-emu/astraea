@@ -154,3 +154,37 @@ disjoint writable targets with exact readback, overlap refusal before
 mutation, and a later unmapped target causing whole-batch preflight
 rejection without changing the earlier valid target. There is no
 retail-title admission, Sony import resolution or PS5 hardware proof.
+
+## Independent x86-64 RELATIVE relocation byte builder
+
+The same source-generated public runtime PRX that extends the C1 host
+test corpus contains 1,790 project-authored
+`R_X86_64_RELATIVE` relocations. Unlike GLOB_DAT/JUMP_SLOT, this
+relocation needs **no symbol binding**: the standard AMD64 psABI
+defines the 64-bit value as `B + A`, where `B` is the caller-provided
+**load bias** and `A` is the signed RELA addend. This is an owned-code
+x86-64 experiment, **not** a firmware-specific PS5 loader assertion.
+
+`build_owned_x86_64_relative_patch` therefore accepts only a
+general `RELA` table, numerical type 8, symbol index 0, an explicit
+signed addend and a caller-provided typed guest load bias. It requires
+a non-overflowing eight-byte target and a checked B+A result (including
+safe handling of `INT64_MIN`). It emits exact little-endian bytes,
+**without writing memory or executing guest code**. The project does
+not silently use host-image bases, guessed PS5 loader addresses or
+wraparound arithmetic.
+
+Independent Catch2 tests cover positive and negative addends, exact
+byte ordering, minimum signed addend, underflow/overflow, unsupported
+type/table, nonzero symbol index, missing addend and invalid target.
+A later separate application test must recheck mapped, writable
+guest memory through `GuestMemoryAccess` and establish actual
+ownership/lifetime. The existing checked owned import batch applies
+only separately validated imported-provider patches.
+
+Primary standard: System V AMD64 psABI,
+https://gitlab.com/x86-psABIs/x86-64-ABI .
+Independent source context: pinned BlackBear authored PRX runtime
+`docs/RUNTIME_SHIM.md`; see
+`docs/research/public_cleanroom_prx_second_corpus_2026-10-08.md`
+after the corresponding integration PR merges.
