@@ -508,3 +508,79 @@ jobs:
           print("modules/libraries; bounded names, local IDs and versions.")
           print("TOOLCHAIN-SCOPED READ ONLY; NO RETAIL ABI PROMOTION.")
           PY
+
+      - name: Probe independently generated clean-room PRX as a second ELF corpus
+        run: |
+          python3 - <<'PY'
+          import hashlib
+          import os
+          import pathlib
+          import subprocess
+
+          root = pathlib.Path(os.environ["RUNNER_TEMP"])
+          public = root / "ps5-native-app-boilerplate"
+          cli = root / "astraea-native-title-smoke/astraea"
+          builder = public / "build/host/libc-builder"
+          api = public / "tooling/native/runtime/api-surface.txt"
+          imports = public / "tooling/native/runtime/imports.txt"
+          raw = root / "public-cleanroom-libc.raw.elf"
+
+          # This builder and both input manifests belong to the already
+          # pinned, GPL-3.0-or-later reviewed public source checkout.
+          for item in (builder, api, imports):
+              if not item.is_file():
+                  raise SystemExit(f"pinned independent PRX build input missing: {item.name}")
+          subprocess.run(
+              [str(builder), str(api), str(imports), str(raw)],
+              check=True, text=True, capture_output=True, timeout=90,
+          )
+          data = raw.read_bytes()
+          sha = hashlib.sha256(data).hexdigest()
+          expected = "8ee6e124993e1af26420cb455890fd002f5d6c7e78883c860ce45734e7d002bb"
+          if sha != expected or len(data) != 1335962:
+              raise SystemExit(f"public raw PRX identity mismatch: sha={sha}, bytes={len(data)}")
+          print("INDEPENDENT CLEAN-ROOM RAW PRX VERIFIED:", sha, len(data))
+
+          for command in ("profile", "dependencies"):
+              result = subprocess.run(
+                  [str(cli), command, str(raw)],
+                  capture_output=True, text=True, timeout=60, check=False,
+              )
+              print(f"CLEANROOM_PRX_{command.upper()}_RC={result.returncode}")
+              print("REPORT PREFIX:")
+              print(result.stdout[:4000])
+              print("ERROR PREFIX:")
+              print(result.stderr[:2000])
+              if result.returncode < 0:
+                  raise SystemExit(f"Astraea {command} crashed on independently built PRX")
+              if result.returncode == 0:
+                  if command == "profile" and not result.stdout.startswith(
+                      "Astraea retail closure profile\n"
+                  ):
+                      raise SystemExit("successful PRX profile had an unstructured header")
+                  if command == "dependencies" and not result.stdout.startswith(
+                      "Astraea dependency manifest v0\n"
+                  ):
+                      raise SystemExit("successful PRX manifest had an unstructured header")
+                  if result.stderr.strip():
+                      raise SystemExit("successful PRX diagnostic emitted stderr")
+                  if command == "dependencies":
+                      fields = dict(line.split("=", 1) for line in
+                                    result.stdout.splitlines()[1:] if "=" in line)
+                      for field, expected_value in (
+                          ("execution", "none"),
+                          ("resolution", "not_attempted"),
+                          ("guest_instructions", "0"),
+                      ):
+                          if fields.get(field) != expected_value:
+                              raise SystemExit(f"PRX manifest overclaimed {field}")
+                      print("RAW PRX RELOCATIONS:", fields.get("relocation_records"),
+                            "SYMBOL ROWS:", fields.get("dynamic_symbol_records"))
+              elif "profile_error=" not in result.stderr and (
+                  "manifest_error=" not in result.stderr
+              ):
+                  raise SystemExit(f"PRX {command} failure lacked typed boundary")
+
+          print("PUBLIC SECOND-ARTIFACT DIAGNOSTIC PROBE COMPLETE.")
+          print("Host-only raw independently generated ELF; no PS5, no gameplay.")
+          PY
