@@ -606,6 +606,49 @@ jobs:
                           f"pinned raw PRX {command} {key} changed: "
                           f"{fields.get(key)!r} vs {expected_value!r}"
                       )
+              if command == "dependencies":
+                  from collections import Counter
+
+                  # These are source-generated ELF relocation records,
+                  # not loader-applied patches or API calls.
+                  classes = Counter()
+                  referenced = set()
+                  for index in range(1896):
+                      prefix = f"relocation[{index}]"
+                      kind = fields[f"{prefix}.table"]
+                      typ = int(fields[f"{prefix}.type"])
+                      si = int(fields[f"{prefix}.symbol_index"])
+                      if not 0 <= si < 2669:
+                          raise SystemExit(f"PRX out-of-range symbol reference: {prefix}")
+                      referenced.add(si)
+                      if fields[f"{prefix}.has_addend"] != "1":
+                          raise SystemExit(f"PRX expected RELA signed addend: {prefix}")
+                      int(fields[f"{prefix}.addend"])
+                      classes[(kind, typ)] += 1
+                      if kind not in ("rela", "plt_rela"):
+                          raise SystemExit(f"unexpected PRX relocation table: {kind!r}")
+                      if typ == 8 and si != 0:
+                          raise SystemExit("RELATIVE relocation unexpectedly references symbol")
+                  expected_classes = {
+                      ("rela", 8): 1790,    # R_X86_64_RELATIVE, B + A
+                      ("rela", 6): 3,       # R_X86_64_GLOB_DAT
+                      ("rela", 16): 3,      # R_X86_64_DTPMOD64 (TLS)
+                      ("plt_rela", 7): 100, # R_X86_64_JUMP_SLOT
+                  }
+                  if classes != Counter(expected_classes):
+                      raise SystemExit(
+                          f"PRX relocation class drift: observed {dict(classes)}, "
+                          f"expected {expected_classes}")
+                  if len(referenced) != int(
+                      fields["relocation_unique_symbol_indices"]
+                  ):
+                      raise SystemExit("PRX relocation unique index census changed")
+                  if (fields["guest_instructions"] != "0" or
+                          fields["relocation_application"] != "not_attempted" or
+                          fields["resolution"] != "not_attempted"):
+                      raise SystemExit("PRX census misrepresented as execution")
+                  print("PUBLIC RAW PRX RELOCATION CLASS CENSUS PASS:",
+                        dict(classes), "unique referenced symbols:", len(referenced))
               print(f"PINNED CLEAN-ROOM PRX {command.upper()} BASELINE PASS.")
 
 
