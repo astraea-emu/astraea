@@ -1138,6 +1138,59 @@ TEST_CASE(
         auto graph = astraea::execution::ModuleGraph::create(modules);
         REQUIRE(graph.has_value());
 
+        // The client and provider have each passed their independent ELF
+        // parser. The exact same live export identities must also survive
+        // module registration. Conflicts are rejected before patching.
+        {
+            auto duplicate = modules;
+            duplicate[1].module_key = "client";
+            auto refused =
+                astraea::execution::ModuleGraph::create(duplicate);
+            REQUIRE_FALSE(refused.has_value());
+            REQUIRE(refused.error().code ==
+                astraea::execution::ModuleGraphErrorCode::
+                    duplicate_module_key);
+        }
+        {
+            auto duplicate_export = modules;
+            duplicate_export[1].exports.push_back(
+                duplicate_export[1].exports.front());
+            auto refused =
+                astraea::execution::ModuleGraph::create(duplicate_export);
+            REQUIRE_FALSE(refused.has_value());
+            REQUIRE(refused.error().code ==
+                astraea::execution::ModuleGraphErrorCode::
+                    duplicate_export_identity);
+        }
+        {
+            auto mismatched_symbol = exit_symbol.value();
+            REQUIRE(mismatched_symbol.name.identity.has_value());
+            mismatched_symbol.name.identity->nid = "LMNOPQRSTUV";
+            auto refused =
+                astraea::execution::plan_module_graph_import(
+                    exit_relocation.value(), mismatched_symbol,
+                    graph.value(), "client", "owned-provider");
+            REQUIRE_FALSE(refused.has_value());
+            REQUIRE(refused.error().code ==
+                astraea::execution::ModuleGraphImportPlanErrorCode::
+                    module_resolution_failure);
+            REQUIRE(refused.error().resolution_failure ==
+                astraea::execution::ModuleGraphResolutionKind::
+                    unresolved_export);
+        }
+        {
+            auto mismatched_relocation = exit_relocation.value();
+            ++mismatched_relocation.symbol_index;
+            auto refused =
+                astraea::execution::plan_module_graph_import(
+                    mismatched_relocation, exit_symbol.value(),
+                    graph.value(), "client", "owned-provider");
+            REQUIRE_FALSE(refused.has_value());
+            REQUIRE(refused.error().code ==
+                astraea::execution::ModuleGraphImportPlanErrorCode::
+                    symbol_index_mismatch);
+        }
+
         auto import_plan =
             astraea::execution::plan_module_graph_import(
                 exit_relocation.value(), exit_symbol.value(),
@@ -1149,6 +1202,32 @@ TEST_CASE(
         REQUIRE(owned_patch.has_value());
         REQUIRE(owned_patch->source_symbol_address ==
             astraea::memory::GuestAddress{provider_address});
+
+        // A structurally valid import plan does NOT grant blanket
+        // relocation or symbol-binding permission. Reject both before
+        // preparing or mutating any native guest memory.
+        {
+            auto unsupported = import_plan.value();
+            unsupported.raw_relocation_type = 0xffffU;
+            auto refused =
+                astraea::execution::build_owned_x86_64_module_import_patch(
+                    unsupported);
+            REQUIRE_FALSE(refused.has_value());
+            REQUIRE(refused.error().code ==
+                astraea::execution::OwnedModuleAbsolutePatchErrorCode::
+                    unsupported_relocation_type);
+        }
+        {
+            auto unsupported = import_plan.value();
+            unsupported.symbol_binding = 0U;
+            auto refused =
+                astraea::execution::build_owned_x86_64_module_import_patch(
+                    unsupported);
+            REQUIRE_FALSE(refused.has_value());
+            REQUIRE(refused.error().code ==
+                astraea::execution::OwnedModuleAbsolutePatchErrorCode::
+                    unsupported_symbol_binding);
+        }
 
         // Exact mismatches refuse to resolve before any memory mutation.
         const auto unresolved =
@@ -1228,6 +1307,36 @@ TEST_CASE(
             astraea::execution::OwnedModuleImportBatchErrorCode::
                 preflight_failure);
         REQUIRE(rejected.error().applied_count == 0U);
+
+        // Importantly, the first batch member is valid, but the second
+        // deliberately targets a read-only code page. Full preflight must
+        // refuse the *entire* batch, not partially apply the first one.
+        const std::array mixed_batch{
+            owned_patch.value(), invalid_patch,
+        };
+        const auto mixed =
+            astraea::execution::apply_owned_module_import_batch(
+                mixed_batch, memory);
+        REQUIRE_FALSE(mixed.has_value());
+        REQUIRE(mixed.error().code ==
+            astraea::execution::OwnedModuleImportBatchErrorCode::
+                preflight_failure);
+        REQUIRE(mixed.error().patch_index == 1U);
+        REQUIRE(mixed.error().applied_count == 0U);
+
+        // Two patches to the same GOT target cannot silently overwrite
+        // each other even when their byte values happen to match.
+        const std::array overlapping{
+            owned_patch.value(), owned_patch.value(),
+        };
+        const auto conflict =
+            astraea::execution::apply_owned_module_import_batch(
+                overlapping, memory);
+        REQUIRE_FALSE(conflict.has_value());
+        REQUIRE(conflict.error().code ==
+            astraea::execution::OwnedModuleImportBatchErrorCode::
+                conflicting_target);
+        REQUIRE(conflict.error().applied_count == 0U);
 
         std::array<std::byte, 8> still_zero{};
         REQUIRE(memory.read(
