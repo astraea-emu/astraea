@@ -27,6 +27,7 @@ and unresolved questions.
 
 Current high-value entries:
 
+- [`research/c1_pc_first_execution_hardware_readiness_2026-10-09.md`](research/c1_pc_first_execution_hardware_readiness_2026-10-09.md) — immediate C1 priority, PC-only work and hardware-ready checklist;
 - [`research/ps5_initial_process_abi.md`](research/ps5_initial_process_abi.md) — C1 process-entry evidence and promotion boundary;
 - [`research/ps5_process_entry_probe.md`](research/ps5_process_entry_probe.md) — transport-neutral owned-hardware observation contract;
 - [`research/scene_review_2026-10-07.md`](research/scene_review_2026-10-07.md) — current PS5-emulation scene comparison and architecture cross-check;
