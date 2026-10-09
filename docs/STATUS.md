@@ -279,6 +279,10 @@ Astraea does **not** currently claim:
   synchronization semantics;
 - complete `sceAgcLinkShaders` output.
 
+## 2026-10-09 execution map
+
+[PC-first C1 execution and reference-console readiness](research/c1_pc_first_execution_hardware_readiness_2026-10-09.md) is the scoped next-task and hardware-gate checklist. Prioritize end-to-end **owned module lifecycle and independently selected executable progression** over producing additional speculative patch encoders. Preserve #334 open until two authentic normal-title entry observations are collected.
+
 ## Next action
 
 1. Preserve all six verified public corpus test contracts and #377's
