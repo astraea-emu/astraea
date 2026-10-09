@@ -129,3 +129,43 @@ cannot establish the correct provider lookup, version-compatibility
 policy, symbol-export availability, process bootstrap state or
 commercial-title compatibility on real hardware. Generalizing this
 relationship requires separate, authenticated observations.
+
+
+## Public relocation-demand accounting (stage K)
+
+For the explicitly selected `--public-sce-pack-v1` experiment only,
+Astraea combines its **already validated** SCE import suffix ledger with
+each previously validated relocation-to-symbol reference. It classifies
+each entry as a reserved/null symbol, a locally defined symbol, an
+undefined symbol without a classified public identity, or an undefined
+public external import. Every relocation retains its original table/type,
+addend, target, raw information and symbol index.
+
+For the last category, the manifest additionally reports the exact
+**public local module ID, local library ID and NID bytes** associated with
+the referenced import. It emits counts for all four classes, distinct
+referenced imported symbol indices, distinct source-defined
+module/library/NID triplets, and groups by
+`(module local ID, library local ID, raw relocation type)`. Categories
+sum to the total relocation count; grouped demand counts sum to the
+classified public external-import references.
+
+These are **static relocation references**, not a function-call trace.
+Counts do not establish the number of HLE functions implemented,
+export availability, correct provider names on real PS5 firmware,
+runtime module activation, or title boot. The default opaque dependency
+manifest is unchanged. This view retains
+`public_demand_resolution=not_attempted`,
+`resolution=not_attempted` and `guest_instructions=0`.
+
+Pure owned tests verify that repeated references, distinct relocation
+types, reserved symbol 0, defined symbols, unclassified external symbols
+and same-NID/different-module identities are never silently conflated.
+The pinned independent BlackBear native-title CI verifies its 40 RELA
+references, the per-record relationship to the established public symbol
+IDs/NID bytes, count conservation and deterministic bounded grouping.
+
+**Implementation follow-up:** use these empirical demand groups to
+prioritize tests of generic relocation application and the exact
+provider/lifetime policy. Do not interpret a raw type as a supported Sony
+relocation automatically or invent a default-success import.
