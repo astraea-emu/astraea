@@ -1,7 +1,13 @@
 #include <astraea/execution/module_graph_import_apply.hpp>
 
 #include <span>
+#include <algorithm>
+#include <atomic>
 #include <cstddef>
+#include <cstdint>
+#include <limits>
+#include <string>
+#include <string_view>
 #include <new>
 #include <stdexcept>
 #include <utility>
@@ -210,6 +216,147 @@ OwnedLiveJumpSlotBatchResult apply_live_owned_jump_slot_batch(
             previous);
     }
     return OwnedLiveJumpSlotBatchResult::success(
+        std::move(applied.value()));
+}
+
+
+namespace {
+std::atomic<std::uint64_t> g_next_owned_registry_id{1U};
+}
+
+OwnedProviderRegistry::OwnedProviderRegistry() noexcept
+    : registry_id_(g_next_owned_registry_id.fetch_add(
+          1U, std::memory_order_relaxed)) {}
+
+OwnedProviderRegistrationResult
+OwnedProviderRegistry::register_provider(
+    std::string_view module_key,
+    astraea::memory::GuestAddress address,
+    const GuestMemoryAccess& guest_memory) {
+    const auto failure = [](OwnedProviderRegistryErrorCode code) {
+        return OwnedProviderRegistrationResult::failure(
+            OwnedProviderRegistryError{.code = code});
+    };
+
+    if (module_key.empty() || module_key.size() > 128U ||
+        module_key.find('\0') != std::string_view::npos) {
+        return failure(OwnedProviderRegistryErrorCode::invalid_module_key);
+    }
+    if (address.value() == 0U ||
+        !guest_memory.is_exact_executable_address(address)) {
+        return failure(OwnedProviderRegistryErrorCode::invalid_provider_address);
+    }
+    for (const auto& existing : active_) {
+        if (existing.handle.module_key == module_key) {
+            return failure(OwnedProviderRegistryErrorCode::duplicate_active_module);
+        }
+        if (existing.handle.address == address) {
+            return failure(OwnedProviderRegistryErrorCode::duplicate_active_address);
+        }
+    }
+    if (active_.size() >= 64U) {
+        return failure(OwnedProviderRegistryErrorCode::too_many_active_providers);
+    }
+    if (registry_id_ == 0U ||
+        next_generation_ == std::numeric_limits<std::uint64_t>::max()) {
+        return failure(OwnedProviderRegistryErrorCode::generation_exhausted);
+    }
+
+    try {
+        OwnedProviderGeneration token{
+            .registry_id = registry_id_,
+            .generation = next_generation_,
+            .module_key = std::string{module_key},
+            .address = address,
+        };
+        // Allocate/copy before recording the epoch. A failed registration
+        // cannot leave a published token or advance the generation.
+        active_.push_back(Entry{.handle = token});
+        ++next_generation_;
+        return OwnedProviderRegistrationResult::success(std::move(token));
+    } catch (const std::bad_alloc&) {
+        return failure(OwnedProviderRegistryErrorCode::host_allocation_failure);
+    } catch (const std::length_error&) {
+        return failure(OwnedProviderRegistryErrorCode::host_allocation_failure);
+    }
+}
+
+bool OwnedProviderRegistry::retire(
+    const OwnedProviderGeneration& generation) noexcept {
+    const auto found = std::find_if(
+        active_.begin(), active_.end(), [&](const Entry& entry) {
+            return entry.handle == generation;
+        });
+    if (found == active_.end()) {
+        return false;
+    }
+    active_.erase(found);
+    return true;
+}
+
+bool OwnedProviderRegistry::is_current(
+    const OwnedProviderGeneration& generation,
+    astraea::memory::GuestAddress address) const noexcept {
+    if (generation.registry_id != registry_id_ ||
+        generation.registry_id == 0U ||
+        generation.generation == 0U ||
+        generation.address != address) {
+        return false;
+    }
+    return std::any_of(
+        active_.begin(), active_.end(), [&](const Entry& entry) {
+            return entry.handle == generation;
+        });
+}
+
+OwnedBoundJumpSlotBatchResult
+apply_generation_bound_owned_jump_slot_batch(
+    std::span<const OwnedModuleAbsolutePatch> patches,
+    std::span<const OwnedProviderGeneration> generations,
+    const OwnedProviderRegistry& registry,
+    const GuestMemoryAccess& guest_memory) {
+    const auto refuse = [](
+        OwnedBoundJumpSlotErrorCode code,
+        std::size_t index,
+        std::size_t applied_count = 0U,
+        std::optional<OwnedLiveJumpSlotError> live = std::nullopt)
+            -> OwnedBoundJumpSlotBatchResult {
+        return OwnedBoundJumpSlotBatchResult::failure(
+            OwnedBoundJumpSlotError{
+                .code = code,
+                .patch_index = index,
+                .applied_count = applied_count,
+                .live_error = std::move(live),
+            });
+    };
+    if (patches.size() != generations.size()) {
+        return refuse(
+            OwnedBoundJumpSlotErrorCode::binding_count_mismatch,
+            patches.size());
+    }
+    for (std::size_t index = 0U; index < patches.size(); ++index) {
+        if (!registry.is_current(
+                generations[index],
+                patches[index].source_symbol_address)) {
+            return refuse(
+                OwnedBoundJumpSlotErrorCode::
+                    stale_or_foreign_provider_generation,
+                index);
+        }
+    }
+
+    // Still require exact live executable backing and the original
+    // full-target preflight; generation alone cannot authorize a mapping.
+    auto applied = apply_live_owned_jump_slot_batch(patches, guest_memory);
+    if (!applied.has_value()) {
+        const auto error = applied.error();
+        return refuse(
+            OwnedBoundJumpSlotErrorCode::live_patch_failure,
+            error.patch_index,
+            error.applied_count,
+            error);
+    }
+    return OwnedBoundJumpSlotBatchResult::success(
         std::move(applied.value()));
 }
 
