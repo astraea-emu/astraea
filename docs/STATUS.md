@@ -1,8 +1,8 @@
 # Project Status
 
 **Repository:** `astraea-emu/astraea`  
-**Merged frontier:** production Linux x86-64 retail diagnostic path is active  
-**Current execution priority:** freeze reproducible public-title/PRX closure and selected-title readiness; only then resolve irreducible #334 normal PS5 entry ABI. #377 owned TLS encoder merged, not retail TLS runtime  
+**Merged frontier:** C0 Linux retail diagnostics, bounded V0-V3 graphics, and source-owned two-ELF supervised execution plus mapping-epoch/generation protections through PR #388  
+**Current execution priority:** measured pinned public-title/PRX lexical closure and first independently evidenced missing dependency; then selected-title readiness. Preserve #334 normal PS5 entry ABI as a distinct hardware gate. #377 owned TLS encoding is not a PS5 TLS runtime  
 **Graphics:** V0-V3 complete for their bounded owned workloads  
 **Compatibility:** C0 complete on Linux x86-64; partial C1A prefix merged; C1 active  
 **CI merge gate:** Linux x64, Windows x64, macOS ARM64, Linux ASan+UBSan, Linux Clang fuzz smoke; pinned C1 workflow also required when its source/workflow changes
@@ -132,6 +132,36 @@ separate responsibilities.
 The C/V/S milestone definitions are unchanged. See the new
 `C1 software-first execution sequence` under `docs/PROJECT_PLAN.md`.
 Unknown load-bearing hardware state still prevents retail native entry.
+
+## 2026-10-09 source-owned execution and public-ELF closure checkpoint
+
+- PRs #379–#388 progressively merged **source-authored** independent
+  client/provider ELF validation, exact graph-resolved callable relocation,
+  in-process and separately supervised native guest execution, byte-identical
+  sealed worker inputs, fail-closed typed rejection, SHA-256 source baselines,
+  target preflight/overlap checks, explicit provider retirement, generation
+  identities and prepared-memory ownership epochs. The latest #388 merge is
+  3a4e06038792a48163a5e9291b22b6383510f747, with Linux x64,
+  Linux sanitizers, Windows x64, macOS ARM64 and fuzz-smoke checks green.
+  This remains an opt-in owned research profile, not a Sony module loader.
+- The pinned public source-build run
+  https://github.com/astraea-emu/astraea/actions/runs/37982894151
+  executed a new *read-only* source-built title versus clean-room PRX lexical
+  import-demand comparison in PR #389: **25** relocation-referenced external
+  title identities, **2,566** defined global/weak long-form PRX export rows,
+  **0 exact literal NID/library/module triples**, **8 NID-only lexical
+  candidates**, and **17 without an equal NID**. No binding/relocation was
+  attempted; guest instruction count was **zero**. The accompanying
+  analyzer's self-test also passed. This pinned workflow result alone does not
+  waive the separate required five-platform merge checks for PR #389.
+- See docs/research/public_pinned_title_prx_lexical_closure_2026-10-09.md
+  for the exact source/artifact hashes and boundary. **Even an equal NID is
+  not a compatible service or a verified defining module**: the encoded
+  library/module fields are not known to be globally scoped across binaries.
+- Production retail diagnostics remain fail-closed at the independently
+  observed dependency / process-entry boundary. No commercial title has
+  executed its first guest instruction, drawn a real-title frame or booted.
+  The real normal-title PS5 observer evidence in #334 remains uncollected.
 
 ## Current critical path: C1
 
@@ -285,29 +315,31 @@ Astraea does **not** currently claim:
 
 ## Next action
 
-1. Preserve all six verified public corpus test contracts and #377's
-   completed owned DTPMOD64 encoder (merged 2026-10-09 at
-   `4b3436b8337e077133d7d2df106a3898bfe89ee5`). Do not use the owned
-   encoder as a Sony TLS-module assignment policy.
-2. Preserve the two pinned lawful corpus results in CI and expand typed,
-   deterministic negative tests when the next public artifact exposes
-   a real structural or relocation gap. Do not infer "supported PS5
-   library" from accepted ELF metadata or standard AMD64 relocation math.
-3. Design and independently prove the **selected module's loader lifecycle**:
-   mapping ownership, relocation order, exact provider identity,
-   conflict/rollback policy, and runtime TLS module-ID allocation.
-   These are distinct from merely encoding a relocation word.
-4. Select a lawful low-complexity commercial-title workload for read-only
-   preflight when an authorized executable is available; store lawful
-   hashes/normalized reports only. A public homebrew title or PRX is not
-   itself commercial game boot evidence.
-5. Schedule #334's same-artifact **two-run normal-title PS5 observation**
-   only for earliest remaining irreducible ABI questions, preserving the
-   existing firmware, launcher provenance, hashes and raw runs. Exploit
-   payload entry is not normal application entry.
-6. Retain #348's `unknown_required` default-deny state; after evidenced
-   normal-title entry, reproduce #350's first actual post-entry retail
-   divergence twice. Let that real boundary choose C2 runtime/HLE/GPU work.
+1. Preserve the complete pinned public-title/raw-PRX source and report hashes,
+   25-reference demand census, and observed **0 exact / 8 NID-only /
+   17 no-NID** lexical classes as a strict, read-only regression.
+   Do not turn eight shared NIDs into guessed Sony provider associations.
+2. Identify the **first function/dependency actually required during this
+   independently authored title's startup**, then test exact provider identity
+   and defining-module authority against source evidence. A host-only lexical
+   match is insufficient to bind, relocate, or call an export.
+3. Reuse the source-owned two-ELF supervised execution and mapping-lifetime
+   primitives where the observed dependency warrants them; finish #378's
+   remaining integrated contract with explicit distinction between a
+   source-owned proof and Sony runtime semantics. No blanket HLE success
+   stubs, speculative concurrent unload, or invented TLS module IDs.
+4. Preserve the pinned public relocation inventories and #377's explicit
+   DTPMOD64 encoder. The PRX's TLS module-ID allocation and Sony process
+   ABI remain **unverified** even though standard AMD64 bytes can be encoded.
+5. Select a lawfully held, low-complexity commercial-title executable for
+   **read-only** static demand/provenance assessment when authorized bytes
+   are available; store hashes/normalized reports, never copyrighted bytes
+   in the repository. One public homebrew title is not a retail game.
+6. Activate #334's two authentic same-title normal-entry PS5 observations
+   only for the earliest otherwise irreducible ABI blockers, keeping the
+   reference console firmware untouched until then. Preserve #348's
+   unknown-required default-deny and let the real first failure choose #350
+   and downstream runtime/HLE/graphics work.
 
 **Long-term:** C3 sustained boot → C4 genuine title-generated GPU work →
 C5 interactive menu → C6A in-game → C6B defined playable route → C6C
