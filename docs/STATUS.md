@@ -2,7 +2,7 @@
 
 **Repository:** `astraea-emu/astraea`  
 **Merged frontier:** production Linux x86-64 retail diagnostic path is active  
-**Current execution priority:** PC-only source-generated PRX relocation and TLS evidence (#373–#375); #334 real PS5 startup ABI remains an open later gate  
+**Current execution priority:** reconcile and verify owned TLS module-ID patch (#377), then public PRX loader-lifecycle evidence; #334 real PS5 startup ABI remains an open later gate  
 **Graphics:** V0-V3 complete for their bounded owned workloads  
 **Compatibility:** C0 complete on Linux x86-64; partial C1A prefix merged; C1 active  
 **CI merge gate:** Linux x64, Windows x64, macOS ARM64, Linux ASan+UBSan, Linux Clang fuzz smoke; pinned C1 workflow also required when its source/workflow changes
@@ -110,9 +110,11 @@ BlackBear checkout is also a pinned CI corpus (#371, merged). It exposes
 100 JUMP_SLOT, 3 GLOB_DAT and 3 DTPMOD64 (TLS module ID), with 103 distinct
 referenced symbol indices. See
 `docs/research/public_cleanroom_prx_second_corpus_2026-10-08.md`.
-The exact relocation-class CI ratchet (#373), checked owned RELATIVE
-application (#374), and explicit source-owned TLS module-ID encoder (#375)
-are **under review** at this checkpoint, not yet merged.
+The exact relocation-class CI ratchet (#373) and checked owned RELATIVE
+application (#374) are **merged**. The explicit source-owned TLS module-ID
+encoder was moved from conflicting #375 to clean, reconciled #377;
+#377 is **under review**, not yet merged. No TLS runtime module assignment
+or Sony process-entry evidence follows from this source-owned encoder.
 
 This work remains strictly PC-side. Unrecognized Sony runtime modules and
 HLE behavior remain unsupported; no fake-success stubs, guessed ABI fields
@@ -278,11 +280,10 @@ Astraea does **not** currently claim:
 
 ## Next action
 
-1. Complete exact-head tests and merge #373 (frozen 1,896-record clean-room
-   PRX histogram), #374 (checked owned RELATIVE application), and #375
-   (explicit owned DTPMOD64 TLS module-ID encoding) **only after full
-   required CI passes**. Reconcile independent branches with latest
-   `main` and review their final diffs.
+1. Review exact-head tests for reconciled #377 (explicit owned DTPMOD64
+   TLS module-ID encoding). #373 and #374 are merged; original #375 was
+   closed as superseded without losing its code/tests or documentation.
+   Merge #377 only after the refreshed five-platform CI passes.
 2. Preserve the two pinned lawful corpus results in CI and expand typed,
    deterministic negative tests when the next public artifact exposes
    a real structural or relocation gap. Do not infer "supported PS5
