@@ -5,6 +5,7 @@
 // The worker's existing controller/supervisor protocol owns the process
 // lifetime; this helper never opens a guest-controlled host path.
 
+#include <algorithm>
 #include <array>
 #include <cstddef>
 #include <cstdint>
