@@ -113,6 +113,7 @@ apply_live_owned_jump_slot_batch(
 struct OwnedProviderGeneration {
     std::uint64_t registry_id = 0U;
     std::uint64_t generation = 0U;
+    std::uint64_t mapping_epoch = 0U;
     std::string module_key;
     astraea::memory::GuestAddress address{0U};
 
@@ -143,6 +144,11 @@ using OwnedProviderRegistrationResult =
 // the registry alone authorizes the generation epoch. An old generation is
 // never revived when another owned provider appears at the same VA.
 //
+// Tokens also capture the prepared native mapping owner's process-local
+// epoch: even unreported same-address replacement in the same owner object
+// refuses old bindings. Explicit retirement is still needed to release
+// reserved module keys and permit replacement registration.
+//
 // Single-threaded only: registry mutation and importing must not race
 // mapping teardown. No concurrency/unload synchronization is supplied.
 class OwnedProviderRegistry {
@@ -164,7 +170,8 @@ public:
 
     [[nodiscard]] bool is_current(
         const OwnedProviderGeneration& generation,
-        astraea::memory::GuestAddress address) const noexcept;
+        astraea::memory::GuestAddress address,
+        const GuestMemoryAccess& guest_memory) const noexcept;
 
 private:
     struct Entry {
@@ -197,8 +204,9 @@ using OwnedBoundJumpSlotBatchResult =
         std::vector<OwnedModuleImportApplyResult>,
         OwnedBoundJumpSlotError>;
 
-// Reject every stale/foreign provider generation BEFORE invoking the
-// existing live executable-address check and batch write. The handle is
+// Reject every stale/foreign provider generation or replaced mapping
+// owner epoch BEFORE invoking the existing live executable-address check
+// and batch write. The handle is
 // captured at explicit source-owned provider registration, not inferred
 // from PS5 dynamic tags. All patches and handles are position-aligned.
 //
