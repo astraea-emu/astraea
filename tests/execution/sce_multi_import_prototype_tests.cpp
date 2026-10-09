@@ -1287,6 +1287,68 @@ TEST_CASE(
         REQUIRE(memory.is_exact_executable_address(
             astraea::memory::GuestAddress{provider_address}));
 
+        // A trusted owned loader explicitly registers the *current*
+        // provider generation after its separate ELF mapping exists.
+        astraea::execution::OwnedProviderRegistry owner;
+        auto issued = owner.register_provider(
+            "owned-provider",
+            astraea::memory::GuestAddress{provider_address},
+            memory);
+        REQUIRE(issued.has_value());
+        const auto original_generation = issued.value();
+        REQUIRE(original_generation.generation != 0U);
+        REQUIRE(original_generation.registry_id != 0U);
+
+        // Registrations are exclusive both by key and mapped address.
+        const auto duplicate = owner.register_provider(
+            "owned-provider",
+            astraea::memory::GuestAddress{provider_address},
+            memory);
+        REQUIRE_FALSE(duplicate.has_value());
+        REQUIRE(duplicate.error().code ==
+            astraea::execution::OwnedProviderRegistryErrorCode::
+                duplicate_active_module);
+        const auto alias = owner.register_provider(
+            "different-provider",
+            astraea::memory::GuestAddress{provider_address},
+            memory);
+        REQUIRE_FALSE(alias.has_value());
+        REQUIRE(alias.error().code ==
+            astraea::execution::OwnedProviderRegistryErrorCode::
+                duplicate_active_address);
+
+        // An independently controlled registry cannot lend its token,
+        // even when the address, module key and generation happen to match.
+        astraea::execution::OwnedProviderRegistry foreign_owner;
+        const auto foreign = foreign_owner.register_provider(
+            "owned-provider",
+            astraea::memory::GuestAddress{provider_address},
+            memory);
+        REQUIRE(foreign.has_value());
+        const std::array probe_patch{owned_patch.value()};
+        const std::array foreign_token{foreign.value()};
+        const auto foreign_rejected =
+            astraea::execution::
+                apply_generation_bound_owned_jump_slot_batch(
+                    probe_patch, foreign_token, owner, memory);
+        REQUIRE_FALSE(foreign_rejected.has_value());
+        REQUIRE(foreign_rejected.error().code ==
+            astraea::execution::OwnedBoundJumpSlotErrorCode::
+                stale_or_foreign_provider_generation);
+        REQUIRE(foreign_rejected.error().applied_count == 0U);
+        REQUIRE_FALSE(owner.retire(foreign.value()));
+
+        const std::array<astraea::execution::OwnedProviderGeneration, 0>
+            no_generations{};
+        const auto no_token =
+            astraea::execution::
+                apply_generation_bound_owned_jump_slot_batch(
+                    probe_patch, no_generations, owner, memory);
+        REQUIRE_FALSE(no_token.has_value());
+        REQUIRE(no_token.error().code ==
+            astraea::execution::OwnedBoundJumpSlotErrorCode::
+                binding_count_mismatch);
+
         // The graph holds valid *declarations*, not executable lifetime.
         // A data address can be an ELF address, but cannot be used as a
         // callable JUMP_SLOT provider in the live owned integration.
@@ -1409,9 +1471,11 @@ TEST_CASE(
         // Apply the exact caller-authorized provider and the separately
         // authorized synthetic write gate. No generic Sony HLE fallback.
         const std::array provider_batch{owned_patch.value()};
+        const std::array provider_generations{original_generation};
         auto applied =
-            astraea::execution::apply_live_owned_jump_slot_batch(
-                provider_batch, memory);
+            astraea::execution::
+                apply_generation_bound_owned_jump_slot_batch(
+                    provider_batch, provider_generations, owner, memory);
         REQUIRE(applied.has_value());
         REQUIRE(applied->size() == 1U);
         REQUIRE(astraea::execution::apply_synthetic_jump_slot_patch(
@@ -1455,6 +1519,20 @@ TEST_CASE(
         REQUIRE(active.is_exact_executable_address(
             astraea::memory::GuestAddress{provider_address}));
 
+        // A retained patch must fail immediately after explicit retirement
+        // even though the old provider's code remains executable.
+        REQUIRE(owner.retire(original_generation));
+        REQUIRE_FALSE(owner.retire(original_generation));
+        const auto retired =
+            astraea::execution::
+                apply_generation_bound_owned_jump_slot_batch(
+                    provider_batch, provider_generations, owner, active);
+        REQUIRE_FALSE(retired.has_value());
+        REQUIRE(retired.error().code ==
+            astraea::execution::OwnedBoundJumpSlotErrorCode::
+                stale_or_foreign_provider_generation);
+        REQUIRE(retired.error().applied_count == 0U);
+
         // Explicitly release/unmap the current prepared memory owner.
         // The data-only module graph can still report the old export,
         // but the owned callable import gate must now refuse to patch.
@@ -1477,6 +1555,56 @@ TEST_CASE(
         REQUIRE_FALSE(active.preflight_write(
             astraea::memory::GuestAddress{fixture.got_exit},
             8U).has_value());
+
+        // ABA regression: remap a *new* provider image at the identical
+        // guest virtual address. The old graph address is executable again,
+        // but must NEVER revive its previous generation.
+        auto remapped =
+            astraea::execution::prepare_linux_guest_memory(built.value());
+        REQUIRE(remapped.has_value());
+        transferred = std::move(remapped.value());
+        REQUIRE(active.is_exact_executable_address(
+            astraea::memory::GuestAddress{provider_address}));
+        std::array<std::byte, 8> remapped_got{};
+        REQUIRE(active.read(
+            astraea::memory::GuestAddress{fixture.got_exit},
+            remapped_got).has_value());
+        REQUIRE(read_u64(remapped_got) == 0U);
+        const auto rejected_reuse =
+            astraea::execution::
+                apply_generation_bound_owned_jump_slot_batch(
+                    provider_batch, provider_generations, owner, active);
+        REQUIRE_FALSE(rejected_reuse.has_value());
+        REQUIRE(rejected_reuse.error().code ==
+            astraea::execution::OwnedBoundJumpSlotErrorCode::
+                stale_or_foreign_provider_generation);
+        REQUIRE(rejected_reuse.error().applied_count == 0U);
+        std::array<std::byte, 8> untouched{};
+        REQUIRE(active.read(
+            astraea::memory::GuestAddress{fixture.got_exit},
+            untouched).has_value());
+        REQUIRE(untouched == remapped_got);
+
+        auto replacement = owner.register_provider(
+            "owned-provider",
+            astraea::memory::GuestAddress{provider_address},
+            active);
+        REQUIRE(replacement.has_value());
+        REQUIRE(replacement->generation > original_generation.generation);
+        REQUIRE(replacement->registry_id == original_generation.registry_id);
+        const std::array new_generation{replacement.value()};
+        auto rebound =
+            astraea::execution::
+                apply_generation_bound_owned_jump_slot_batch(
+                    provider_batch, new_generation, owner, active);
+        REQUIRE(rebound.has_value());
+        REQUIRE(rebound->size() == 1U);
+        std::array<std::byte, 8> now_bound{};
+        REQUIRE(active.read(
+            astraea::memory::GuestAddress{fixture.got_exit},
+            now_bound).has_value());
+        REQUIRE(read_u64(now_bound) == provider_address);
+        REQUIRE(owner.retire(replacement.value()));
     }
 }
 

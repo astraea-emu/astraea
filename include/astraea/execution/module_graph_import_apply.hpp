@@ -2,6 +2,9 @@
 
 #include <compare>
 #include <cstddef>
+#include <cstdint>
+#include <string>
+#include <string_view>
 #include <optional>
 #include <span>
 #include <vector>
@@ -100,6 +103,113 @@ using OwnedLiveJumpSlotBatchResult =
 [[nodiscard]] OwnedLiveJumpSlotBatchResult
 apply_live_owned_jump_slot_batch(
     std::span<const OwnedModuleAbsolutePatch> patches,
+    const GuestMemoryAccess& guest_memory);
+
+
+ 
+// Caller-owned identity of ONE explicitly registered provider generation.
+// Generation is not a guest virtual address, ELF TLS module index, or a
+// Sony-assigned module ID. Tokens are valid only in their issuing registry.
+struct OwnedProviderGeneration {
+    std::uint64_t registry_id = 0U;
+    std::uint64_t generation = 0U;
+    std::string module_key;
+    astraea::memory::GuestAddress address{0U};
+
+    auto operator<=>(const OwnedProviderGeneration&) const = default;
+};
+
+enum class OwnedProviderRegistryErrorCode {
+    invalid_module_key,
+    invalid_provider_address,
+    duplicate_active_module,
+    duplicate_active_address,
+    too_many_active_providers,
+    generation_exhausted,
+    host_allocation_failure,
+};
+
+struct OwnedProviderRegistryError {
+    OwnedProviderRegistryErrorCode code =
+        OwnedProviderRegistryErrorCode::invalid_module_key;
+};
+
+using OwnedProviderRegistrationResult =
+    astraea::core::Result<
+        OwnedProviderGeneration, OwnedProviderRegistryError>;
+
+// No runtime provider discovery or memory mapping is attempted. The
+// trusted owned loader/test supplies exact module key/address after mapping;
+// the registry alone authorizes the generation epoch. An old generation is
+// never revived when another owned provider appears at the same VA.
+//
+// Single-threaded only: registry mutation and importing must not race
+// mapping teardown. No concurrency/unload synchronization is supplied.
+class OwnedProviderRegistry {
+public:
+    OwnedProviderRegistry() noexcept;
+
+    OwnedProviderRegistry(const OwnedProviderRegistry&) = delete;
+    OwnedProviderRegistry& operator=(const OwnedProviderRegistry&) = delete;
+    OwnedProviderRegistry(OwnedProviderRegistry&&) = delete;
+    OwnedProviderRegistry& operator=(OwnedProviderRegistry&&) = delete;
+
+    [[nodiscard]] OwnedProviderRegistrationResult register_provider(
+        std::string_view module_key,
+        astraea::memory::GuestAddress address,
+        const GuestMemoryAccess& guest_memory);
+
+    [[nodiscard]] bool retire(
+        const OwnedProviderGeneration& generation) noexcept;
+
+    [[nodiscard]] bool is_current(
+        const OwnedProviderGeneration& generation,
+        astraea::memory::GuestAddress address) const noexcept;
+
+private:
+    struct Entry {
+        OwnedProviderGeneration handle;
+    };
+
+    // Registry IDs distinguish two independently owned registries as well
+    // as generations within a registry. Zero is always invalid.
+    std::uint64_t registry_id_ = 0U;
+    std::uint64_t next_generation_ = 1U;
+    std::vector<Entry> active_;
+};
+
+enum class OwnedBoundJumpSlotErrorCode {
+    binding_count_mismatch,
+    stale_or_foreign_provider_generation,
+    live_patch_failure,
+};
+
+struct OwnedBoundJumpSlotError {
+    OwnedBoundJumpSlotErrorCode code =
+        OwnedBoundJumpSlotErrorCode::binding_count_mismatch;
+    std::size_t patch_index = 0U;
+    std::size_t applied_count = 0U;
+    std::optional<OwnedLiveJumpSlotError> live_error;
+};
+
+using OwnedBoundJumpSlotBatchResult =
+    astraea::core::Result<
+        std::vector<OwnedModuleImportApplyResult>,
+        OwnedBoundJumpSlotError>;
+
+// Reject every stale/foreign provider generation BEFORE invoking the
+// existing live executable-address check and batch write. The handle is
+// captured at explicit source-owned provider registration, not inferred
+// from PS5 dynamic tags. All patches and handles are position-aligned.
+//
+// No guarantee against concurrent mapping changes, rogue forged registry
+// ownership, post-preflight partial writes, or guest code caching imports
+// beyond this binding operation.
+[[nodiscard]] OwnedBoundJumpSlotBatchResult
+apply_generation_bound_owned_jump_slot_batch(
+    std::span<const OwnedModuleAbsolutePatch> patches,
+    std::span<const OwnedProviderGeneration> generations,
+    const OwnedProviderRegistry& registry,
     const GuestMemoryAccess& guest_memory);
 
 }  // namespace astraea::execution
