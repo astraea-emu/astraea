@@ -54,6 +54,7 @@ add_executable(astraea_core_tests
     execution/module_graph_tests.cpp
     execution/module_graph_import_plan_tests.cpp
     execution/module_graph_import_patch_tests.cpp
+    execution/owned_relative_patch_tests.cpp
     execution/sce_plt_import_batch_tests.cpp
     execution/sce_jump_slot_patch_tests.cpp
     execution/sce_glob_dat_patch_tests.cpp
