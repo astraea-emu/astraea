@@ -111,6 +111,8 @@ The generic owned-code linker, mapped-memory and relocation primitives
 continue to expand under their own negative tests. None of this is
 commercial guest execution, PS5 firmware ABI evidence or gameplay.
 
+For the exact PC-first gating sequence and the deliberately delayed firmware-13.00 hardware experiment, read the [C1 execution and hardware readiness plan](docs/research/c1_pc_first_execution_hardware_readiness_2026-10-09.md).
+
 The #334 two-run real-PS5 normal-title startup observation remains required
 later, before promoting the selected real-title process-entry profile (#348).
 The first post-entry milestone is C2.0: a typed reproducible retail
