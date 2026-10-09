@@ -1,4 +1,5 @@
 #include "owned_two_elf_worker_fixture.hpp"
+#include "owned_pair_sha256.hpp"
 
 #include <astraea/execution/guest_worker_process_session.hpp>
 
@@ -178,6 +179,34 @@ TEST_CASE(
 }
 
 TEST_CASE(
+    "owned SHA-256 evidence follows standard vectors and pinned independent ELF source",
+    "[execution][c1][sha256][provenance]") {
+    REQUIRE(astraea::test::owned_pair_sha256_hex(
+        std::span<const std::byte>{}) ==
+        "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855");
+
+    const std::array abc{
+        std::byte{'a'}, std::byte{'b'}, std::byte{'c'},
+    };
+    REQUIRE(astraea::test::owned_pair_sha256_hex(abc) ==
+        "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad");
+
+#if defined(__linux__) && defined(__x86_64__) && defined(MAP_FIXED_NOREPLACE)
+    // Canonical *source-only* fixture uses a fixed reference base and a
+    // 4096-byte page. It is never mapped or run at this address: runtime
+    // binaries still use the host-selected address in their sealed bundle.
+    // These NIST-independent values were cross-checked with Python hashlib.
+    auto source = astraea::test::detail::make_owned_binary_pair(
+        0x100000000ULL, 4096U);
+    REQUIRE(source.has_value());
+    REQUIRE(astraea::test::owned_pair_sha256_hex(source->client) ==
+        "50a7fe41e4833f5ac5cfa87ced4a658efc584a5310805dff6fe08f4770335a31");
+    REQUIRE(astraea::test::owned_pair_sha256_hex(source->provider) ==
+        "da76c429e4d722f618a33396281add0b40bbb6e832b0fa78e21be4a77c4d9834");
+#endif
+}
+
+TEST_CASE(
     "isolated Linux worker executes two source-owned ELF modules to a repeatable typed stop",
     "[execution][c1][two-elf][process][linux]") {
 #if defined(__linux__) && defined(__x86_64__)
@@ -189,6 +218,28 @@ TEST_CASE(
     REQUIRE(frozen_bundle.has_value());
     REQUIRE(frozen_bundle->size() > 16U);
     const auto exactly_frozen_bytes = frozen_bundle.value();
+
+    // Record both exact-runtime bundle identity and its two individual
+    // authored ELF digests. This SHA-256 is evidence, not an HLE or Sony
+    // trust policy. The bundle's hash may differ across independent hosts
+    // because it embeds the controller-selected guest virtual address.
+    const auto whole_sha =
+        astraea::test::owned_pair_sha256(exactly_frozen_bytes);
+    REQUIRE((exactly_frozen_bytes.size() - 16U) % 5U == 0U);
+    const auto page =
+        (exactly_frozen_bytes.size() - 16U) / 5U;
+    const std::span<const std::byte> client_bytes{
+        exactly_frozen_bytes.data() + 16U, 3U * page,
+    };
+    const std::span<const std::byte> provider_bytes{
+        exactly_frozen_bytes.data() + 16U + 3U * page,
+        2U * page,
+    };
+    const auto client_sha =
+        astraea::test::owned_pair_sha256(client_bytes);
+    const auto provider_sha =
+        astraea::test::owned_pair_sha256(provider_bytes);
+    REQUIRE(client_sha != provider_sha);
 
     auto settings = config({"--owned-two-elf-execution"}, 15000U);
     // The same immutable byte vector is sealed by the controller in two
@@ -227,6 +278,16 @@ TEST_CASE(
     check(second.value());
     REQUIRE(settings.linux_artifact_bytes.has_value());
     REQUIRE(settings.linux_artifact_bytes.value() == exactly_frozen_bytes);
+    REQUIRE(astraea::test::owned_pair_sha256(
+        settings.linux_artifact_bytes.value()) == whole_sha);
+    REQUIRE(astraea::test::owned_pair_sha256(
+        std::span<const std::byte>{
+            settings.linux_artifact_bytes->data() + 16U,
+            3U * page}) == client_sha);
+    REQUIRE(astraea::test::owned_pair_sha256(
+        std::span<const std::byte>{
+            settings.linux_artifact_bytes->data() +
+                16U + 3U * page, 2U * page}) == provider_sha);
 
     // A mismatch, missing artifact or malformed bundle must produce a
     // typed diagnostic boundary and clean worker exit, never appear to
@@ -253,6 +314,8 @@ TEST_CASE(
     // cannot pass exact source identity preflight.
     auto damaged_provider = exactly_frozen_bytes;
     damaged_provider.back() ^= std::byte{0x01};
+    REQUIRE(astraea::test::owned_pair_sha256(damaged_provider) !=
+        whole_sha);
     require_rejection(std::move(damaged_provider));
     auto damaged_client = exactly_frozen_bytes;
     damaged_client[16U] ^= std::byte{0x01};
