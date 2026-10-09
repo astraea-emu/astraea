@@ -67,6 +67,11 @@ struct ExecutionPlanError {
 using ExecutionMemoryPlanResult =
     astraea::core::Result<ExecutionMemoryPlan, ExecutionPlanError>;
 
+// Internal nonzero identity for each successfully prepared native guest
+// mapping *owner*. It is not a Sony runtime module ID, a guest VA, or a
+// memory safety pin. An exhausted epoch source refuses new issuance.
+[[nodiscard]] std::uint64_t next_prepared_mapping_epoch() noexcept;
+
 [[nodiscard]] ExecutionMemoryPlanResult build_execution_memory_plan(
     const ExecutionMemoryPlanRequest& request);
 
