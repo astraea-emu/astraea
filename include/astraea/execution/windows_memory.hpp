@@ -31,6 +31,17 @@ public:
         return reservation_ranges_;
     }
 
+    // Identity follows the actual native mapping owner through moves;
+    // reset/replacement invalidates the old epoch even at the same VA.
+    [[nodiscard]] std::uint64_t mapping_epoch() const noexcept {
+        return mapping_epoch_;
+    }
+
+    [[nodiscard]] const std::uint64_t& mapping_epoch_ref()
+        const noexcept {
+        return mapping_epoch_;
+    }
+
     [[nodiscard]] bool empty() const noexcept {
         return reservation_ranges_.empty();
     }
@@ -49,6 +60,7 @@ private:
         .regions = {},
     };
     std::vector<astraea::memory::GuestRange> reservation_ranges_;
+    std::uint64_t mapping_epoch_ = 0U;
 };
 
 using WindowsPreparedMemoryResult =
