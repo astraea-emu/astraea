@@ -282,14 +282,14 @@ MultiImportFixture make_fixture() {
         static_cast<std::uint64_t>(
             kDynamicOffset + kDynamicSize));
     REQUIRE(
-        page * 4U <=
+        page * 5U <=
         static_cast<std::uint64_t>(
             std::numeric_limits<std::size_t>::max()));
 
     const auto base =
         find_free_block(
             static_cast<std::size_t>(
-                page * 4U));
+                page * 5U));
     const auto code_base = base;
     const auto data_base = base + page;
     const auto stack_base = base + 2U * page;
@@ -950,25 +950,25 @@ TEST_CASE(
 
 
 TEST_CASE(
-    "owned provider control transfer reaches the same deterministic synthetic stop twice",
+    "independently validated client and provider ELFs execute across owned mapping boundary",
     "[execution][c1][owned-provider-bridge]") {
-    // This is one independently generated test ELF containing a client
-    // entry and an authored provider function at a distinct code address.
-    // It exercises the existing graph -> relocation -> guest-execution
-    // pipeline. It is NOT a two-ELF loader, normal PS5 entry, or C1 retail.
-    auto fixture = make_fixture();
-    constexpr std::size_t kProviderCodeOffset = 0x600;
-    REQUIRE(fixture.page > kProviderCodeOffset + 12U);
-
-    const auto provider_address =
-        fixture.code_base + kProviderCodeOffset;
+    // Two independent, source-authored SCE-profile ELF byte streams
+    // are parsed separately before a test-only view joins their disjoint
+    // file-backed mappings. This does not implement a retail module loader,
+    // infer Sony provider identities, or authorize commercial entry.
+    const auto fixture = make_fixture();
+    const auto provider_address = fixture.gate_base + fixture.page;
     const auto exit_gate_address =
         fixture.gate_base +
         astraea::execution::kSyntheticGateStride;
+    REQUIRE(fixture.page <=
+        static_cast<std::uint64_t>(
+            std::numeric_limits<std::size_t>::max() / 2U));
+    REQUIRE(fixture.page >= kElfHeaderSize + kProgramHeaderSize);
 
-    // Authored x86-64 provider: movabs rax, exit_gate; jmp rax.
-    // The client calls this provider via its JUMP_SLOT, so reaching the
-    // exit gate demonstrates an actual native provider control transfer.
+    // Authored provider entry: movabs rax, synthetic_exit_gate; jmp rax.
+    // The client will reach this executable page only through a checked
+    // graph-resolved GOT JUMP_SLOT. It is not a Sony runtime module.
     std::vector<std::byte> provider_code{
         std::byte{0x48}, std::byte{0xb8},
     };
@@ -976,10 +976,37 @@ TEST_CASE(
     provider_code.push_back(std::byte{0xff});
     provider_code.push_back(std::byte{0xe0});
     REQUIRE(provider_code.size() == 12U);
+
+    std::vector<std::byte> provider_artifact(
+        static_cast<std::size_t>(fixture.page * 2U), std::byte{0});
+    provider_artifact[0] = std::byte{0x7f};
+    provider_artifact[1] = std::byte{'E'};
+    provider_artifact[2] = std::byte{'L'};
+    provider_artifact[3] = std::byte{'F'};
+    provider_artifact[4] = std::byte{2};
+    provider_artifact[5] = std::byte{1};
+    provider_artifact[6] = std::byte{1};
+    write_unsigned<std::uint16_t>(
+        provider_artifact, 16, kSceDynExecType);
+    write_unsigned<std::uint16_t>(provider_artifact, 18, 62);
+    write_unsigned<std::uint32_t>(provider_artifact, 20, 1);
+    write_unsigned(provider_artifact, 24, provider_address);
+    write_unsigned<std::uint64_t>(
+        provider_artifact, 32, kProgramHeaderOffset);
+    write_unsigned<std::uint16_t>(
+        provider_artifact, 52, kElfHeaderSize);
+    write_unsigned<std::uint16_t>(
+        provider_artifact, 54, kProgramHeaderSize);
+    write_unsigned<std::uint16_t>(
+        provider_artifact, 56, 1);
+    write_program_header(
+        provider_artifact, kProgramHeaderOffset, kPtLoad,
+        kPfRead | kPfExecute, fixture.page,
+        provider_address, fixture.page, fixture.page, fixture.page);
     for (std::size_t i = 0; i < provider_code.size(); ++i) {
-        fixture.bytes[
-            static_cast<std::size_t>(fixture.page) +
-            kProviderCodeOffset + i] = provider_code[i];
+        provider_artifact[
+            static_cast<std::size_t>(fixture.page) + i] =
+            provider_code[i];
     }
 
     std::vector<astraea::execution::SyntheticSessionEvent>
@@ -997,6 +1024,20 @@ TEST_CASE(
         REQUIRE(built->dynamic_strings.has_value());
         REQUIRE(built->dynamic_strings->string_table.has_value());
         REQUIRE(built->plt_relocations.has_value());
+
+        // The provider is a *second* structurally validated ELF artifact,
+        // never a function secretly placed in the client's ELF bytes.
+        auto provider = astraea::loader::build_guest_image({
+            .image_bytes = provider_artifact,
+            .initial_stack =
+                make_stack_request(fixture.stack_base, fixture.page),
+            .elf_profile = astraea::loader::ElfParseProfile::ps5_sce,
+        });
+        REQUIRE(provider.has_value());
+        REQUIRE(provider->elf.header.entry == provider_address);
+        REQUIRE(provider->mappings.size() == 1U);
+        REQUIRE_FALSE(provider->dynamic_table.has_value());
+        REQUIRE_FALSE(provider->tls.has_value());
 
         auto view = built->initialized_image_view();
         REQUIRE(view.has_value());
@@ -1024,6 +1065,57 @@ TEST_CASE(
                 *built->dynamic_symbols, view.value());
         REQUIRE(write_relocation.has_value());
         REQUIRE(exit_relocation.has_value());
+
+        // Fail closed when an export is declared but its independent
+        // executable mapping has not been staged by the owner.
+        {
+            auto client_only =
+                astraea::execution::prepare_linux_guest_memory(
+                    built.value());
+            REQUIRE(client_only.has_value());
+            astraea::execution::GuestMemoryAccess client_memory{
+                built.value(), client_only.value()};
+            REQUIRE_FALSE(client_memory.is_exact_executable_address(
+                astraea::memory::GuestAddress{provider_address}));
+        }
+
+        // Research-only staging adapter: copy the provider's already
+        // validated, disjoint PT_LOAD file backing into the test image.
+        // No Sony dependencies, separate runtime, or general relocation
+        // ordering semantics are invented here.
+        auto provider_mapping = provider->mappings.front();
+        REQUIRE(provider_mapping.range.base() ==
+            astraea::memory::GuestAddress{provider_address});
+        REQUIRE(provider_mapping.backing.kind ==
+            astraea::memory::MappingBackingKind::file);
+        REQUIRE_FALSE(provider_mapping.range.overlaps(
+            built->initial_stack.storage));
+        for (const auto& mapping : built->mappings) {
+            REQUIRE_FALSE(provider_mapping.range.overlaps(
+                mapping.range));
+        }
+        const auto appended_at = built->image_bytes.size();
+        REQUIRE(provider->image_bytes.size() <=
+            std::numeric_limits<std::size_t>::max() - appended_at);
+        REQUIRE(provider_mapping.backing.file_offset <=
+            std::numeric_limits<std::uint64_t>::max() -
+                static_cast<std::uint64_t>(appended_at));
+        provider_mapping.backing.file_offset +=
+            static_cast<std::uint64_t>(appended_at);
+        provider_mapping.source_index +=
+            built->elf.program_headers.size();
+        built->image_bytes.insert(
+            built->image_bytes.end(),
+            provider->image_bytes.begin(),
+            provider->image_bytes.end());
+        built->mappings.push_back(provider_mapping);
+        auto staged_view = built->initialized_image_view();
+        REQUIRE(staged_view.has_value());
+        auto provider_first_byte =
+            staged_view->read_byte(
+                astraea::memory::GuestAddress{provider_address});
+        REQUIRE(provider_first_byte.has_value());
+        REQUIRE(provider_first_byte.value() == std::byte{0x48});
 
         const std::array modules{
             astraea::execution::ModuleGraphDeclaration{
@@ -1181,6 +1273,16 @@ TEST_CASE(
         } else {
             REQUIRE(session->events == first_events);
         }
+
+        // A transferred/moved-from prepared mapping owner must not
+        // leave a still-admissible executable export in the old facade.
+        auto transferred = std::move(prepared.value());
+        REQUIRE_FALSE(memory.is_exact_executable_address(
+            astraea::memory::GuestAddress{provider_address}));
+        astraea::execution::GuestMemoryAccess active{
+            built.value(), transferred};
+        REQUIRE(active.is_exact_executable_address(
+            astraea::memory::GuestAddress{provider_address}));
     }
 }
 

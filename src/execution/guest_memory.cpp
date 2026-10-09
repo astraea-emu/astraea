@@ -360,10 +360,27 @@ bool GuestMemoryAccess::is_exact_executable_address(
         return false;
     }
 
+    // Both guest ownership and the *current prepared host plan* must
+    // still authorize instruction fetch. A moved-from/unmapped owner
+    // must not validate a stale export address merely because the
+    // original ELF mapping intent remains in GuestImage.
+    bool guest_executable = false;
     for (const auto& mapping : image_->mappings) {
         if (mapping.permissions.has(
                 astraea::memory::GuestPermission::execute) &&
             mapping.range.contains(address)) {
+            guest_executable = true;
+            break;
+        }
+    }
+    if (!guest_executable) {
+        return false;
+    }
+
+    for (const auto& region : prepared_plan_->regions) {
+        if (region.permissions.has(
+                astraea::memory::GuestPermission::execute) &&
+            region.range.contains(address)) {
             return true;
         }
     }
