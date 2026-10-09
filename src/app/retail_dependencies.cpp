@@ -466,7 +466,7 @@ constexpr std::uint64_t kMaxDependencyNameBytes = 256U;
             << "public_demand_group_records="
             << public_demand.groups().size() << '\n';
         std::size_t group_index = 0U;
-        for (const auto& [key, count] : public_demand.groups()) {
+        for (const auto& [key, group_count] : public_demand.groups()) {
             const auto& [module, library, type] = key;
             out << "public_demand_group[" << group_index
                 << "].module_local_id=" << module << '\n'
@@ -475,7 +475,7 @@ constexpr std::uint64_t kMaxDependencyNameBytes = 256U;
                 << "public_demand_group[" << group_index
                 << "].relocation_type=" << type << '\n'
                 << "public_demand_group[" << group_index
-                << "].relocation_count=" << count << '\n';
+                << "].relocation_count=" << group_count << '\n';
             ++group_index;
         }
         out << "public_demand_resolution=not_attempted\n";
