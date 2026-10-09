@@ -100,12 +100,16 @@ Astraea tracks three orthogonal axes:
 - **C — compatibility:** diagnostic -> first retail instruction -> first deterministic post-entry divergence -> runtime closure -> boot -> headless frame -> presentation -> in-game/playable -> reference-guarded support;
 - **S — scalability/readiness:** first-divergence coverage, cross-title regression guards, architecture ratchets, measured performance, and eventual release quality.
 
-The current critical path is **C1, software-first**. A pinned public
-independently generated PS5 native title now builds and passes Astraea's own
-read-only `profile` and supervised `diagnose` regression checks. Its first
-typed boundary is `unsupported_dynamic_dependencies`, before the ABI gate.
-Issue #356 identifies the next PC-only dependency-inventory work; this is
-not yet guest instruction execution or commercial-title boot.
+The current critical path is **C1, software-first**. The first
+independently authored PS5-format title is pinned in CI and reaches an
+explicit pre-entry `unsupported_dynamic_dependencies` stop in Astraea's
+supervised diagnostic. Its read-only dependency manifest now identifies
+exact module names, source-attributed SCE symbol IDs and relocation demand.
+A second **source-generated, non-Sony PRX** is also pinned in CI, with
+2,669 dynamic symbols, 1,896 relocations and nonempty TLS metadata.
+The generic owned-code linker, mapped-memory and relocation primitives
+continue to expand under their own negative tests. None of this is
+commercial guest execution, PS5 firmware ABI evidence or gameplay.
 
 The #334 two-run real-PS5 normal-title startup observation remains required
 later, before promoting the selected real-title process-entry profile (#348).
@@ -159,6 +163,20 @@ The command reports independent structural-pressure dimensions such as module/
 library dependencies, relocations, mapped/executable footprint, symbol-table
 size and TLS requirements. It deliberately does **not** collapse them into a
 compatibility percentage or weighted difficulty score.
+
+For additional *read-only* exact metadata on lawfully held SCE ELF inputs:
+
+```sh
+./out/build/linux-dev/astraea dependencies /path/to/artifact
+```
+
+The default manifest preserves opaque SCE dynamic records, losslessly
+hex-encodes untrusted dependency and symbol names, and counts referenced
+relocations. The **opt-in** `dependencies --public-sce-pack-v1` mode
+experiments with one independently authored public-linker field encoding;
+it must not be interpreted as a universal PS5 ABI. See
+[the second clean-room PRX corpus](docs/research/public_cleanroom_prx_second_corpus_2026-10-08.md)
+and [the current status](docs/STATUS.md).
 
 `profile` and the Linux `diagnose` path share one bounded artifact reader
 and one deterministic non-overlapping analysis-stack policy, so title-selection
