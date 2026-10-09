@@ -2,7 +2,7 @@
 
 **Repository:** `astraea-emu/astraea`  
 **Merged frontier:** production Linux x86-64 retail diagnostic path is active  
-**Current execution priority:** #356 — PC-only public native-title dependency identities; #334 hardware ABI retained for later C1 promotion  
+**Current execution priority:** PC-only source-generated PRX relocation and TLS evidence (#373–#375); #334 real PS5 startup ABI remains an open later gate  
 **Graphics:** V0-V3 complete for their bounded owned workloads  
 **Compatibility:** C0 complete on Linux x86-64; partial C1A prefix merged; C1 active  
 **CI merge gate:** Linux x64, Windows x64, macOS ARM64, Linux ASan+UBSan, Linux Clang fuzz smoke; pinned C1 workflow also required when its source/workflow changes
@@ -96,11 +96,27 @@ a genuine PC-testable closure dependency earlier than the initial-process
 ABI on this particular public artifact. See
 `docs/research/public_native_title_closure_2026-10-08.md`.
 
-Current work queue: **#356**, deterministic fail-closed module/import
-identity inventory from existing validated loader metadata; then a scoped,
-generic module/linker and relocation test slice only when independently
-reproducible. No fake-success HLE, invented ABI fields, speculative GPU
-breadth or copyrighted executable assets.
+The first inventory and owned-code linker slices are **merged** in #358–#372.
+The project now has exact checked public-title names, import symbol identities,
+relocation reference/demand counts, an explicit owned module dependency graph,
+bounded GLOB_DAT/JUMP_SLOT and RELATIVE patch encoders, and owned mapped-memory
+application with full-target preflight and overlap rejection. None of these
+implies PS5 system-library behavior or permission to execute commercial titles.
+
+A **second source-generated, non-Sony PRX** from the same exact reviewed
+BlackBear checkout is also a pinned CI corpus (#371, merged). It exposes
+2,669 dynamic symbols, 1,896 relocations, 384 initialized TLS bytes and
+1,128 total TLS bytes. The reproducible histogram is 1,790 RELATIVE,
+100 JUMP_SLOT, 3 GLOB_DAT and 3 DTPMOD64 (TLS module ID), with 103 distinct
+referenced symbol indices. See
+`docs/research/public_cleanroom_prx_second_corpus_2026-10-08.md`.
+The exact relocation-class CI ratchet (#373), checked owned RELATIVE
+application (#374), and explicit source-owned TLS module-ID encoder (#375)
+are **under review** at this checkpoint, not yet merged.
+
+This work remains strictly PC-side. Unrecognized Sony runtime modules and
+HLE behavior remain unsupported; no fake-success stubs, guessed ABI fields
+or proprietary executable/firmware assets are added.
 
 The normal-title #334 two-run hardware observation is **open and unfulfilled**.
 It was corrected after an unsupported "completed" issue closure on
@@ -262,37 +278,35 @@ Astraea does **not** currently claim:
 
 ## Next action
 
-1. **#356:** derive a bounded manifest of exact generic/SCE module and
-   import identities from the public native-title ELF via existing
-   `GuestImage` / initialized-image string reader. Report declared,
-   unique, unresolved and malformed items separately; test under hostile
-   synthetic inputs and the pinned CI title. No invented Sony semantics.
-2. If #356 demonstrates a genuine generic pre-entry requirement, split the
-   minimum typed module graph and relocation/link-resolution test slice.
-   Resolve only independently modeled interfaces; fail closed on unknown
-   calls/objects. Keep the production supervisor boundary unchanged.
-3. Profile one lawfully held primary commercial-title executable and two
-   reserve candidates when artifacts are legally available. Rank independent
-   closure dimensions, not a fictitious percent complete. Store only lawful
-   normalized results and hashes.
-4. Keep the observer build, offline analyzer, repeat comparison and
-   cross-host CI green. Fix any real defect found by these tests.
-5. **Then**, when remaining selected-path facts are irreducibly hardware
-   dependent, perform #334's same-artifact two-run normal-title entry
-   observation using authorized reference hardware. Preserve unchanged
-   firmware, toolchain, hashes and two raw records; no assumption that
-   exploit-loader execution is title entry.
-6. Classify #312/#333/#335 on the bounded selected path, implement #348
-   only with evidence and keep `unknown_required` as a hard refusal.
-7. Complete C1 native real-title entry under the Linux worker and repeat
-   #350's C2.0 first typed post-entry divergence twice. Then let actual
-   C2 runtime/HLE/GPU behavior select the next generic patch.
+1. Complete exact-head tests and merge #373 (frozen 1,896-record clean-room
+   PRX histogram), #374 (checked owned RELATIVE application), and #375
+   (explicit owned DTPMOD64 TLS module-ID encoding) **only after full
+   required CI passes**. Reconcile independent branches with latest
+   `main` and review their final diffs.
+2. Preserve the two pinned lawful corpus results in CI and expand typed,
+   deterministic negative tests when the next public artifact exposes
+   a real structural or relocation gap. Do not infer "supported PS5
+   library" from accepted ELF metadata or standard AMD64 relocation math.
+3. Design and independently prove the **selected module's loader lifecycle**:
+   mapping ownership, relocation order, exact provider identity,
+   conflict/rollback policy, and runtime TLS module-ID allocation.
+   These are distinct from merely encoding a relocation word.
+4. Select a lawful low-complexity commercial-title workload for read-only
+   preflight when an authorized executable is available; store lawful
+   hashes/normalized reports only. A public homebrew title or PRX is not
+   itself commercial game boot evidence.
+5. Schedule #334's same-artifact **two-run normal-title PS5 observation**
+   only for earliest remaining irreducible ABI questions, preserving the
+   existing firmware, launcher provenance, hashes and raw runs. Exploit
+   payload entry is not normal application entry.
+6. Retain #348's `unknown_required` default-deny state; after evidenced
+   normal-title entry, reproduce #350's first actual post-entry retail
+   divergence twice. Let that real boundary choose C2 runtime/HLE/GPU work.
 
-**Long-term product:** C3 boot → C4 real-title GPU evidence → C5 visible
-interaction → C6A in-game → C6B playable defined route → C6C
-reference-validated, guarded support, while S1–S5 scale regression,
-performance and user readiness. Proposed Astraea Verify diagnostics are
-not yet a demonstrated differentiator.
+**Long-term:** C3 sustained boot → C4 genuine title-generated GPU work →
+C5 interactive menu → C6A in-game → C6B defined playable route → C6C
+regression-guarded, independently reference-validated support. Astraea
+Verify remains a proposed product advantage, not a demonstrated feature.
 
-Full governing milestones: `docs/PROJECT_PLAN.md`. Hardware evidence
-remains pending; do not claim PS5 boot, gameplay or emulator superiority.
+Full governing milestones: `docs/PROJECT_PLAN.md`. PS5 hardware evidence,
+commercial guest instruction execution, and gameplay are still absent.
