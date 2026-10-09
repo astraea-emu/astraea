@@ -116,6 +116,7 @@ add_library(astraea_core STATIC
     src/execution/module_graph_import_patch.cpp
     src/execution/module_graph_import_apply.cpp
     src/execution/owned_relative_patch.cpp
+    src/execution/owned_relative_apply.cpp
     src/execution/sce_jump_slot_patch.cpp
     src/execution/sce_jump_slot_apply.cpp
     src/execution/sce_glob_dat_patch.cpp

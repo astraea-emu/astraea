@@ -2,6 +2,7 @@
 #include <astraea/execution/linux_memory.hpp>
 #include <astraea/execution/sce_glob_dat_apply.hpp>
 #include <astraea/execution/module_graph_import_apply.hpp>
+#include <astraea/execution/owned_relative_apply.hpp>
 #include <astraea/loader/guest_image.hpp>
 #include <astraea/memory/mapping.hpp>
 
@@ -921,6 +922,114 @@ TEST_CASE(
     std::array<std::byte, 8> after{};
     REQUIRE(memory.read(GuestAddress{layout.data_base}, after).has_value());
     REQUIRE(after == before);
+}
+
+#endif
+
+
+namespace {
+
+[[nodiscard]] astraea::execution::OwnedRelativePatch
+make_owned_relative_patch(std::uint64_t target) {
+    const astraea::loader::DynamicRelocation record{
+        .table_kind = astraea::loader::RelocationTableKind::rela,
+        .table_index = 0U,
+        .target = GuestAddress{target},
+        .raw_info = 8U,
+        .symbol_index = 0U,
+        .relocation_type = 8U,
+        .addend = std::int64_t{0x345},
+    };
+    const auto patch =
+        astraea::execution::build_owned_x86_64_relative_patch(
+            record, GuestAddress{0x1000U});
+    REQUIRE(patch.has_value());
+    return patch.value();
+}
+
+}  // namespace
+
+TEST_CASE(
+    "owned RELATIVE apply refuses missing prepared memory without writes",
+    "[execution][owned-relative][apply]") {
+    auto image = make_empty_image();
+    astraea::execution::LinuxPreparedMemory prepared;
+    GuestMemoryAccess memory{image, prepared};
+
+    const auto result = astraea::execution::apply_owned_relative_patch(
+        make_owned_relative_patch(0x4000U), memory);
+    REQUIRE_FALSE(result.has_value());
+    REQUIRE(result.error().code ==
+        GuestMemoryErrorCode::prepared_memory_unavailable);
+}
+
+#if defined(__linux__) && defined(__x86_64__) && defined(MAP_FIXED_NOREPLACE)
+
+TEST_CASE(
+    "owned RELATIVE patch writes exact B plus A bytes into checked guest memory",
+    "[execution][owned-relative][apply]") {
+    constexpr auto read = static_cast<std::uint8_t>(GuestPermission::read);
+    constexpr auto write = static_cast<std::uint8_t>(GuestPermission::write);
+    auto layout = make_layout(permissions(read | write));
+    auto prepared = astraea::execution::prepare_linux_guest_memory(layout.image);
+    REQUIRE(prepared.has_value());
+    GuestMemoryAccess memory{layout.image, prepared.value()};
+
+    const auto patch = make_owned_relative_patch(layout.data_base);
+    const auto result = astraea::execution::apply_owned_relative_patch(
+        patch, memory);
+    REQUIRE(result.has_value());
+    REQUIRE(result->target == patch.target);
+    REQUIRE(result->relocated_value == GuestAddress{0x1345U});
+    std::array<std::byte, 8> actual{};
+    REQUIRE(memory.read(GuestAddress{layout.data_base}, actual).has_value());
+    REQUIRE(actual == patch.bytes);
+}
+
+TEST_CASE(
+    "owned RELATIVE patch does not alter readonly target",
+    "[execution][owned-relative][apply]") {
+    constexpr auto read = static_cast<std::uint8_t>(GuestPermission::read);
+    auto layout = make_layout(permissions(read));
+    auto prepared = astraea::execution::prepare_linux_guest_memory(layout.image);
+    REQUIRE(prepared.has_value());
+    GuestMemoryAccess memory{layout.image, prepared.value()};
+
+    std::array<std::byte, 8> before{};
+    REQUIRE(memory.read(GuestAddress{layout.data_base}, before).has_value());
+    const auto result = astraea::execution::apply_owned_relative_patch(
+        make_owned_relative_patch(layout.data_base), memory);
+    REQUIRE_FALSE(result.has_value());
+    REQUIRE(result.error().code ==
+        GuestMemoryErrorCode::guest_memory_permission_denied);
+    std::array<std::byte, 8> after{};
+    REQUIRE(memory.read(GuestAddress{layout.data_base}, after).has_value());
+    REQUIRE(after == before);
+}
+
+TEST_CASE(
+    "owned RELATIVE rejects partially mapped or unmapped eight-byte targets",
+    "[execution][owned-relative][apply]") {
+    constexpr auto read = static_cast<std::uint8_t>(GuestPermission::read);
+    constexpr auto write = static_cast<std::uint8_t>(GuestPermission::write);
+    auto layout = make_layout(permissions(read | write), 4);
+    auto prepared = astraea::execution::prepare_linux_guest_memory(layout.image);
+    REQUIRE(prepared.has_value());
+    GuestMemoryAccess memory{layout.image, prepared.value()};
+    std::array<std::byte, 4> before{};
+    REQUIRE(memory.read(GuestAddress{layout.data_base}, before).has_value());
+    const auto partial = astraea::execution::apply_owned_relative_patch(
+        make_owned_relative_patch(layout.data_base), memory);
+    REQUIRE_FALSE(partial.has_value());
+    REQUIRE(partial.error().code == GuestMemoryErrorCode::guest_memory_unmapped);
+    std::array<std::byte, 4> after{};
+    REQUIRE(memory.read(GuestAddress{layout.data_base}, after).has_value());
+    REQUIRE(after == before);
+
+    const auto unmapped = astraea::execution::apply_owned_relative_patch(
+        make_owned_relative_patch(layout.unmapped_base), memory);
+    REQUIRE_FALSE(unmapped.has_value());
+    REQUIRE(unmapped.error().code == GuestMemoryErrorCode::guest_memory_unmapped);
 }
 
 #endif
