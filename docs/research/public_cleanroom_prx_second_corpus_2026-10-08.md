@@ -96,3 +96,26 @@ https://github.com/blackbearreloaded/ps5-native-app-boilerplate/blob/2f672d1c2f5
 
 Related: #334 (still no hardware observations), #356 (dependency
 closure), #367 (public metadata profile), #370 (first title demand).
+
+## Relocation-class falsification gate (follow-on)
+
+The pinned public PRX's independently authored source records claim
+**1,790** `R_X86_64_RELATIVE` (type 8) general RELA records,
+**3** general `R_X86_64_GLOB_DAT` (type 6),
+**3** general `R_X86_64_DTPMOD64` (type 16) TLS module references,
+and **100** PLT `R_X86_64_JUMP_SLOT` (type 7) records.
+
+The follow-on CI experiment enumerates **all 1,896** entries using the
+actual `astraea dependencies` output, verifies each referenced symbol
+index is within the validated 2,669-row dynamic-symbol table, requires
+a signed addend for every RELA record, and demands that type-8
+RELATIVE records reference symbol index zero. It compares the complete
+`(table_kind, relocation_type) → count` histogram to these four
+source-recorded classes. The test additionally checks that no guest
+instructions executed and no relocation was applied or import resolved.
+
+This census protects a **read-only structural observation**. It does not
+show that any of the 1,896 relocations can be executed by the emulator.
+In particular, `DTPMOD64` depends on TLS module-ID assignment and
+runtime-loader ordering, both still unevidenced for PS5 and not
+silently supplied by any generic owned-code patch builder.
