@@ -89,10 +89,10 @@ TEST_CASE(
     REQUIRE(counts.unique_imported_symbol_indices == 5U);
     REQUIRE(counts.unique_public_import_identities == 4U);
     REQUIRE(ledger.groups().size() == 4U);
-    REQUIRE(ledger.groups().at(std::tuple{2U, 1U, 6U}) == 4U);
-    REQUIRE(ledger.groups().at(std::tuple{2U, 1U, 7U}) == 1U);
-    REQUIRE(ledger.groups().at(std::tuple{3U, 1U, 6U}) == 1U);
-    REQUIRE(ledger.groups().at(std::tuple{2U, 2U, 6U}) == 1U);
+    REQUIRE(ledger.groups().at(astraea::loader::PublicSceDemandGroupKey{std::uint16_t{2}, std::uint16_t{1}, std::uint32_t{6}}) == 4U);
+    REQUIRE(ledger.groups().at(astraea::loader::PublicSceDemandGroupKey{std::uint16_t{2}, std::uint16_t{1}, std::uint32_t{7}}) == 1U);
+    REQUIRE(ledger.groups().at(astraea::loader::PublicSceDemandGroupKey{std::uint16_t{3}, std::uint16_t{1}, std::uint32_t{6}}) == 1U);
+    REQUIRE(ledger.groups().at(astraea::loader::PublicSceDemandGroupKey{std::uint16_t{2}, std::uint16_t{2}, std::uint32_t{6}}) == 1U);
 }
 
 TEST_CASE(
