@@ -270,6 +270,7 @@ TEST_CASE(
     REQUIRE(
         astraea::execution::
             windows_native_memory_backend_available());
+    REQUIRE(astraea::execution::WindowsPreparedMemory{}.mapping_epoch() == 0U);
 #else
     REQUIRE_FALSE(
         astraea::execution::
@@ -307,6 +308,15 @@ TEST_CASE(
             host_page_size ==
         g.page);
     REQUIRE_FALSE(prepared->empty());
+    const auto original_epoch = prepared->mapping_epoch();
+    REQUIRE(original_epoch != 0U);
+    auto transferred = std::move(prepared.value());
+    REQUIRE(prepared->mapping_epoch() == 0U);
+    REQUIRE(transferred.mapping_epoch() == original_epoch);
+    prepared.value() = std::move(transferred);
+    REQUIRE(transferred.mapping_epoch() == 0U);
+    REQUIRE(prepared->mapping_epoch() == original_epoch);
+
 
     const auto* code =
         reinterpret_cast<
@@ -422,6 +432,7 @@ TEST_CASE(
         make_guest_image(
             base,
             g.page);
+    std::uint64_t previous_epoch = 0U;
 
     {
         auto first =
@@ -429,6 +440,8 @@ TEST_CASE(
                 prepare_windows_guest_memory(
                     image);
         REQUIRE(first.has_value());
+        previous_epoch = first->mapping_epoch();
+        REQUIRE(previous_epoch != 0U);
     }
 
     {
@@ -437,6 +450,8 @@ TEST_CASE(
                 prepare_windows_guest_memory(
                     image);
         REQUIRE(second.has_value());
+        REQUIRE(second->mapping_epoch() != 0U);
+        REQUIRE(second->mapping_epoch() != previous_epoch);
     }
 }
 
