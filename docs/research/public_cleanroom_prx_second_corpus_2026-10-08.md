@@ -1,6 +1,6 @@
 # Second independently authored PS5-format corpus: raw clean-room PRX
 
-**Status:** prospective host-only diagnostic experiment, not emulator compatibility or real PS5 runtime evidence. Until its exact-head CI finishes, do not claim Astraea accepts this PRX.
+**Status:** first host-only diagnostic reproduction succeeded on the pinned independent PRX; exact regression assertions now added and awaiting their own full CI. Not PS5 runtime or gameplay evidence.
 
 ## Motivation and source
 
@@ -39,15 +39,48 @@ artifact against the exact source-recorded byte length and SHA-256.
 
 It then runs **only** `astraea profile` and the default,
 opaque `astraea dependencies` read-only CLI on that raw ELF.
-Positive reports must use the expected structured headers and cannot
-claim execution or import resolution. If an unsupported feature makes
-one command fail, it must report a typed, reproducible error—never a
-crash or silent success. Actual outcomes must be recorded and turned
-into exact regression assertions before concluding compatibility.
+Both host diagnostics **succeeded** on the initial recorded pinned
+artifact, so subsequent runs now require exact source-recorded structural
+fields. The acceptance test does not permit an arbitrary typed refusal to
+replace this established valid baseline. No guest instructions execute and
+no import resolution is claimed.
 
 The experiment does **not** execute either the PRX's startup code or
 Astraea's retail guest path; it does not import a proprietary Sony binary
 or use a PS5 jailbreak, console, keys or firmware.
+
+## Observed Astraea results (first successful run)
+
+The pinned-host [integration run 37875721907](https://github.com/astraea-emu/astraea/actions/runs/37875721907) verified the independently rebuilt raw ELF's exact
+SHA-256 and byte length before invoking Astraea's real production
+`profile` and `dependencies` commands. **Both returned exit code 0.**
+
+| Field | Read-only observation |
+| --- | ---: |
+| Program headers | 14 |
+| PT_LOAD segments | 5 |
+| Load memory bytes | 1,294,514 |
+| Generic needed modules | 3 |
+| SCE needed-module entries | 3 |
+| SCE import-library entries | 3 |
+| Unknown SCE dynamic records | 0 |
+| Dynamic symbols | 2,669 |
+| General RELA relocations | 1,796 |
+| PLT relocations | 100 |
+| Total relocations | 1,896 |
+| TLS present | Yes |
+| TLS initialized / total bytes | 384 / 1,128 |
+| TLS alignment | 16 |
+
+The default dependency manifest also reported `execution=none`,
+`resolution=not_attempted` and `guest_instructions=0`.
+These are **Astraea-observed read-only properties** of this exact public
+raw ELF, not confirmation of its runtime imports, symbol provider
+behavior, relocation application or native entry.
+
+The CI assertions were subsequently tightened to require these
+values on the pinned exact source artifact. This higher-tier test
+must pass on its new head before the PR is merged.
 
 ## Why it matters
 
