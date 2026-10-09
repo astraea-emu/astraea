@@ -266,6 +266,19 @@ def main() -> int:
     if provider_hash != EXPECTED_PRX_SHA256 or provider_size != 1335962:
         raise InventoryError("pinned independently authored provider PRX digest/size changed")
     analysis = compare(parse_report(title_raw), parse_report(provider_raw))
+
+    # First independently measured pinned corpus baseline; this is a
+    # read-only lexical comparison, never actual provider resolution.
+    pinned_classes = {
+        "lexical_full_triplet": 0,
+        "lexical_nid_only": 8,
+        "no_nid_candidate": 17,
+    }
+    if (analysis["comparison_counts"] != pinned_classes or
+            analysis["title_longform_external_relocations"] != 25 or
+            analysis["title_unique_longform_external_identities"] != 25 or
+            analysis["provider_defined_longform_export_rows"] != 2566):
+        raise InventoryError("pinned public-title/PRX lexical demand baseline drift")
     analysis["provenance"] = {
         "source_revision": "2f672d1c2f508e26f82ce6e27cef289a0861413c",
         "title_elf_sha256": title_hash,
@@ -280,6 +293,9 @@ def main() -> int:
     print("PUBLIC TWO-ELF LEXICAL CLOSURE REPORT (NO RESOLUTION)")
     print(json.dumps({k: v for k, v in analysis.items() if k != "demands"},
                      sort_keys=True, indent=2))
+    print("BOUNDED PER-IDENTITY READ-ONLY DEMAND (NO BINDING)")
+    for item in analysis["demands"]:
+        print(json.dumps(item, sort_keys=True, separators=(",", ":")))
     return 0
 
 
