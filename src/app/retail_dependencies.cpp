@@ -13,11 +13,13 @@
 #include <string>
 #include <string_view>
 #include <utility>
+#include <vector>
 
 #include <astraea/execution/retail_closure_profile.hpp>
 #include <astraea/loader/dynamic_metadata.hpp>
 #include <astraea/loader/dynamic_string.hpp>
 #include <astraea/loader/public_sce_packed_fields.hpp>
+#include <astraea/loader/public_sce_relocation_demand.hpp>
 #include <astraea/loader/dynamic_symbols.hpp>
 #include <astraea/loader/dynamic_relocations.hpp>
 #include <astraea/loader/sce_symbol_identity.hpp>
@@ -220,6 +222,17 @@ constexpr std::uint64_t kMaxDependencyNameBytes = 256U;
         throw std::runtime_error("too_many_dynamic_symbols");
     }
     std::set<std::string> symbol_names;
+    // Only the explicitly selected public linker profile may make this
+    // structural cross-reference. The ordinary manifest remains opaque.
+    struct ObservedSymbol {
+        bool undefined = false;
+        std::optional<astraea::loader::PublicSceDemandImport> imported;
+    };
+    std::vector<ObservedSymbol> observed_symbols;
+    if (public_sce_pack_v1) {
+        observed_symbols.reserve(static_cast<std::size_t>(symbol_count));
+    }
+    astraea::loader::PublicSceRelocationDemandLedger public_demand;
     out << "dynamic_symbol_records=" << symbol_count << '\n';
     for (std::uint64_t i = 0; i < symbol_count; ++i) {
         auto symbol = astraea::loader::parse_dynamic_symbol(
@@ -246,6 +259,8 @@ constexpr std::uint64_t kMaxDependencyNameBytes = 256U;
         if (!name.has_value()) {
             throw std::runtime_error("malformed_sce_symbol_identity");
         }
+        std::optional<astraea::loader::PublicSceDemandImport>
+            public_import;
         bool duplicate = false;
         if (!raw_name.empty()) {
             const auto [iter, fresh] = symbol_names.insert(raw_name);
@@ -302,6 +317,11 @@ constexpr std::uint64_t kMaxDependencyNameBytes = 256U;
                     throw std::runtime_error(
                         "public_symbol_unregistered_id");
                 }
+                public_import = astraea::loader::PublicSceDemandImport{
+                    .module_local_id = *link.module_local_id,
+                    .library_local_id = *link.library_local_id,
+                    .nid = name->identity->nid,
+                };
                 out << "symbol[" << i << "].public_module_local_id="
                     << *link.module_local_id << '\n'
                     << "symbol[" << i << "].public_library_local_id="
@@ -311,6 +331,12 @@ constexpr std::uint64_t kMaxDependencyNameBytes = 256U;
                     << "symbol[" << i << "].public_library_name_hex="
                     << encode_hex(library->second) << '\n';
             }
+        }
+        if (public_sce_pack_v1) {
+            observed_symbols.push_back(ObservedSymbol{
+                .undefined = symbol->section_index_raw == 0U,
+                .imported = std::move(public_import),
+            });
         }
     }
     out << "dynamic_symbol_unique_nonempty_names="
@@ -348,6 +374,53 @@ constexpr std::uint64_t kMaxDependencyNameBytes = 256U;
             }
             relocation_symbols.insert(relocation->symbol_index);
             const auto row = total_relocations++;
+            if (public_sce_pack_v1) {
+                // parse_dynamic_relocation has already validated the symbol
+                // index, but recheck the local manifest bound explicitly.
+                if (relocation->symbol_index >= observed_symbols.size()) {
+                    throw std::runtime_error(
+                        "public_demand_symbol_index_out_of_bounds");
+                }
+                const auto& symbol =
+                    observed_symbols[relocation->symbol_index];
+                const auto classification = public_demand.record(
+                    astraea::loader::PublicSceDemandReference{
+                        .symbol_index = relocation->symbol_index,
+                        .relocation_type = relocation->relocation_type,
+                        .symbol_is_undefined = symbol.undefined,
+                        .public_import = symbol.imported,
+                    });
+                const char* category = "unknown";
+                using astraea::loader::PublicSceDemandClass;
+                switch (classification) {
+                case PublicSceDemandClass::null_symbol:
+                    category = "null_symbol";
+                    break;
+                case PublicSceDemandClass::local_defined_symbol:
+                    category = "local_defined";
+                    break;
+                case PublicSceDemandClass::external_unclassified:
+                    category = "external_unclassified";
+                    break;
+                case PublicSceDemandClass::public_external_import:
+                    category = "public_external_import";
+                    break;
+                }
+                out << "relocation[" << row << "].public_demand_class="
+                    << category << '\n';
+                if (symbol.imported.has_value() &&
+                    classification ==
+                        PublicSceDemandClass::public_external_import) {
+                    out << "relocation[" << row
+                        << "].public_module_local_id="
+                        << symbol.imported->module_local_id << '\n'
+                        << "relocation[" << row
+                        << "].public_library_local_id="
+                        << symbol.imported->library_local_id << '\n'
+                        << "relocation[" << row << "].public_nid_hex="
+                        << encode_hex(symbol.imported->nid) << '\n';
+                }
+            }
             out << "relocation[" << row << "].table="
                 << kind << '\n'
                 << "relocation[" << row << "].table_index="
@@ -375,6 +448,38 @@ constexpr std::uint64_t kMaxDependencyNameBytes = 256U;
         image.plt_relocations->kind ==
             astraea::loader::RelocationTableKind::plt_rel
         ? "plt_rel" : "plt_rela");
+    if (public_sce_pack_v1) {
+        const auto counts = public_demand.counts();
+        out << "public_demand_relocation_records=" << counts.total << '\n'
+            << "public_demand_null_symbol_relocations="
+            << counts.null_symbol << '\n'
+            << "public_demand_local_defined_relocations="
+            << counts.local_defined << '\n'
+            << "public_demand_external_unclassified_relocations="
+            << counts.external_unclassified << '\n'
+            << "public_demand_external_import_relocations="
+            << counts.public_external_import << '\n'
+            << "public_demand_unique_import_symbol_indices="
+            << counts.unique_imported_symbol_indices << '\n'
+            << "public_demand_unique_import_identities="
+            << counts.unique_public_import_identities << '\n'
+            << "public_demand_group_records="
+            << public_demand.groups().size() << '\n';
+        std::size_t group_index = 0U;
+        for (const auto& [key, count] : public_demand.groups()) {
+            const auto& [module, library, type] = key;
+            out << "public_demand_group[" << group_index
+                << "].module_local_id=" << module << '\n'
+                << "public_demand_group[" << group_index
+                << "].library_local_id=" << library << '\n'
+                << "public_demand_group[" << group_index
+                << "].relocation_type=" << type << '\n'
+                << "public_demand_group[" << group_index
+                << "].relocation_count=" << count << '\n';
+            ++group_index;
+        }
+        out << "public_demand_resolution=not_attempted\n";
+    }
     out << "relocation_records=" << total_relocations << '\n'
         << "relocation_unique_symbol_indices="
         << relocation_symbols.size() << '\n'
