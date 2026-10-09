@@ -287,6 +287,45 @@ make_owned_two_elf_sealed_bundle() {
 #endif
 }
 
+// Read-only provenance gate shared by the worker's classification and
+// execution paths. Even a structurally parseable but changed ELF is refused.
+[[nodiscard]] inline bool owned_two_elf_bundle_matches_source(
+    std::span<const std::byte> bytes) {
+#if !(defined(__linux__) && defined(__x86_64__) && defined(MAP_FIXED_NOREPLACE))
+    (void)bytes;
+    return false;
+#else
+    const long raw_page = ::sysconf(_SC_PAGESIZE);
+    if (raw_page < 4096)
+        return false;
+    const auto page = static_cast<std::uint64_t>(raw_page);
+    if (page > (std::numeric_limits<std::size_t>::max() - 16U) / 5U ||
+        bytes.size() != static_cast<std::size_t>(5U * page) + 16U ||
+        !std::equal(
+            detail::kOwnedPairMagic.begin(),
+            detail::kOwnedPairMagic.end(), bytes.begin()))
+        return false;
+    const auto code = detail::read_le64(bytes, 8U);
+    if (code == 0U || code % page != 0U ||
+        code > std::numeric_limits<std::uint64_t>::max() - 5U * page)
+        return false;
+
+    const auto client_size = static_cast<std::size_t>(3U * page);
+    const auto provider_size = static_cast<std::size_t>(2U * page);
+    const auto client_blob = bytes.subspan(16U, client_size);
+    const auto provider_blob =
+        bytes.subspan(16U + client_size, provider_size);
+    const auto expected = detail::make_owned_binary_pair(code, page);
+    return expected.has_value() &&
+        std::equal(
+            client_blob.begin(), client_blob.end(),
+            expected->client.begin(), expected->client.end()) &&
+        std::equal(
+            provider_blob.begin(), provider_blob.end(),
+            expected->provider.begin(), expected->provider.end());
+#endif
+}
+
 // Success requires exact byte equality against both independently authored
 // source inputs, separate ELF validation, checked native binding, and typed
 // worker stop. No Sony ABI or real commercial title is admitted.
@@ -307,18 +346,10 @@ run_owned_two_elf_worker(
     const auto page = static_cast<std::uint64_t>(raw_page);
     if (page > (std::numeric_limits<std::size_t>::max() - 16U) / 5U)
         return std::nullopt;
-    const auto artifact_size = static_cast<std::size_t>(page * 5U) + 16U;
-    if (sealed_bundle.size() != artifact_size ||
-        !std::equal(
-            detail::kOwnedPairMagic.begin(),
-            detail::kOwnedPairMagic.end(),
-            sealed_bundle.begin()))
+    if (!owned_two_elf_bundle_matches_source(sealed_bundle))
         return std::nullopt;
 
     const auto code = detail::read_le64(sealed_bundle, 8U);
-    if (code == 0U || code % page != 0U ||
-        code > std::numeric_limits<std::uint64_t>::max() - 5U * page)
-        return std::nullopt;
     const auto data = code + page;
     const auto gate = code + 3U * page;
     const auto provider_address = code + 4U * page;
@@ -332,17 +363,6 @@ run_owned_two_elf_worker(
     const auto provider_blob = sealed_bundle.subspan(
         16U + client_size, provider_size);
 
-    // Explicitly reject even a one-byte mutation; sealed input identity
-    // is stronger than successfully parsing an arbitrary guest ELF.
-    auto expected = detail::make_owned_binary_pair(code, page);
-    if (!expected.has_value() ||
-        !std::equal(
-            client_blob.begin(), client_blob.end(),
-            expected->client.begin(), expected->client.end()) ||
-        !std::equal(
-            provider_blob.begin(), provider_blob.end(),
-            expected->provider.begin(), expected->provider.end()))
-        return std::nullopt;
     std::vector<std::byte> client_bytes(
         client_blob.begin(), client_blob.end());
     std::vector<std::byte> provider_bytes(

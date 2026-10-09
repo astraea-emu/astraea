@@ -228,16 +228,54 @@ TEST_CASE(
     REQUIRE(settings.linux_artifact_bytes.has_value());
     REQUIRE(settings.linux_artifact_bytes.value() == exactly_frozen_bytes);
 
-    // Fail closed on a mutated provider ELF. It is still transported via
-    // a sealed descriptor but cannot be executed or reported as success.
-    auto corrupted = settings;
-    REQUIRE(corrupted.linux_artifact_bytes.has_value());
-    corrupted.linux_artifact_bytes->back() ^= std::byte{0x01};
-    auto denied = astraea::execution::run_guest_worker_process_session(
-        corrupted);
-    REQUIRE_FALSE(denied.has_value());
-    REQUIRE(denied.error().code !=
-        astraea::execution::GuestWorkerProcessSessionErrorCode::timeout);
+    // A mismatch, missing artifact or malformed bundle must produce a
+    // typed diagnostic boundary and clean worker exit, never appear to
+    // have executed guest code. All cases reuse the same containment policy.
+    const auto require_rejection = [&](
+        std::optional<std::vector<std::byte>> modified) {
+        auto invalid = settings;
+        invalid.linux_artifact_bytes = std::move(modified);
+        const auto result =
+            astraea::execution::run_guest_worker_process_session(invalid);
+        REQUIRE(result.has_value());
+        REQUIRE(result->child_exit_code == 0);
+        REQUIRE_FALSE(result->terminal_fault.has_value());
+        REQUIRE(result->terminal_diagnostic.has_value());
+        REQUIRE(result->terminal_diagnostic->kind ==
+            astraea::execution::GuestWorkerDiagnosticKind::loader_rejected);
+        REQUIRE(result->terminal_diagnostic->guest_rip.value() == 0U);
+        REQUIRE(result->stop.reason ==
+            astraea::execution::GuestWorkerStopReason::diagnostic_boundary);
+        REQUIRE(result->stop.guest_rip.value() == 0U);
+    };
+
+    // A one-byte change to either ELF, or to the container framing,
+    // cannot pass exact source identity preflight.
+    auto damaged_provider = exactly_frozen_bytes;
+    damaged_provider.back() ^= std::byte{0x01};
+    require_rejection(std::move(damaged_provider));
+    auto damaged_client = exactly_frozen_bytes;
+    damaged_client[16U] ^= std::byte{0x01};
+    require_rejection(std::move(damaged_client));
+    auto damaged_magic = exactly_frozen_bytes;
+    damaged_magic[0U] ^= std::byte{0x01};
+    require_rejection(std::move(damaged_magic));
+    auto truncated = exactly_frozen_bytes;
+    truncated.pop_back();
+    require_rejection(std::move(truncated));
+    // No fd 3 at all is refused inside the worker, with a typed stop.
+    require_rejection(std::nullopt);
+
+    // An explicitly empty optional byte vector is rejected by the
+    // controller's pre-spawn configuration validation instead.
+    auto empty_config = settings;
+    empty_config.linux_artifact_bytes = std::vector<std::byte>{};
+    auto empty_result =
+        astraea::execution::run_guest_worker_process_session(
+            empty_config);
+    REQUIRE_FALSE(empty_result.has_value());
+    REQUIRE(empty_result.error().code ==
+        astraea::execution::GuestWorkerProcessSessionErrorCode::invalid_config);
 
     // Compare normalized protocol evidence. Absolute native guest RIPs
     // are intentionally ASLR-dependent and must not be matched bytewise.
