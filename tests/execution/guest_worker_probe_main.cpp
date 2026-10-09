@@ -1662,34 +1662,73 @@ int main(int argc, char** argv) {
 
     if (mode == ProbeMode::owned_two_elf_execution) {
 #if defined(__linux__) && defined(__x86_64__) && defined(MAP_FIXED_NOREPLACE)
-        // Consume the identical controller-owned source ELF pair through
-        // the production sealed fd 3 transfer. Validate and close it
-        // before guest mapping or execution. Never rebuild different
-        // artifact bytes or read a host pathname in this worker.
+        // Rejections are typed controller-visible diagnostic boundaries.
+        // Never mask a failed preflight/backend with normal_guest_return.
+        const auto refuse = [&](
+            GuestWorkerDiagnosticKind reason) -> int {
+            const auto rip =
+                astraea::memory::GuestAddress{0U};
+            if (!write_message(
+                    GuestWorkerWireMessage{
+                        GuestWorkerDiagnostic{
+                            .worker_id = kWorkerId,
+                            .thread_id = kThreadId,
+                            .kind = reason,
+                            .guest_rip = rip,
+                            .detail0 = 0U,
+                            .detail1 = 0U,
+                        }}) ||
+                !write_message(
+                    GuestWorkerWireMessage{
+                        GuestWorkerStop{
+                            .worker_id = kWorkerId,
+                            .thread_id = kThreadId,
+                            .reason =
+                                GuestWorkerStopReason::diagnostic_boundary,
+                            .guest_rip = rip,
+                        }}))
+                return 43;
+            const auto terminate_message = read_message();
+            const auto* terminate =
+                terminate_message.has_value()
+                    ? std::get_if<GuestWorkerTerminate>(
+                        &terminate_message.value())
+                    : nullptr;
+            return terminate != nullptr &&
+                terminate->reason ==
+                    GuestWorkerTerminationReason::
+                        unsupported_guest_behavior
+                ? 0 : 44;
+        };
+
+        // The controller supplies ONE byte-identical pair to both workers
+        // through the production sealed fd 3 transfer. The worker closes
+        // that descriptor before any native guest execution.
         const auto artifact =
             read_linux_sealed_worker_artifact(1024U * 1024U);
-        if (!artifact.has_value() || !artifact_fd_is_closed()) {
-            return 43;
+        if (!artifact.has_value() || !artifact_fd_is_closed() ||
+            !astraea::test::owned_two_elf_bundle_matches_source(
+                artifact.value())) {
+            return refuse(GuestWorkerDiagnosticKind::loader_rejected);
         }
         const auto stopped =
             astraea::test::run_owned_two_elf_worker(
                 kWorkerId, kThreadId, artifact.value());
         if (!stopped.has_value()) {
-            return 43;
+            return refuse(
+                GuestWorkerDiagnosticKind::native_backend_error);
         }
         if (!write_message(
-                GuestWorkerWireMessage{stopped.value()})) {
-            return 44;
-        }
+                GuestWorkerWireMessage{stopped.value()}))
+            return 45;
         const auto terminate_message = read_message();
         if (!terminate_message.has_value() ||
             std::get_if<GuestWorkerTerminate>(
-                &terminate_message.value()) == nullptr) {
-            return 45;
-        }
+                &terminate_message.value()) == nullptr)
+            return 46;
         return 0;
 #else
-        return 46;
+        return 47;
 #endif
     }
 
