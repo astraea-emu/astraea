@@ -1,3 +1,7 @@
+#include <astraea/execution/module_graph.hpp>
+#include <astraea/execution/module_graph_import_apply.hpp>
+#include <astraea/execution/module_graph_import_patch.hpp>
+#include <astraea/execution/module_graph_import_plan.hpp>
 #include <astraea/execution/guest_memory.hpp>
 #include <astraea/execution/hle.hpp>
 #include <astraea/execution/hle_runtime.hpp>
@@ -942,6 +946,242 @@ TEST_CASE(
         astraea::execution::
             kSyntheticTestExitId);
     REQUIRE(session->events[5].value == 42);
+}
+
+
+TEST_CASE(
+    "owned provider control transfer reaches the same deterministic synthetic stop twice",
+    "[execution][c1][owned-provider-bridge]") {
+    // This is one independently generated test ELF containing a client
+    // entry and an authored provider function at a distinct code address.
+    // It exercises the existing graph -> relocation -> guest-execution
+    // pipeline. It is NOT a two-ELF loader, normal PS5 entry, or C1 retail.
+    auto fixture = make_fixture();
+    constexpr std::size_t kProviderCodeOffset = 0x600;
+    REQUIRE(fixture.page > kProviderCodeOffset + 12U);
+
+    const auto provider_address =
+        fixture.code_base + kProviderCodeOffset;
+    const auto exit_gate_address =
+        fixture.gate_base +
+        astraea::execution::kSyntheticGateStride;
+
+    // Authored x86-64 provider: movabs rax, exit_gate; jmp rax.
+    // The client calls this provider via its JUMP_SLOT, so reaching the
+    // exit gate demonstrates an actual native provider control transfer.
+    std::vector<std::byte> provider_code{
+        std::byte{0x48}, std::byte{0xb8},
+    };
+    append_u64(provider_code, exit_gate_address);
+    provider_code.push_back(std::byte{0xff});
+    provider_code.push_back(std::byte{0xe0});
+    REQUIRE(provider_code.size() == 12U);
+    for (std::size_t i = 0; i < provider_code.size(); ++i) {
+        fixture.bytes[
+            static_cast<std::size_t>(fixture.page) +
+            kProviderCodeOffset + i] = provider_code[i];
+    }
+
+    std::vector<astraea::execution::SyntheticSessionEvent>
+        first_events;
+
+    for (unsigned iteration = 0; iteration < 2U; ++iteration) {
+        auto built = astraea::loader::build_guest_image({
+            .image_bytes = fixture.bytes,
+            .initial_stack =
+                make_stack_request(fixture.stack_base, fixture.page),
+            .elf_profile = astraea::loader::ElfParseProfile::ps5_sce,
+        });
+        REQUIRE(built.has_value());
+        REQUIRE(built->dynamic_symbols.has_value());
+        REQUIRE(built->dynamic_strings.has_value());
+        REQUIRE(built->dynamic_strings->string_table.has_value());
+        REQUIRE(built->plt_relocations.has_value());
+
+        auto view = built->initialized_image_view();
+        REQUIRE(view.has_value());
+        auto write_symbol =
+            astraea::loader::materialize_sce_dynamic_symbol(
+                *built->dynamic_symbols,
+                *built->dynamic_strings->string_table,
+                1U, view.value());
+        auto exit_symbol =
+            astraea::loader::materialize_sce_dynamic_symbol(
+                *built->dynamic_symbols,
+                *built->dynamic_strings->string_table,
+                2U, view.value());
+        REQUIRE(write_symbol.has_value());
+        REQUIRE(exit_symbol.has_value());
+        REQUIRE(exit_symbol->name.identity.has_value());
+
+        auto write_relocation =
+            astraea::loader::parse_dynamic_relocation(
+                *built->plt_relocations, 0U,
+                *built->dynamic_symbols, view.value());
+        auto exit_relocation =
+            astraea::loader::parse_dynamic_relocation(
+                *built->plt_relocations, 1U,
+                *built->dynamic_symbols, view.value());
+        REQUIRE(write_relocation.has_value());
+        REQUIRE(exit_relocation.has_value());
+
+        const std::array modules{
+            astraea::execution::ModuleGraphDeclaration{
+                .module_key = "client",
+                .dependency_keys = {"owned-provider"},
+                .exports = {},
+            },
+            astraea::execution::ModuleGraphDeclaration{
+                .module_key = "owned-provider",
+                .dependency_keys = {},
+                .exports = {
+                    astraea::execution::ModuleGraphExport{
+                        .identity = exit_symbol->name.identity.value(),
+                        .guest_address =
+                            astraea::memory::GuestAddress{provider_address},
+                    },
+                },
+            },
+        };
+        auto graph = astraea::execution::ModuleGraph::create(modules);
+        REQUIRE(graph.has_value());
+
+        auto import_plan =
+            astraea::execution::plan_module_graph_import(
+                exit_relocation.value(), exit_symbol.value(),
+                graph.value(), "client", "owned-provider");
+        REQUIRE(import_plan.has_value());
+        auto owned_patch =
+            astraea::execution::build_owned_x86_64_module_import_patch(
+                import_plan.value());
+        REQUIRE(owned_patch.has_value());
+        REQUIRE(owned_patch->source_symbol_address ==
+            astraea::memory::GuestAddress{provider_address});
+
+        // Exact mismatches refuse to resolve before any memory mutation.
+        const auto unresolved =
+            astraea::execution::plan_module_graph_import(
+                exit_relocation.value(), exit_symbol.value(),
+                graph.value(), "client", "undeclared-provider");
+        REQUIRE_FALSE(unresolved.has_value());
+        REQUIRE(unresolved.error().resolution_failure ==
+            astraea::execution::ModuleGraphResolutionKind::
+                undeclared_dependency);
+
+        auto registry = make_registry();
+        const std::array bindings{
+            astraea::execution::SceImportBinding{
+                .identity = write_symbol->name.identity.value(),
+                .function_id =
+                    astraea::execution::kSyntheticTestWriteId,
+            },
+        };
+        auto import_bindings =
+            astraea::execution::SceImportBindingRegistry::create(
+                registry, bindings);
+        REQUIRE(import_bindings.has_value());
+        auto write_plan =
+            astraea::execution::plan_sce_import_resolution(
+                write_relocation.value(), write_symbol.value(),
+                import_bindings.value());
+        REQUIRE(write_plan.has_value());
+
+        auto gates = astraea::execution::build_synthetic_gate_region(
+            registry,
+            astraea::memory::GuestAddress{fixture.gate_base},
+            2U,
+            std::vector<astraea::execution::GateBinding>{
+                { .slot = 0U,
+                  .function_id =
+                      astraea::execution::kSyntheticTestWriteId },
+                { .slot = 1U,
+                  .function_id =
+                      astraea::execution::kSyntheticTestExitId },
+            },
+            built.value());
+        REQUIRE(gates.has_value());
+        auto write_patch =
+            astraea::execution::build_synthetic_x86_64_jump_slot_patch(
+                write_plan.value(), gates.value(), 0U);
+        REQUIRE(write_patch.has_value());
+
+        auto prepared =
+            astraea::execution::prepare_linux_guest_memory(built.value());
+        REQUIRE(prepared.has_value());
+        astraea::execution::GuestMemoryAccess memory{
+            built.value(), prepared.value()};
+
+        // Require a mapped, executable provider before admitting its
+        // jump target. Graph resolution alone does not prove lifetime.
+        REQUIRE(memory.is_exact_executable_address(
+            astraea::memory::GuestAddress{provider_address}));
+
+        std::array<std::byte, 8> before{};
+        REQUIRE(memory.read(
+            astraea::memory::GuestAddress{fixture.got_exit},
+            before).has_value());
+        REQUIRE(read_u64(before) == 0U);
+
+        // A read-only guest instruction address is never a valid
+        // relocation target; preflight must leave the real GOT unchanged.
+        auto invalid_patch = owned_patch.value();
+        invalid_patch.target =
+            astraea::memory::GuestAddress{fixture.code_base};
+        const std::array invalid_batch{invalid_patch};
+        auto rejected =
+            astraea::execution::apply_owned_module_import_batch(
+                invalid_batch, memory);
+        REQUIRE_FALSE(rejected.has_value());
+        REQUIRE(rejected.error().code ==
+            astraea::execution::OwnedModuleImportBatchErrorCode::
+                preflight_failure);
+        REQUIRE(rejected.error().applied_count == 0U);
+
+        std::array<std::byte, 8> still_zero{};
+        REQUIRE(memory.read(
+            astraea::memory::GuestAddress{fixture.got_exit},
+            still_zero).has_value());
+        REQUIRE(still_zero == before);
+
+        // Apply the exact caller-authorized provider and the separately
+        // authorized synthetic write gate. No generic Sony HLE fallback.
+        const std::array provider_batch{owned_patch.value()};
+        auto applied =
+            astraea::execution::apply_owned_module_import_batch(
+                provider_batch, memory);
+        REQUIRE(applied.has_value());
+        REQUIRE(applied->size() == 1U);
+        REQUIRE(astraea::execution::apply_synthetic_jump_slot_patch(
+            write_patch.value(), memory).has_value());
+
+        std::array<std::byte, 8> patched{};
+        REQUIRE(memory.read(
+            astraea::memory::GuestAddress{fixture.got_exit},
+            patched).has_value());
+        REQUIRE(read_u64(patched) == provider_address);
+
+        auto session = astraea::execution::run_linux_synthetic_session(
+            built.value(), prepared.value(), registry, gates.value(),
+            astraea::execution::make_synthetic_initial_context(
+                built.value()));
+        REQUIRE(session.has_value());
+        REQUIRE(session->exit_code == 42U);
+        REQUIRE(session->gate_stop_count == 2U);
+        REQUIRE(session->output == std::vector<std::byte>{
+            std::byte{'O'}, std::byte{'K'},
+        });
+        REQUIRE(session->events.size() == 6U);
+        REQUIRE(session->events[4].kind ==
+            astraea::execution::SyntheticSessionEventKind::gate_stop);
+        REQUIRE(session->events[4].function_id ==
+            astraea::execution::kSyntheticTestExitId);
+
+        if (iteration == 0U) {
+            first_events = session->events;
+        } else {
+            REQUIRE(session->events == first_events);
+        }
+    }
 }
 
 #endif
