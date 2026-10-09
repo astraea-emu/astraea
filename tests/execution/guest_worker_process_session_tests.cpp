@@ -231,7 +231,8 @@ TEST_CASE(
     // A mismatch, missing artifact or malformed bundle must produce a
     // typed diagnostic boundary and clean worker exit, never appear to
     // have executed guest code. All cases reuse the same containment policy.
-    const auto require_rejection = [&](auto modified) {
+    const auto require_rejection = [&](
+        std::optional<std::vector<std::byte>> modified) {
         auto invalid = settings;
         invalid.linux_artifact_bytes = std::move(modified);
         const auto result =
@@ -262,7 +263,19 @@ TEST_CASE(
     auto truncated = exactly_frozen_bytes;
     truncated.pop_back();
     require_rejection(std::move(truncated));
-    require_rejection(std::vector<std::byte>{});
+    // No fd 3 at all is refused inside the worker, with a typed stop.
+    require_rejection(std::nullopt);
+
+    // An explicitly empty optional byte vector is rejected by the
+    // controller's pre-spawn configuration validation instead.
+    auto empty_config = settings;
+    empty_config.linux_artifact_bytes = std::vector<std::byte>{};
+    auto empty_result =
+        astraea::execution::run_guest_worker_process_session(
+            empty_config);
+    REQUIRE_FALSE(empty_result.has_value());
+    REQUIRE(empty_result.error().code ==
+        astraea::execution::GuestWorkerProcessSessionErrorCode::invalid_config);
 
     // Compare normalized protocol evidence. Absolute native guest RIPs
     // are intentionally ASLR-dependent and must not be matched bytewise.
