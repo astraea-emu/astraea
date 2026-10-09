@@ -1,3 +1,5 @@
+#include "owned_two_elf_worker_fixture.hpp"
+
 #include <astraea/execution/guest_worker_protocol.hpp>
 #include <astraea/execution/guest_worker_artifact.hpp>
 #include <astraea/execution/guest_worker_fault_projection.hpp>
@@ -66,6 +68,7 @@ enum class ProbeMode {
     native_seccomp_syscall_roundtrip,
     native_access_fault,
     native_illegal_instruction_fault,
+    owned_two_elf_execution,
     fault_then_syscall,
     burn_cpu,
     artifact_probe,
@@ -236,6 +239,10 @@ using ReadResult =
             "--native-seccomp-syscall-roundtrip") {
             return ProbeMode::
                 native_seccomp_syscall_roundtrip;
+        }
+        if (argument ==
+            "--owned-two-elf-execution") {
+            return ProbeMode::owned_two_elf_execution;
         }
         if (argument ==
             "--native-access-fault") {
@@ -1651,6 +1658,32 @@ int main(int argc, char** argv) {
             return 34;
         }
         return 0;
+    }
+
+    if (mode == ProbeMode::owned_two_elf_execution) {
+#if defined(__linux__) && defined(__x86_64__) && defined(MAP_FIXED_NOREPLACE)
+        // Execute the independently parsed client/provider ELF workload
+        // solely in this supervised worker, never in the controller.
+        const auto stopped =
+            astraea::test::run_owned_two_elf_worker(
+                kWorkerId, kThreadId);
+        if (!stopped.has_value()) {
+            return 43;
+        }
+        if (!write_message(
+                GuestWorkerWireMessage{stopped.value()})) {
+            return 44;
+        }
+        const auto terminate_message = read_message();
+        if (!terminate_message.has_value() ||
+            std::get_if<GuestWorkerTerminate>(
+                &terminate_message.value()) == nullptr) {
+            return 45;
+        }
+        return 0;
+#else
+        return 46;
+#endif
     }
 
     if (mode == ProbeMode::fault_then_syscall) {
