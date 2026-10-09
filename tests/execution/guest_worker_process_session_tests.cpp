@@ -228,16 +228,41 @@ TEST_CASE(
     REQUIRE(settings.linux_artifact_bytes.has_value());
     REQUIRE(settings.linux_artifact_bytes.value() == exactly_frozen_bytes);
 
-    // Fail closed on a mutated provider ELF. It is still transported via
-    // a sealed descriptor but cannot be executed or reported as success.
-    auto corrupted = settings;
-    REQUIRE(corrupted.linux_artifact_bytes.has_value());
-    corrupted.linux_artifact_bytes->back() ^= std::byte{0x01};
-    auto denied = astraea::execution::run_guest_worker_process_session(
-        corrupted);
-    REQUIRE_FALSE(denied.has_value());
-    REQUIRE(denied.error().code !=
-        astraea::execution::GuestWorkerProcessSessionErrorCode::timeout);
+    // A mismatch, missing artifact or malformed bundle must produce a
+    // typed diagnostic boundary and clean worker exit, never appear to
+    // have executed guest code. All cases reuse the same containment policy.
+    const auto require_rejection = [&](auto modified) {
+        auto invalid = settings;
+        invalid.linux_artifact_bytes = std::move(modified);
+        const auto result =
+            astraea::execution::run_guest_worker_process_session(invalid);
+        REQUIRE(result.has_value());
+        REQUIRE(result->child_exit_code == 0);
+        REQUIRE_FALSE(result->terminal_fault.has_value());
+        REQUIRE(result->terminal_diagnostic.has_value());
+        REQUIRE(result->terminal_diagnostic->kind ==
+            astraea::execution::GuestWorkerDiagnosticKind::loader_rejected);
+        REQUIRE(result->terminal_diagnostic->guest_rip.value() == 0U);
+        REQUIRE(result->stop.reason ==
+            astraea::execution::GuestWorkerStopReason::diagnostic_boundary);
+        REQUIRE(result->stop.guest_rip.value() == 0U);
+    };
+
+    // A one-byte change to either ELF, or to the container framing,
+    // cannot pass exact source identity preflight.
+    auto damaged_provider = exactly_frozen_bytes;
+    damaged_provider.back() ^= std::byte{0x01};
+    require_rejection(std::move(damaged_provider));
+    auto damaged_client = exactly_frozen_bytes;
+    damaged_client[16U] ^= std::byte{0x01};
+    require_rejection(std::move(damaged_client));
+    auto damaged_magic = exactly_frozen_bytes;
+    damaged_magic[0U] ^= std::byte{0x01};
+    require_rejection(std::move(damaged_magic));
+    auto truncated = exactly_frozen_bytes;
+    truncated.pop_back();
+    require_rejection(std::move(truncated));
+    require_rejection(std::vector<std::byte>{});
 
     // Compare normalized protocol evidence. Absolute native guest RIPs
     // are intentionally ASLR-dependent and must not be matched bytewise.
