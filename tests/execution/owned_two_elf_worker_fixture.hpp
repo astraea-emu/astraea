@@ -5,6 +5,7 @@
 // The worker's existing controller/supervisor protocol owns the process
 // lifetime; this helper never opens a guest-controlled host path.
 
+#include <algorithm>
 #include <array>
 #include <cstddef>
 #include <cstdint>
@@ -131,36 +132,28 @@ inline std::optional<astraea::loader::InitialStackRequest> stack_request(
 
 }  // namespace detail
 
-// Success is returned only after a separate client/provider ELF parse,
-// exact typed symbol resolution, checked relocation write, native control
-// transfer to the provider and the explicit synthetic exit service.
-// This source-built worker workload is intentionally not a frozen same-hash
-// PS5 binary corpus: absolute test mapping addresses vary with host ASLR.
-[[nodiscard]] inline std::optional<astraea::execution::GuestWorkerStop>
-run_owned_two_elf_worker(
-    astraea::execution::GuestWorkerId worker_id,
-    astraea::execution::GuestThreadId thread_id) {
-#if !(defined(__linux__) && defined(__x86_64__) && defined(MAP_FIXED_NOREPLACE))
-    (void)worker_id;
-    (void)thread_id;
-    return std::nullopt;
-#else
-    using namespace astraea;
-    const long raw_page = ::sysconf(_SC_PAGESIZE);
-    if (raw_page < 4096) return std::nullopt;
-    const auto page = static_cast<std::uint64_t>(raw_page);
-    if (page > std::numeric_limits<std::size_t>::max() / 5U)
+namespace detail {
+
+#if defined(__linux__) && defined(__x86_64__) && defined(MAP_FIXED_NOREPLACE)
+struct OwnedBinaryPair {
+    std::vector<std::byte> client;
+    std::vector<std::byte> provider;
+};
+
+// This is the single source of independently authored ELF input bytes.
+// Both the controller and the worker call this generator, but ONLY the
+// controller's bytes are delivered and executed. The worker regenerates
+// the expected bytes exclusively to refuse tampering before native entry.
+[[nodiscard]] inline std::optional<OwnedBinaryPair>
+make_owned_binary_pair(std::uint64_t code, std::uint64_t page) {
+    if (page < 4096U ||
+        page > std::numeric_limits<std::size_t>::max() / 5U ||
+        code > std::numeric_limits<std::uint64_t>::max() - 5U * page)
         return std::nullopt;
-    auto base = detail::free_guest_block(page);
-    if (!base.has_value()) return std::nullopt;
-    const auto code = base.value();
     const auto data = code + page;
     const auto gate = code + 3U * page;
     const auto provider_address = code + 4U * page;
     const auto got = data + 0x40U;
-    auto stack = detail::stack_request(code, page);
-    if (!stack.has_value()) return std::nullopt;
-
     // Client: movabs rdi, 42; call qword [rip + GOT-relative displacement];
     // ud2 (unreachable). One exact imported symbol and one JUMP_SLOT.
     auto client_bytes = detail::make_elf(code, 0xfe10U, 3U, page, 3U);
@@ -228,6 +221,132 @@ run_owned_two_elf_worker(
         provider_bytes, p + 2U, gate);
     provider_bytes[p + 10U] = std::byte{0xff};
     provider_bytes[p + 11U] = std::byte{0xe0};
+
+
+    return OwnedBinaryPair{
+        .client = std::move(client_bytes),
+        .provider = std::move(provider_bytes),
+    };
+}
+
+constexpr std::array<std::byte, 8U> kOwnedPairMagic{
+    std::byte{'A'}, std::byte{'S'}, std::byte{'T'},
+    std::byte{'2'}, std::byte{'E'}, std::byte{'L'},
+    std::byte{'F'}, std::byte{'1'},
+};
+
+inline std::uint64_t read_le64(
+    std::span<const std::byte> bytes, std::size_t offset) noexcept {
+    std::uint64_t value = 0U;
+    for (std::size_t i = 0U; i < 8U; ++i)
+        value |= static_cast<std::uint64_t>(
+            std::to_integer<std::uint8_t>(bytes[offset + i]))
+            << (8U * i);
+    return value;
+}
+#endif
+
+}  // namespace detail
+
+// Produce the exact *same* frozen source-authored ELF input pair once in the
+// controller. Callers must transmit the identical returned vector to each
+// fresh Linux worker via the existing sealed fd 3 artifact channel.
+// A fixed base is frozen into this bundle for both workers; mapping failure
+// remains fail-closed instead of choosing a different address on retry.
+[[nodiscard]] inline std::optional<std::vector<std::byte>>
+make_owned_two_elf_sealed_bundle() {
+#if !(defined(__linux__) && defined(__x86_64__) && defined(MAP_FIXED_NOREPLACE))
+    return std::nullopt;
+#else
+    const long raw_page = ::sysconf(_SC_PAGESIZE);
+    if (raw_page < 4096)
+        return std::nullopt;
+    const auto page = static_cast<std::uint64_t>(raw_page);
+    if (page > std::numeric_limits<std::size_t>::max() / 5U)
+        return std::nullopt;
+    auto base = detail::free_guest_block(page);
+    if (!base.has_value())
+        return std::nullopt;
+    auto pair = detail::make_owned_binary_pair(base.value(), page);
+    if (!pair.has_value())
+        return std::nullopt;
+
+    std::vector<std::byte> result;
+    result.reserve(16U + pair->client.size() + pair->provider.size());
+    result.insert(
+        result.end(), detail::kOwnedPairMagic.begin(),
+        detail::kOwnedPairMagic.end());
+    for (std::size_t i = 0U; i < 8U; ++i)
+        result.push_back(static_cast<std::byte>(
+            (base.value() >> (i * 8U)) & 0xffU));
+    result.insert(
+        result.end(), pair->client.begin(), pair->client.end());
+    result.insert(
+        result.end(), pair->provider.begin(), pair->provider.end());
+    return result;
+#endif
+}
+
+// Success requires exact byte equality against both independently authored
+// source inputs, separate ELF validation, checked native binding, and typed
+// worker stop. No Sony ABI or real commercial title is admitted.
+[[nodiscard]] inline std::optional<astraea::execution::GuestWorkerStop>
+run_owned_two_elf_worker(
+    astraea::execution::GuestWorkerId worker_id,
+    astraea::execution::GuestThreadId thread_id,
+    std::span<const std::byte> sealed_bundle) {
+#if !(defined(__linux__) && defined(__x86_64__) && defined(MAP_FIXED_NOREPLACE))
+    (void)worker_id;
+    (void)thread_id;
+    (void)sealed_bundle;
+    return std::nullopt;
+#else
+    using namespace astraea;
+    const long raw_page = ::sysconf(_SC_PAGESIZE);
+    if (raw_page < 4096) return std::nullopt;
+    const auto page = static_cast<std::uint64_t>(raw_page);
+    if (page > (std::numeric_limits<std::size_t>::max() - 16U) / 5U)
+        return std::nullopt;
+    const auto artifact_size = static_cast<std::size_t>(page * 5U) + 16U;
+    if (sealed_bundle.size() != artifact_size ||
+        !std::equal(
+            detail::kOwnedPairMagic.begin(),
+            detail::kOwnedPairMagic.end(),
+            sealed_bundle.begin()))
+        return std::nullopt;
+
+    const auto code = detail::read_le64(sealed_bundle, 8U);
+    if (code == 0U || code % page != 0U ||
+        code > std::numeric_limits<std::uint64_t>::max() - 5U * page)
+        return std::nullopt;
+    const auto data = code + page;
+    const auto gate = code + 3U * page;
+    const auto provider_address = code + 4U * page;
+    const auto got = data + 0x40U;
+    auto stack = detail::stack_request(code, page);
+    if (!stack.has_value()) return std::nullopt;
+
+    const auto client_size = static_cast<std::size_t>(page * 3U);
+    const auto provider_size = static_cast<std::size_t>(page * 2U);
+    const auto client_blob = sealed_bundle.subspan(16U, client_size);
+    const auto provider_blob = sealed_bundle.subspan(
+        16U + client_size, provider_size);
+
+    // Explicitly reject even a one-byte mutation; sealed input identity
+    // is stronger than successfully parsing an arbitrary guest ELF.
+    auto expected = detail::make_owned_binary_pair(code, page);
+    if (!expected.has_value() ||
+        !std::equal(
+            client_blob.begin(), client_blob.end(),
+            expected->client.begin(), expected->client.end()) ||
+        !std::equal(
+            provider_blob.begin(), provider_blob.end(),
+            expected->provider.begin(), expected->provider.end()))
+        return std::nullopt;
+    std::vector<std::byte> client_bytes(
+        client_blob.begin(), client_blob.end());
+    std::vector<std::byte> provider_bytes(
+        provider_blob.begin(), provider_blob.end());
 
     auto client = loader::build_guest_image({
         .image_bytes = std::move(client_bytes),
