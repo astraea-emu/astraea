@@ -203,6 +203,10 @@ jobs:
           lines = result.stdout.splitlines()
           if lines[0] != "Astraea dependency manifest v0":
               raise SystemExit("wrong manifest header")
+          # Retain the exact ASCII-only read-only output for the
+          # subsequent cross-artifact comparison, not guessed bindings.
+          (root / "public-title-dependencies.txt").write_text(
+              result.stdout, encoding="ascii")
           fields = {}
           for line in lines[1:]:
               if "=" not in line:
@@ -607,6 +611,8 @@ jobs:
                           f"{fields.get(key)!r} vs {expected_value!r}"
                       )
               if command == "dependencies":
+                  (root / "public-prx-dependencies.txt").write_text(
+                      result.stdout, encoding="ascii")
                   from collections import Counter
 
                   # These are source-generated ELF relocation records,
@@ -655,3 +661,19 @@ jobs:
           print("PUBLIC SECOND-ARTIFACT DIAGNOSTIC PROBE COMPLETE.")
           print("Host-only raw independently generated ELF; no PS5, no gameplay.")
           PY
+
+      - name: Self-test read-only cross-artifact lexical comparison
+        run: |
+          python3 tools/reference/ps5_process_entry_observer/public_pair_lexical_demand.py \
+            --self-test
+
+      - name: Compare pinned public title demands against independent PRX exports without resolution
+        run: |
+          python3 tools/reference/ps5_process_entry_observer/public_pair_lexical_demand.py \
+            --title-manifest "$RUNNER_TEMP/public-title-dependencies.txt" \
+            --provider-manifest "$RUNNER_TEMP/public-prx-dependencies.txt" \
+            --title-elf "$RUNNER_TEMP/ps5-native-app-boilerplate/build/eboot.elf" \
+            --provider-elf "$RUNNER_TEMP/public-cleanroom-libc.raw.elf" \
+            --report "$RUNNER_TEMP/public-two-elf-lexical-closure.json"
+          test -s "$RUNNER_TEMP/public-two-elf-lexical-closure.json"
+          echo "HOST-ONLY TWO-ARTIFACT DEMAND REPORT PASS; NO GUEST EXECUTION OR BINDING."
