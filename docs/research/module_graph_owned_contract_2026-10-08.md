@@ -188,3 +188,24 @@ Independent source context: pinned BlackBear authored PRX runtime
 `docs/RUNTIME_SHIM.md`; see
 `docs/research/public_cleanroom_prx_second_corpus_2026-10-08.md`
 after the corresponding integration PR merges.
+
+## Owned R_X86_64_RELATIVE checked application
+
+The source-independent `build_owned_x86_64_relative_patch` (merged #372)
+implements `word64 = B + A` for a caller-supplied explicit guest load
+bias `B` and signed RELA addend `A`, with overflow/underflow refusal.
+
+`apply_owned_relative_patch` now composes an *already validated* owned
+patch with `GuestMemoryAccess::preflight_write` and checked `write`.
+The accepted target is one exact eight-byte, writable, prepared guest
+mapping. Tests use independently authored layouts to verify the
+resulting value and byte-for-byte readback, and to confirm that a
+readonly, unmapped or partially mapped target is refused before any
+mutation. No raw guest pointer is dereferenced by this function.
+
+This **does not** determine a Sony loader's module base or memory
+layout, execute a PS5 title, approve relocations for actual firmware
+libraries, or resolve `DTPMOD64` TLS module IDs. It is a single owned
+patch, not an atomic batch, and assumes its caller has established the
+load bias and prevalidated the relocation. Additional mapping-lifetime
+and synchronization rules remain necessary before real loader use.
