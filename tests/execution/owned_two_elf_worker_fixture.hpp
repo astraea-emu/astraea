@@ -474,9 +474,17 @@ run_owned_two_elf_worker(
     if (!guest_memory.is_exact_executable_address(
             memory::GuestAddress{provider_address}))
         return std::nullopt;
+    // An explicit source-owned module registration precedes any native
+    // callable import write; no generation is inferred from ELF/SCE tags.
+    execution::OwnedProviderRegistry lifetime;
+    auto issued = lifetime.register_provider(
+        "provider", memory::GuestAddress{provider_address}, guest_memory);
+    if (!issued.has_value()) return std::nullopt;
     const std::array patches{patch.value()};
-    if (!execution::apply_live_owned_jump_slot_batch(
-            patches, guest_memory).has_value())
+    const std::array captured_generations{issued.value()};
+    if (!execution::apply_generation_bound_owned_jump_slot_batch(
+            patches, captured_generations,
+            lifetime, guest_memory).has_value())
         return std::nullopt;
     std::array<std::byte, 8> got_bytes{};
     if (!guest_memory.read(
@@ -513,10 +521,23 @@ run_owned_two_elf_worker(
         .guest_rip = memory::GuestAddress{session->events[1].rip},
     };
 
-    // Explicit teardown in the *supervised worker*: the source module
-    // graph remains a declaration, but releasing prepared host mappings
-    // must make the provider uncallable and its GOT unwritable. These
-    // checks never dereference an unmapped guest pointer.
+    // The provider can be retired while its old code is still mapped.
+    // The saved import must cease to be authorized immediately, without
+    // relying on the later OS-level address unmap.
+    if (!lifetime.retire(issued.value())) return std::nullopt;
+    const auto retired =
+        execution::apply_generation_bound_owned_jump_slot_batch(
+            patches, captured_generations, lifetime, guest_memory);
+    if (retired.has_value() ||
+        retired.error().code !=
+            execution::OwnedBoundJumpSlotErrorCode::
+                stale_or_foreign_provider_generation ||
+        retired.error().applied_count != 0U)
+        return std::nullopt;
+
+    // Explicit teardown in the *supervised worker*: releasing prepared
+    // host mappings also makes the old provider source and GOT unavailable.
+    // These checks never dereference an unmapped guest pointer.
     prepared.value() = execution::LinuxPreparedMemory{};
     if (guest_memory.is_exact_executable_address(
             memory::GuestAddress{provider_address}) ||
@@ -524,12 +545,12 @@ run_owned_two_elf_worker(
             memory::GuestAddress{got}, 8U).has_value())
         return std::nullopt;
     auto after_release =
-        execution::apply_live_owned_jump_slot_batch(
-            patches, guest_memory);
+        execution::apply_generation_bound_owned_jump_slot_batch(
+            patches, captured_generations, lifetime, guest_memory);
     if (after_release.has_value() ||
         after_release.error().code !=
-            execution::OwnedLiveJumpSlotErrorCode::
-                provider_not_live_executable ||
+            execution::OwnedBoundJumpSlotErrorCode::
+                stale_or_foreign_provider_generation ||
         after_release.error().applied_count != 0U)
         return std::nullopt;
 
