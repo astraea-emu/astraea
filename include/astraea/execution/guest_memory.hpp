@@ -41,6 +41,7 @@ public:
         const LinuxPreparedMemory& prepared_memory) noexcept
         : image_(&image),
           prepared_plan_(&prepared_memory.plan()),
+          prepared_epoch_(&prepared_memory.mapping_epoch_ref()),
           prepared_memory_available_(!prepared_memory.empty()) {}
 
     GuestMemoryAccess(
@@ -48,6 +49,7 @@ public:
         const WindowsPreparedMemory& prepared_memory) noexcept
         : image_(&image),
           prepared_plan_(&prepared_memory.plan()),
+          prepared_epoch_(&prepared_memory.mapping_epoch_ref()),
           prepared_memory_available_(!prepared_memory.empty()) {}
 
     using CopyResult =
@@ -77,6 +79,18 @@ public:
     [[nodiscard]] bool is_exact_executable_address(
         astraea::memory::GuestAddress address) const noexcept;
 
+    // Process-local identity of the *current* prepared native mapping
+    // owner. It follows move semantics and changes on same-VA replacement.
+    // Zero means unavailable. Does not pin memory against concurrent unmap.
+    [[nodiscard]] std::uint64_t current_mapping_epoch() const noexcept {
+        return image_ != nullptr && prepared_plan_ != nullptr &&
+                       prepared_epoch_ != nullptr &&
+                       prepared_memory_available_ &&
+                       !prepared_plan_->regions.empty()
+            ? *prepared_epoch_
+            : 0U;
+    }
+
 private:
     enum class AccessKind {
         read,
@@ -93,6 +107,7 @@ private:
 
     const astraea::loader::GuestImage* image_ = nullptr;
     const ExecutionMemoryPlan* prepared_plan_ = nullptr;
+    const std::uint64_t* prepared_epoch_ = nullptr;
     bool prepared_memory_available_ = false;
 };
 
