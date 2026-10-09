@@ -508,3 +508,107 @@ jobs:
           print("modules/libraries; bounded names, local IDs and versions.")
           print("TOOLCHAIN-SCOPED READ ONLY; NO RETAIL ABI PROMOTION.")
           PY
+
+      - name: Probe independently generated clean-room PRX as a second ELF corpus
+        run: |
+          python3 - <<'PY'
+          import hashlib
+          import os
+          import pathlib
+          import subprocess
+
+          root = pathlib.Path(os.environ["RUNNER_TEMP"])
+          public = root / "ps5-native-app-boilerplate"
+          cli = root / "astraea-native-title-smoke/astraea"
+          builder = public / "build/host/libc-builder"
+          api = public / "tooling/native/runtime/api-surface.txt"
+          imports = public / "tooling/native/runtime/imports.txt"
+          raw = root / "public-cleanroom-libc.raw.elf"
+
+          # This builder and both input manifests belong to the already
+          # pinned, GPL-3.0-or-later reviewed public source checkout.
+          for item in (builder, api, imports):
+              if not item.is_file():
+                  raise SystemExit(f"pinned independent PRX build input missing: {item.name}")
+          subprocess.run(
+              [str(builder), str(api), str(imports), str(raw)],
+              check=True, text=True, capture_output=True, timeout=90,
+          )
+          data = raw.read_bytes()
+          sha = hashlib.sha256(data).hexdigest()
+          expected = "8ee6e124993e1af26420cb455890fd002f5d6c7e78883c860ce45734e7d002bb"
+          if sha != expected or len(data) != 1335962:
+              raise SystemExit(f"public raw PRX identity mismatch: sha={sha}, bytes={len(data)}")
+          print("INDEPENDENT CLEAN-ROOM RAW PRX VERIFIED:", sha, len(data))
+
+          for command in ("profile", "dependencies"):
+              result = subprocess.run(
+                  [str(cli), command, str(raw)],
+                  capture_output=True, text=True, timeout=60, check=False,
+              )
+              print(f"CLEANROOM_PRX_{command.upper()}_RC={result.returncode}")
+              print("REPORT PREFIX:")
+              print(result.stdout[:4000])
+              print("ERROR PREFIX:")
+              print(result.stderr[:2000])
+              if result.returncode != 0 or result.stderr.strip():
+                  raise SystemExit(f"verified public PRX {command} baseline regressed")
+              expected_header = (
+                  "Astraea retail closure profile\n" if command == "profile"
+                  else "Astraea dependency manifest v0\n"
+              )
+              if not result.stdout.startswith(expected_header):
+                  raise SystemExit(f"public PRX {command} report header changed")
+              fields = {}
+              for line in result.stdout.splitlines()[1:]:
+                  if "=" not in line:
+                      raise SystemExit(f"malformed PRX report line: {line[:100]!r}")
+                  key, value = line.split("=", 1)
+                  if key in fields:
+                      raise SystemExit(f"duplicate PRX report field: {key}")
+                  fields[key] = value
+              expected_fields = (
+                  {
+                      "program_headers": "14",
+                      "load_segments": "5",
+                      "load_memory_bytes": "1294514",
+                      "executable_load_segments": "1",
+                      "generic_needed": "3",
+                      "sce_needed_modules": "3",
+                      "sce_import_libraries": "3",
+                      "sce_unknown_dynamic_records": "0",
+                      "dynamic_symbols": "2669",
+                      "rel_relocations": "0",
+                      "rela_relocations": "1796",
+                      "plt_relocations": "100",
+                      "total_relocations": "1896",
+                      "tls_present": "1",
+                      "tls_initialized_bytes": "384",
+                      "tls_total_bytes": "1128",
+                      "tls_alignment": "16",
+                  } if command == "profile"
+                  else {
+                      "execution": "none",
+                      "identity_policy": "opaque",
+                      "generic_needed_records": "3",
+                      "sce_needed_module_records": "3",
+                      "sce_import_library_records": "3",
+                      "dynamic_symbol_records": "2669",
+                      "relocation_records": "1896",
+                      "resolution": "not_attempted",
+                      "relocation_application": "not_attempted",
+                      "guest_instructions": "0",
+                  }
+              )
+              for key, expected_value in expected_fields.items():
+                  if fields.get(key) != expected_value:
+                      raise SystemExit(
+                          f"pinned raw PRX {command} {key} changed: "
+                          f"{fields.get(key)!r} vs {expected_value!r}"
+                      )
+              print(f"PINNED CLEAN-ROOM PRX {command.upper()} BASELINE PASS.")
+
+
+          print("PUBLIC SECOND-ARTIFACT DIAGNOSTIC PROBE COMPLETE.")
+          print("Host-only raw independently generated ELF; no PS5, no gameplay.")
+          PY
