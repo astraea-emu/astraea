@@ -225,6 +225,7 @@ std::string permissions_for_address(
 TEST_CASE("Linux native memory backend availability matches host", "[execution][linux-memory]") {
 #if defined(__linux__) && defined(__x86_64__) && defined(MAP_FIXED_NOREPLACE)
     REQUIRE(astraea::execution::linux_native_memory_backend_available());
+    REQUIRE(astraea::execution::LinuxPreparedMemory{}.mapping_epoch() == 0U);
 #else
     REQUIRE_FALSE(astraea::execution::linux_native_memory_backend_available());
 #endif
@@ -245,6 +246,15 @@ TEST_CASE("Linux preparation populates bytes and applies final W^X protections",
             astraea::execution::prepare_linux_guest_memory(image);
         REQUIRE(prepared.has_value());
         REQUIRE_FALSE(prepared->empty());
+        const auto original_epoch = prepared->mapping_epoch();
+        REQUIRE(original_epoch != 0U);
+        auto transferred = std::move(prepared.value());
+        REQUIRE(prepared->mapping_epoch() == 0U);
+        REQUIRE(transferred.mapping_epoch() == original_epoch);
+        prepared.value() = std::move(transferred);
+        REQUIRE(transferred.mapping_epoch() == 0U);
+        REQUIRE(prepared->mapping_epoch() == original_epoch);
+
 
         const auto* code =
             reinterpret_cast<const std::byte*>(
@@ -405,17 +415,22 @@ TEST_CASE("Linux preparation can be repeated after deterministic teardown", "[ex
         static_cast<std::size_t>(page * 3U);
     const auto base = find_free_block(total);
     auto image = make_guest_image(base, page);
+    std::uint64_t previous_epoch = 0U;
 
     {
         auto first =
             astraea::execution::prepare_linux_guest_memory(image);
         REQUIRE(first.has_value());
+        previous_epoch = first->mapping_epoch();
+        REQUIRE(previous_epoch != 0U);
     }
 
     {
         auto second =
             astraea::execution::prepare_linux_guest_memory(image);
         REQUIRE(second.has_value());
+        REQUIRE(second->mapping_epoch() != 0U);
+        REQUIRE(second->mapping_epoch() != previous_epoch);
     }
 }
 
