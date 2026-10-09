@@ -1165,7 +1165,7 @@ TEST_CASE(
         {
             auto mismatched_symbol = exit_symbol.value();
             REQUIRE(mismatched_symbol.name.identity.has_value());
-            mismatched_symbol.name.identity->nid = "LMNOPQRSTUV";
+            mismatched_symbol.name.identity->nid = "ZZZZZZZZZZZ";
             auto refused =
                 astraea::execution::plan_module_graph_import(
                     exit_relocation.value(), mismatched_symbol,
