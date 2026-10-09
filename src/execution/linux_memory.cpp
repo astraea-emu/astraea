@@ -98,7 +98,8 @@ LinuxPreparedMemory::~LinuxPreparedMemory() {
 LinuxPreparedMemory::LinuxPreparedMemory(
     LinuxPreparedMemory&& other) noexcept
     : plan_(std::move(other.plan_)),
-      mapped_regions_(std::move(other.mapped_regions_)) {
+      mapped_regions_(std::move(other.mapped_regions_)),
+      mapping_epoch_(std::exchange(other.mapping_epoch_, 0U)) {
     other.mapped_regions_.clear();
     other.plan_ = ExecutionMemoryPlan{
         .host_page_size = 0,
@@ -115,6 +116,7 @@ LinuxPreparedMemory& LinuxPreparedMemory::operator=(
     reset();
     plan_ = std::move(other.plan_);
     mapped_regions_ = std::move(other.mapped_regions_);
+    mapping_epoch_ = std::exchange(other.mapping_epoch_, 0U);
     other.mapped_regions_.clear();
     other.plan_ = ExecutionMemoryPlan{
         .host_page_size = 0,
@@ -138,6 +140,7 @@ void LinuxPreparedMemory::reset() noexcept {
 #endif
 
     mapped_regions_.clear();
+    mapping_epoch_ = 0U;
     plan_ = ExecutionMemoryPlan{
         .host_page_size = 0,
         .regions = {},
@@ -401,6 +404,13 @@ LinuxPreparedMemoryResult prepare_linux_guest_memory(
 #endif
         }
 
+        prepared.mapping_epoch_ = next_prepared_mapping_epoch();
+        if (prepared.mapping_epoch_ == 0U) {
+            return fail_with_cleanup(
+                std::move(prepared),
+                backend_error(
+                    NativeBackendErrorCode::internal_transition_failure));
+        }
         return LinuxPreparedMemoryResult::success(
             std::move(prepared));
     } catch (const std::bad_alloc&) {

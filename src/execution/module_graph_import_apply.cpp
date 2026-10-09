@@ -243,6 +243,7 @@ OwnedProviderRegistry::register_provider(
         return failure(OwnedProviderRegistryErrorCode::invalid_module_key);
     }
     if (address.value() == 0U ||
+        guest_memory.current_mapping_epoch() == 0U ||
         !guest_memory.is_exact_executable_address(address)) {
         return failure(OwnedProviderRegistryErrorCode::invalid_provider_address);
     }
@@ -266,6 +267,7 @@ OwnedProviderRegistry::register_provider(
         OwnedProviderGeneration token{
             .registry_id = registry_id_,
             .generation = next_generation_,
+            .mapping_epoch = guest_memory.current_mapping_epoch(),
             .module_key = std::string{module_key},
             .address = address,
         };
@@ -296,10 +298,13 @@ bool OwnedProviderRegistry::retire(
 
 bool OwnedProviderRegistry::is_current(
     const OwnedProviderGeneration& generation,
-    astraea::memory::GuestAddress address) const noexcept {
+    astraea::memory::GuestAddress address,
+    const GuestMemoryAccess& guest_memory) const noexcept {
     if (generation.registry_id != registry_id_ ||
         generation.registry_id == 0U ||
         generation.generation == 0U ||
+        generation.mapping_epoch == 0U ||
+        generation.mapping_epoch != guest_memory.current_mapping_epoch() ||
         generation.address != address) {
         return false;
     }
@@ -337,7 +342,8 @@ apply_generation_bound_owned_jump_slot_batch(
     for (std::size_t index = 0U; index < patches.size(); ++index) {
         if (!registry.is_current(
                 generations[index],
-                patches[index].source_symbol_address)) {
+                patches[index].source_symbol_address,
+                guest_memory)) {
             return refuse(
                 OwnedBoundJumpSlotErrorCode::
                     stale_or_foreign_provider_generation,

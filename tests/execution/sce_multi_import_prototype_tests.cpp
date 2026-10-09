@@ -1518,25 +1518,23 @@ TEST_CASE(
             built.value(), transferred};
         REQUIRE(active.is_exact_executable_address(
             astraea::memory::GuestAddress{provider_address}));
+        REQUIRE(memory.current_mapping_epoch() == 0U);
+        REQUIRE(active.current_mapping_epoch() ==
+            original_generation.mapping_epoch);
+        REQUIRE(active.current_mapping_epoch() != 0U);
+        REQUIRE(owner.is_current(
+            original_generation,
+            astraea::memory::GuestAddress{provider_address},
+            active));
 
-        // A retained patch must fail immediately after explicit retirement
-        // even though the old provider's code remains executable.
-        REQUIRE(owner.retire(original_generation));
-        REQUIRE_FALSE(owner.retire(original_generation));
-        const auto retired =
-            astraea::execution::
-                apply_generation_bound_owned_jump_slot_batch(
-                    provider_batch, provider_generations, owner, active);
-        REQUIRE_FALSE(retired.has_value());
-        REQUIRE(retired.error().code ==
-            astraea::execution::OwnedBoundJumpSlotErrorCode::
-                stale_or_foreign_provider_generation);
-        REQUIRE(retired.error().applied_count == 0U);
-
+        // The trusted caller intentionally omits retirement. Releasing
+        // the physical mapping owner must still invalidate its saved epoch.
+        // Registry metadata can remain active, but it is no longer callable.
         // Explicitly release/unmap the current prepared memory owner.
         // The data-only module graph can still report the old export,
         // but the owned callable import gate must now refuse to patch.
         transferred = astraea::execution::LinuxPreparedMemory{};
+        REQUIRE(active.current_mapping_epoch() == 0U);
         REQUIRE_FALSE(active.is_exact_executable_address(
             astraea::memory::GuestAddress{provider_address}));
         const auto stale = graph->resolve(
@@ -1565,6 +1563,13 @@ TEST_CASE(
         transferred = std::move(remapped.value());
         REQUIRE(active.is_exact_executable_address(
             astraea::memory::GuestAddress{provider_address}));
+        REQUIRE(active.current_mapping_epoch() != 0U);
+        REQUIRE(active.current_mapping_epoch() !=
+            original_generation.mapping_epoch);
+        REQUIRE_FALSE(owner.is_current(
+            original_generation,
+            astraea::memory::GuestAddress{provider_address},
+            active));
         std::array<std::byte, 8> remapped_got{};
         REQUIRE(active.read(
             astraea::memory::GuestAddress{fixture.got_exit},
@@ -1585,6 +1590,18 @@ TEST_CASE(
             untouched).has_value());
         REQUIRE(untouched == remapped_got);
 
+        // The old key remains reserved until the trusted loader retires
+        // its inactive generation. No implicit allocation or rebind.
+        auto still_held = owner.register_provider(
+            "owned-provider",
+            astraea::memory::GuestAddress{provider_address}, active);
+        REQUIRE_FALSE(still_held.has_value());
+        REQUIRE(still_held.error().code ==
+            astraea::execution::OwnedProviderRegistryErrorCode::
+                duplicate_active_module);
+        REQUIRE(owner.retire(original_generation));
+        REQUIRE_FALSE(owner.retire(original_generation));
+
         auto replacement = owner.register_provider(
             "owned-provider",
             astraea::memory::GuestAddress{provider_address},
@@ -1592,6 +1609,10 @@ TEST_CASE(
         REQUIRE(replacement.has_value());
         REQUIRE(replacement->generation > original_generation.generation);
         REQUIRE(replacement->registry_id == original_generation.registry_id);
+        REQUIRE(replacement->mapping_epoch ==
+            active.current_mapping_epoch());
+        REQUIRE(replacement->mapping_epoch !=
+            original_generation.mapping_epoch);
         const std::array new_generation{replacement.value()};
         auto rebound =
             astraea::execution::
