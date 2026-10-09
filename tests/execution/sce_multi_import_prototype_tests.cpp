@@ -1287,6 +1287,62 @@ TEST_CASE(
         REQUIRE(memory.is_exact_executable_address(
             astraea::memory::GuestAddress{provider_address}));
 
+        // The graph holds valid *declarations*, not executable lifetime.
+        // A data address can be an ELF address, but cannot be used as a
+        // callable JUMP_SLOT provider in the live owned integration.
+        {
+            auto non_executable = owned_patch.value();
+            non_executable.source_symbol_address =
+                astraea::memory::GuestAddress{fixture.data_base};
+            const auto address = fixture.data_base;
+            for (std::size_t byte_index = 0U;
+                 byte_index < non_executable.bytes.size();
+                 ++byte_index) {
+                non_executable.bytes[byte_index] =
+                    static_cast<std::byte>(
+                        (address >> (8U * byte_index)) & 0xffU);
+            }
+            const std::array invalid_sources{
+                owned_patch.value(), non_executable,
+            };
+            const auto denied =
+                astraea::execution::apply_live_owned_jump_slot_batch(
+                    invalid_sources, memory);
+            REQUIRE_FALSE(denied.has_value());
+            REQUIRE(denied.error().code ==
+                astraea::execution::OwnedLiveJumpSlotErrorCode::
+                    provider_not_live_executable);
+            REQUIRE(denied.error().patch_index == 1U);
+            REQUIRE(denied.error().applied_count == 0U);
+        }
+
+        {
+            auto corrupt_encoding = owned_patch.value();
+            corrupt_encoding.bytes[0] ^= std::byte{0x01};
+            const std::array invalid_patches{corrupt_encoding};
+            const auto denied =
+                astraea::execution::apply_live_owned_jump_slot_batch(
+                    invalid_patches, memory);
+            REQUIRE_FALSE(denied.has_value());
+            REQUIRE(denied.error().code ==
+                astraea::execution::OwnedLiveJumpSlotErrorCode::
+                    invalid_patch_encoding);
+            REQUIRE(denied.error().applied_count == 0U);
+        }
+        {
+            auto wrong_type = owned_patch.value();
+            wrong_type.raw_relocation_type = 6U;
+            const std::array invalid_patches{wrong_type};
+            const auto denied =
+                astraea::execution::apply_live_owned_jump_slot_batch(
+                    invalid_patches, memory);
+            REQUIRE_FALSE(denied.has_value());
+            REQUIRE(denied.error().code ==
+                astraea::execution::OwnedLiveJumpSlotErrorCode::
+                    unsupported_relocation_type);
+            REQUIRE(denied.error().applied_count == 0U);
+        }
+
         std::array<std::byte, 8> before{};
         REQUIRE(memory.read(
             astraea::memory::GuestAddress{fixture.got_exit},
@@ -1315,10 +1371,13 @@ TEST_CASE(
             owned_patch.value(), invalid_patch,
         };
         const auto mixed =
-            astraea::execution::apply_owned_module_import_batch(
+            astraea::execution::apply_live_owned_jump_slot_batch(
                 mixed_batch, memory);
         REQUIRE_FALSE(mixed.has_value());
         REQUIRE(mixed.error().code ==
+            astraea::execution::OwnedLiveJumpSlotErrorCode::batch_failure);
+        REQUIRE(mixed.error().batch_error.has_value());
+        REQUIRE(mixed.error().batch_error->code ==
             astraea::execution::OwnedModuleImportBatchErrorCode::
                 preflight_failure);
         REQUIRE(mixed.error().patch_index == 1U);
@@ -1330,10 +1389,13 @@ TEST_CASE(
             owned_patch.value(), owned_patch.value(),
         };
         const auto conflict =
-            astraea::execution::apply_owned_module_import_batch(
+            astraea::execution::apply_live_owned_jump_slot_batch(
                 overlapping, memory);
         REQUIRE_FALSE(conflict.has_value());
         REQUIRE(conflict.error().code ==
+            astraea::execution::OwnedLiveJumpSlotErrorCode::batch_failure);
+        REQUIRE(conflict.error().batch_error.has_value());
+        REQUIRE(conflict.error().batch_error->code ==
             astraea::execution::OwnedModuleImportBatchErrorCode::
                 conflicting_target);
         REQUIRE(conflict.error().applied_count == 0U);
@@ -1348,7 +1410,7 @@ TEST_CASE(
         // authorized synthetic write gate. No generic Sony HLE fallback.
         const std::array provider_batch{owned_patch.value()};
         auto applied =
-            astraea::execution::apply_owned_module_import_batch(
+            astraea::execution::apply_live_owned_jump_slot_batch(
                 provider_batch, memory);
         REQUIRE(applied.has_value());
         REQUIRE(applied->size() == 1U);
@@ -1392,6 +1454,29 @@ TEST_CASE(
             built.value(), transferred};
         REQUIRE(active.is_exact_executable_address(
             astraea::memory::GuestAddress{provider_address}));
+
+        // Explicitly release/unmap the current prepared memory owner.
+        // The data-only module graph can still report the old export,
+        // but the owned callable import gate must now refuse to patch.
+        transferred = astraea::execution::LinuxPreparedMemory{};
+        REQUIRE_FALSE(active.is_exact_executable_address(
+            astraea::memory::GuestAddress{provider_address}));
+        const auto stale = graph->resolve(
+            "client", "owned-provider",
+            exit_symbol->name.identity.value());
+        REQUIRE(stale.kind ==
+            astraea::execution::ModuleGraphResolutionKind::resolved);
+        const auto after_release =
+            astraea::execution::apply_live_owned_jump_slot_batch(
+                provider_batch, active);
+        REQUIRE_FALSE(after_release.has_value());
+        REQUIRE(after_release.error().code ==
+            astraea::execution::OwnedLiveJumpSlotErrorCode::
+                provider_not_live_executable);
+        REQUIRE(after_release.error().applied_count == 0U);
+        REQUIRE_FALSE(active.preflight_write(
+            astraea::memory::GuestAddress{fixture.got_exit},
+            8U).has_value());
     }
 }
 

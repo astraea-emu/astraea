@@ -64,4 +64,42 @@ apply_owned_module_import_batch(
     std::span<const OwnedModuleAbsolutePatch> patches,
     const GuestMemoryAccess& guest_memory);
 
+
+enum class OwnedLiveJumpSlotErrorCode {
+    too_many_patches,
+    unsupported_relocation_type,
+    invalid_patch_encoding,
+    provider_not_live_executable,
+    batch_failure,
+};
+
+struct OwnedLiveJumpSlotError {
+    OwnedLiveJumpSlotErrorCode code =
+        OwnedLiveJumpSlotErrorCode::batch_failure;
+    std::size_t patch_index = 0U;
+    std::size_t applied_count = 0U;
+    std::optional<OwnedModuleImportBatchError> batch_error;
+};
+
+using OwnedLiveJumpSlotBatchResult =
+    astraea::core::Result<
+        std::vector<OwnedModuleImportApplyResult>,
+        OwnedLiveJumpSlotError>;
+
+// Narrow opt-in integration policy for *source-owned x86-64 callable*
+// JUMP_SLOT exports. Checks each import's exact canonical address bytes,
+// relocation class and live executable backing in the prepared guest plan,
+// BEFORE delegating target preflight/conflict checks and writes to the
+// existing owned batch application. A ModuleGraph export address alone is
+// never proof that its provider remains mapped.
+//
+// This does NOT provide Sony module lifetime rules, GLOB_DAT/data-export
+// handling, concurrency-safe unloading, post-write rollback or retail entry.
+// As with apply_owned_module_import_batch, a failure after preflight can
+// still leave earlier patches applied; inspect batch_error.applied_count.
+[[nodiscard]] OwnedLiveJumpSlotBatchResult
+apply_live_owned_jump_slot_batch(
+    std::span<const OwnedModuleAbsolutePatch> patches,
+    const GuestMemoryAccess& guest_memory);
+
 }  // namespace astraea::execution
