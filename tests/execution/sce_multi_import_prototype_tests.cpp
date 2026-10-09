@@ -1371,10 +1371,13 @@ TEST_CASE(
             owned_patch.value(), invalid_patch,
         };
         const auto mixed =
-            astraea::execution::apply_owned_module_import_batch(
+            astraea::execution::apply_live_owned_jump_slot_batch(
                 mixed_batch, memory);
         REQUIRE_FALSE(mixed.has_value());
         REQUIRE(mixed.error().code ==
+            astraea::execution::OwnedLiveJumpSlotErrorCode::batch_failure);
+        REQUIRE(mixed.error().batch_error.has_value());
+        REQUIRE(mixed.error().batch_error->code ==
             astraea::execution::OwnedModuleImportBatchErrorCode::
                 preflight_failure);
         REQUIRE(mixed.error().patch_index == 1U);
@@ -1386,10 +1389,13 @@ TEST_CASE(
             owned_patch.value(), owned_patch.value(),
         };
         const auto conflict =
-            astraea::execution::apply_owned_module_import_batch(
+            astraea::execution::apply_live_owned_jump_slot_batch(
                 overlapping, memory);
         REQUIRE_FALSE(conflict.has_value());
         REQUIRE(conflict.error().code ==
+            astraea::execution::OwnedLiveJumpSlotErrorCode::batch_failure);
+        REQUIRE(conflict.error().batch_error.has_value());
+        REQUIRE(conflict.error().batch_error->code ==
             astraea::execution::OwnedModuleImportBatchErrorCode::
                 conflicting_target);
         REQUIRE(conflict.error().applied_count == 0U);
