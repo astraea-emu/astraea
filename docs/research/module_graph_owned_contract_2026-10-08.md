@@ -188,3 +188,31 @@ Independent source context: pinned BlackBear authored PRX runtime
 `docs/RUNTIME_SHIM.md`; see
 `docs/research/public_cleanroom_prx_second_corpus_2026-10-08.md`
 after the corresponding integration PR merges.
+
+## Owned R_X86_64_DTPMOD64: explicit TLS module index only
+
+The second independently built clean-room PRX has three observed
+`R_X86_64_DTPMOD64` (x86-64 relocation type 16) records. The
+[AMD64 psABI](https://www.uclibc.org/docs/psABI-x86_64.pdf) defines
+their result as the runtime-assigned dynamic thread vector index of the
+module **defining the referenced TLS symbol**, not the symbol's
+absolute address. The glibc x86-64 dynamic linker consequently uses
+the resolved module's `l_tls_modid`; its module-index assignment is
+part of runtime loader state, not relocation parsing.
+
+`build_owned_x86_64_dtpmod64_patch` is a **non-applying** encoder
+limited to independently owned ELF test modules. It requires one
+explicit nonzero, strongly typed `OwnedTlsModuleId`, a general RELA
+record of type 16, a present addend and a valid eight-byte target
+range. It emits the module ID as a little-endian 64-bit word and
+retains the raw symbol index and signed addend for diagnostics;
+it never infers a module ID, falls back to 1, resolves imported
+TLS symbols, or writes guest memory.
+
+The public PRX's three type-16 entries have **not** been applied
+or proven to bind the right runtime module. This encoder cannot be
+promoted to PS5 compatibility without an independently evidenced
+module loader, TLS module-ID allocator, defining-module resolution,
+thread-local block/DTv lifetime model and initialization ordering.
+No Sony firmware, hardware observation or commercial guest execution
+is involved.
