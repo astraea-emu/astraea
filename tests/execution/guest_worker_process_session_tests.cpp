@@ -1,6 +1,9 @@
+#include "owned_two_elf_worker_fixture.hpp"
+
 #include <astraea/execution/guest_worker_process_session.hpp>
 
 #include <chrono>
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <optional>
@@ -182,7 +185,16 @@ TEST_CASE(
     // controller does not execute native guest instructions. The worker
     // internally requires exit_code=42, the exact graph-resolved provider
     // control transfer, a single synthetic exit gate and zero HLE output.
+    auto frozen_bundle = astraea::test::make_owned_two_elf_sealed_bundle();
+    REQUIRE(frozen_bundle.has_value());
+    REQUIRE(frozen_bundle->size() > 16U);
+    const auto exactly_frozen_bytes = frozen_bundle.value();
+
     auto settings = config({"--owned-two-elf-execution"}, 15000U);
+    // The same immutable byte vector is sealed by the controller in two
+    // separately launched workers. The worker accepts only byte-exact
+    // authored ELF images, never generated run-specific replacements.
+    settings.linux_artifact_bytes = frozen_bundle.value();
     settings.resource_policy =
         astraea::execution::GuestWorkerResourcePolicy{
             .process_memory_limit_bytes = std::nullopt,
@@ -213,6 +225,19 @@ TEST_CASE(
     };
     check(first.value());
     check(second.value());
+    REQUIRE(settings.linux_artifact_bytes.has_value());
+    REQUIRE(settings.linux_artifact_bytes.value() == exactly_frozen_bytes);
+
+    // Fail closed on a mutated provider ELF. It is still transported via
+    // a sealed descriptor but cannot be executed or reported as success.
+    auto corrupted = settings;
+    REQUIRE(corrupted.linux_artifact_bytes.has_value());
+    corrupted.linux_artifact_bytes->back() ^= std::byte{0x01};
+    auto denied = astraea::execution::run_guest_worker_process_session(
+        corrupted);
+    REQUIRE_FALSE(denied.has_value());
+    REQUIRE(denied.error().code !=
+        astraea::execution::GuestWorkerProcessSessionErrorCode::timeout);
 
     // Compare normalized protocol evidence. Absolute native guest RIPs
     // are intentionally ASLR-dependent and must not be matched bytewise.
