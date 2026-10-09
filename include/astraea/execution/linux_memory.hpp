@@ -26,6 +26,17 @@ public:
         return plan_;
     }
 
+    // Identity follows the actual native mapping owner through moves;
+    // reset/replacement invalidates the old epoch even at the same VA.
+    [[nodiscard]] std::uint64_t mapping_epoch() const noexcept {
+        return mapping_epoch_;
+    }
+
+    [[nodiscard]] const std::uint64_t& mapping_epoch_ref()
+        const noexcept {
+        return mapping_epoch_;
+    }
+
     [[nodiscard]] bool empty() const noexcept {
         return mapped_regions_.empty();
     }
@@ -38,6 +49,7 @@ private:
 
     ExecutionMemoryPlan plan_{.host_page_size = 0, .regions = {}};
     std::vector<astraea::memory::GuestRange> mapped_regions_;
+    std::uint64_t mapping_epoch_ = 0U;
 };
 
 using LinuxPreparedMemoryResult =
