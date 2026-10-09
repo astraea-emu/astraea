@@ -1,6 +1,7 @@
 #include <astraea/execution/memory_plan.hpp>
 
 #include <algorithm>
+#include <atomic>
 #include <cstddef>
 #include <cstdint>
 #include <limits>
@@ -10,6 +11,29 @@
 #include <vector>
 
 namespace astraea::execution {
+
+namespace {
+std::atomic<std::uint64_t> g_next_prepared_mapping_epoch{1U};
+}
+
+// Process-local, saturating monotonic epoch allocation. Never reuse zero or
+// wrap an old epoch into a new mapping identity.
+std::uint64_t next_prepared_mapping_epoch() noexcept {
+    auto current =
+        g_next_prepared_mapping_epoch.load(std::memory_order_relaxed);
+    for (;;) {
+        if (current == 0U ||
+            current == std::numeric_limits<std::uint64_t>::max()) {
+            return 0U;
+        }
+        if (g_next_prepared_mapping_epoch.compare_exchange_weak(
+                current, current + 1U, std::memory_order_relaxed,
+                std::memory_order_relaxed)) {
+            return current;
+        }
+    }
+}
+
 namespace {
 
 using astraea::memory::GuestAddress;
