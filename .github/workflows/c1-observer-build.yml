@@ -413,6 +413,87 @@ jobs:
               raise SystemExit(f"expected 25 independently emitted import names, got {long_form_count}")
           print("PUBLIC SYMBOL ID CROSSCHECK PASS: 25 long-form SCE records match")
           print("the separately decoded module/library local IDs and names.")
+          # Demand is a STATIC reference count, not imported API execution
+          # or proof that an external Sony service is implemented.
+          expected_total = 40
+          demand_total = int(fields["public_demand_relocation_records"])
+          if demand_total != expected_total:
+              raise SystemExit("pinned public title relocation demand changed")
+          categories = (
+              "null_symbol", "local_defined",
+              "external_unclassified", "external_import",
+          )
+          demand_counts = {
+              name: int(fields[f"public_demand_{name}_relocations"])
+              for name in categories
+          }
+          if sum(demand_counts.values()) != expected_total:
+              raise SystemExit(f"unaccounted relocation demand: {demand_counts}")
+          if not 0 < demand_counts["external_import"] <= expected_total:
+              raise SystemExit("the independent title has no external import demand")
+          referenced_import_indices = set()
+          real_import_relocations = 0
+          for index in range(expected_total):
+              prefix = f"relocation[{index}]"
+              classification = fields[f"{prefix}.public_demand_class"]
+              symbol_index = int(fields[f"{prefix}.symbol_index"])
+              expected_category = {
+                  "null_symbol": "null_symbol",
+                  "local_defined": "local_defined",
+                  "external_unclassified": "external_unclassified",
+                  "public_external_import": "external_import",
+              }.get(classification)
+              if expected_category is None:
+                  raise SystemExit(f"unknown public demand class: {classification}")
+              if classification == "public_external_import":
+                  real_import_relocations += 1
+                  referenced_import_indices.add(symbol_index)
+                  symbol_prefix = f"symbol[{symbol_index}]"
+                  if fields[f"{symbol_prefix}.sce_longform"] != "1":
+                      raise SystemExit("external import missing long-form symbol")
+                  if fields[f"{symbol_prefix}.undefined"] != "1":
+                      raise SystemExit("defined symbol counted as external")
+                  for field in ("module_local_id", "library_local_id"):
+                      if (fields[f"{prefix}.public_{field}"] !=
+                              fields[f"{symbol_prefix}.public_{field}"]):
+                          raise SystemExit(f"relocation/provider mismatch: {prefix}/{field}")
+                  if (fields[f"{prefix}.public_nid_hex"] !=
+                          fields[f"{symbol_prefix}.nid_hex"]):
+                      raise SystemExit(f"relocation/NID mismatch: {prefix}")
+              else:
+                  if f"{prefix}.public_module_local_id" in fields:
+                      raise SystemExit("non-import gained a public module association")
+          if real_import_relocations != demand_counts["external_import"]:
+              raise SystemExit("individual import references disagree with census")
+          if len(referenced_import_indices) != int(
+              fields["public_demand_unique_import_symbol_indices"]
+          ):
+              raise SystemExit("unique referenced imported symbols inconsistent")
+          if not 0 < int(fields["public_demand_unique_import_identities"]) <= 25:
+              raise SystemExit("invalid count of public unique import identities")
+          count_groups = int(fields["public_demand_group_records"])
+          if not 0 < count_groups <= expected_total:
+              raise SystemExit("unbounded public demand group count")
+          group_sum = 0
+          for i in range(count_groups):
+              prefix = f"public_demand_group[{i}]"
+              mid = int(fields[f"{prefix}.module_local_id"])
+              lid = int(fields[f"{prefix}.library_local_id"])
+              typ = int(fields[f"{prefix}.relocation_type"])
+              count = int(fields[f"{prefix}.relocation_count"])
+              if not (1 <= mid <= 4 and 0 <= lid <= 3 and
+                      0 <= typ < 2**32 and 0 < count <= 40):
+                  raise SystemExit(f"invalid bounded import group: {prefix}")
+              group_sum += count
+          if group_sum != demand_counts["external_import"]:
+              raise SystemExit("import groups do not cover the reference count")
+          if (fields.get("public_demand_resolution") != "not_attempted" or
+                  fields.get("resolution") != "not_attempted"):
+              raise SystemExit("public demand misrepresented as binding success")
+          print("PUBLIC RELOCATION DEMAND PASS:", demand_counts,
+                "unique referenced external symbols:", len(referenced_import_indices),
+                "typed demand groups:", count_groups)
+
           invalid = root / "bad-public-pack-title.bin"
           invalid.write_bytes(b"not-an-elf")
           refused = subprocess.run(
