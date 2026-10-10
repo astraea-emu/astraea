@@ -582,6 +582,45 @@ TEST_CASE(
         REQUIRE(result->value().count_from_gnu_hash);
     }
 
+    SECTION("GNU hash count conflicts with explicit table extent") {
+        std::array intents{
+            file_intent(0xc000U, 3U * kSymSize, 0U, 0U),
+            file_intent(0xd000U, 36U, kHashOffset, 1U),
+        };
+        auto view = InitializedImageView::create(image, intents);
+        REQUIRE(view.has_value());
+        auto wrong_count = metadata;
+        wrong_count.entries.push_back(
+            entry(kDtSymtabsz, 2U * kSymSize, 3U));
+        const auto result =
+            astraea::loader::build_dynamic_symbol_table_descriptor(
+                wrong_count, view.value());
+        REQUIRE_FALSE(result.has_value());
+        REQUIRE(result.error().code ==
+                DynamicSymbolErrorCode::conflicting_symbol_count);
+    }
+
+    SECTION("GNU hash count conflicts with SysV hash nchain") {
+        auto extended_image = image;
+        extended_image.resize(kHashOffset + 44U, std::byte{0});
+        write_hash_header(extended_image, kHashOffset + 36U, 1U, 2U);
+        std::array intents{
+            file_intent(0xc000U, 3U * kSymSize, 0U, 0U),
+            file_intent(0xd000U, 36U, kHashOffset, 1U),
+            file_intent(0xe000U, 8U, kHashOffset + 36U, 2U),
+        };
+        auto view = InitializedImageView::create(extended_image, intents);
+        REQUIRE(view.has_value());
+        auto wrong_count = metadata;
+        wrong_count.entries.push_back(entry(kDtHash, 0xe000U, 3U));
+        const auto result =
+            astraea::loader::build_dynamic_symbol_table_descriptor(
+                wrong_count, view.value());
+        REQUIRE_FALSE(result.has_value());
+        REQUIRE(result.error().code ==
+                DynamicSymbolErrorCode::conflicting_symbol_count);
+    }
+
     SECTION("truncated symbol table refuses otherwise valid hash count") {
         std::array intents{
             file_intent(0xc000U, 2U * kSymSize, 0U, 0U),
