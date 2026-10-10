@@ -10,6 +10,12 @@ astraea_add_fuzzer(astraea_dynamic_parser_fuzz
 target_link_libraries(astraea_dynamic_parser_fuzz PRIVATE Astraea::core)
 astraea_set_project_warnings(astraea_dynamic_parser_fuzz)
 
+astraea_add_fuzzer(astraea_gnu_hash_fuzz
+    gnu_hash_fuzz.cpp
+)
+target_link_libraries(astraea_gnu_hash_fuzz PRIVATE Astraea::core)
+astraea_set_project_warnings(astraea_gnu_hash_fuzz)
+
 astraea_add_fuzzer(astraea_agc_shader_binary_fuzz
     agc_shader_binary_fuzz.cpp
 )
