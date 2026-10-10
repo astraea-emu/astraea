@@ -6,6 +6,18 @@ on:
     paths:
       - '.github/workflows/c1-observer-build.yml'
       - 'tools/reference/ps5_process_entry_observer/**'
+      - 'CMakeLists.txt'
+      - 'CMakePresets.json'
+      - 'cmake/**'
+      - 'include/astraea/loader/**'
+      - 'include/astraea/memory/**'
+      - 'include/astraea/execution/**'
+      - 'src/app/**'
+      - 'src/loader/**'
+      - 'src/memory/**'
+      - 'src/execution/**'
+      - 'tests/loader/**'
+      - 'tests/execution/**'
 
 permissions:
   contents: read
