@@ -91,7 +91,8 @@ void write_retail_closure_profile(
 }
 
 int run_retail_closure_profile(
-    std::string_view artifact_path) {
+    std::string_view artifact_path,
+    astraea::loader::ElfParseProfile profile) {
     auto artifact =
         read_artifact_file(artifact_path);
     if (!artifact.has_value()) {
@@ -106,7 +107,7 @@ int run_retail_closure_profile(
 
     auto profiled =
         astraea::execution::profile_retail_artifact(
-            std::move(artifact.value()));
+            std::move(artifact.value()), profile);
     if (!profiled.has_value()) {
         const auto& error = profiled.error();
         std::cerr
