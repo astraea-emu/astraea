@@ -1,0 +1,127 @@
+name: C1 public game-like ELF closure
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - '.github/workflows/c1-public-demo-closure.yml'
+      - 'src/app/**'
+      - 'src/loader/**'
+      - 'include/astraea/loader/**'
+      - 'src/execution/linux_retail_diagnostic.cpp'
+      - 'CMakeLists.txt'
+      - 'cmake/**'
+
+permissions:
+  contents: read
+
+jobs:
+  public-demo-closure:
+    name: Public Breakout ELF static closure
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - name: Check out Astraea
+        uses: actions/checkout@v7
+
+      - name: Install host build tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends ninja-build
+
+      - name: Build production Astraea read-only diagnostics
+        run: |
+          cmake -S . -B "$RUNNER_TEMP/astraea-public-demo-profile" -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DBUILD_TESTING=OFF \
+            -DASTRAEA_WARNINGS_AS_ERRORS=ON
+          cmake --build "$RUNNER_TEMP/astraea-public-demo-profile" \
+            --target astraea --parallel 3
+
+      - name: Fetch and verify pinned independent Breakout demo
+        env:
+          DEMO_URL: https://github.com/sharpemu/sharpemu-demo/releases/download/49e6b3b/sharpemu-demo.zip
+        run: |
+          curl --fail --location --retry 3 --silent --show-error \
+            "$DEMO_URL" --output "$RUNNER_TEMP/sharpemu-demo.zip"
+          python3 - <<'PY'
+          import hashlib
+          import os
+          from pathlib import Path
+          import struct
+          import zipfile
+
+          root = Path(os.environ["RUNNER_TEMP"])
+          archive = root / "sharpemu-demo.zip"
+          pinned_zip_sha256 = "2413f587b6f310c7b0f5ae3f76019de53d5a419141e7392b48096648eb74def4"
+          actual_sha = hashlib.sha256(archive.read_bytes()).hexdigest()
+          if actual_sha != pinned_zip_sha256:
+              raise SystemExit(f"upstream release archive drift: sha256={actual_sha}")
+          with zipfile.ZipFile(archive) as zf:
+              binaries = [name for name in zf.namelist()
+                          if name == "eboot.bin" or name.endswith("/eboot.bin")]
+              if len(binaries) != 1:
+                  raise SystemExit(f"expected one eboot.bin, found {len(binaries)}")
+              executable = zf.read(binaries[0])
+          if len(executable) < 64 or executable[:7] != b"\x7fELF\x02\x01\x01":
+              raise SystemExit("upstream game executable is not ELF64 little-endian")
+          if executable[7] != 9 or executable[8] != 2:
+              raise SystemExit("upstream game ELF OSABI unexpectedly changed")
+          elf_type, machine = struct.unpack_from("<HH", executable, 16)
+          if machine != 62 or elf_type not in (2, 3, 0xfe10, 0xfe18):
+              raise SystemExit("unexpected ELF machine or type")
+          dest = root / "sharpemu-demo-eboot.elf"
+          dest.write_bytes(executable)
+          print("PUBLIC DEMO PIN PASS")
+          print("upstream_source=sharpemu/sharpemu-demo@49e6b3b25678f14ec57a70b907ee215fddb608d8")
+          print("upstream_code_license=GPL-2.0-or-later (per source README)")
+          print("archive_sha256=" + actual_sha)
+          print("elf_sha256=" + hashlib.sha256(executable).hexdigest())
+          print(f"elf_type={elf_type} elf_size={len(executable)}")
+          print("external_assets=not_extracted")
+          print("guest_execution=not_attempted")
+          PY
+
+      - name: Record the first exact Astraea static boundary
+        run: |
+          python3 - <<'PY'
+          import os
+          from pathlib import Path
+          import subprocess
+
+          root = Path(os.environ["RUNNER_TEMP"])
+          executable = root / "astraea-public-demo-profile/astraea"
+          guest = root / "sharpemu-demo-eboot.elf"
+          if not executable.is_file() or not guest.is_file():
+              raise SystemExit("required executable missing")
+          for mode in ("profile", "dependencies", "diagnose"):
+              result = subprocess.run([str(executable), mode, str(guest)],
+                                      capture_output=True, text=True, timeout=30,
+                                      check=False)
+              if result.returncode < 0:
+                  raise SystemExit(f"{mode} terminated by signal {-result.returncode}")
+              if result.returncode > 10:
+                  raise SystemExit(f"{mode} unexpected return code {result.returncode}")
+              stdout, stderr = result.stdout, result.stderr
+              if len(stdout) > 250000 or len(stderr) > 250000:
+                  raise SystemExit(f"{mode} emitted unbounded output")
+              if result.returncode == 0 and not stdout.strip():
+                  raise SystemExit(f"{mode} returned success with no evidence")
+              if result.returncode != 0 and not stderr.strip():
+                  raise SystemExit(f"{mode} rejected without an explanation")
+              print(f"ASTRAEA_{mode.upper()}_RC={result.returncode}")
+              print(f"ASTRAEA_{mode.upper()}_STDOUT_BEGIN")
+              print(stdout[:11000].rstrip())
+              print(f"ASTRAEA_{mode.upper()}_STDOUT_END")
+              print(f"ASTRAEA_{mode.upper()}_STDERR_BEGIN")
+              print(stderr[:3000].rstrip())
+              print(f"ASTRAEA_{mode.upper()}_STDERR_END")
+              if mode == "diagnose" and result.returncode == 0:
+                  if "stage=pre_entry" not in stdout:
+                      raise SystemExit("unexpected post-entry or untyped diagnostic")
+                  if "boundary=" not in stdout:
+                      raise SystemExit("missing diagnostic boundary")
+          print("PUBLIC GAME-LIKE ELF READ-ONLY FIRST-BOUNDARY RECORD COMPLETE")
+          print("retail_first_instruction=not_attempted")
+          print("gameplay=not_claimed")
+          PY
