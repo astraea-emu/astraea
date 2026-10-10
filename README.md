@@ -76,7 +76,7 @@ merged a separately opted-in `profile --ps5-raw-elf` and
 Merged [PR #408](https://github.com/astraea-emu/astraea/pull/408)
 validates bounded GNU-hash symbol counts and a frozen external report
 of five needed libraries, 20 dynamic symbols and 20 relocations
-(1 `RELATIVE`, 19 `GLOB_DAT`). Draft [PR #409](https://github.com/astraea-emu/astraea/pull/409)
+(1 `RELATIVE`, 19 `GLOB_DAT`). Merged [PR #409](https://github.com/astraea-emu/astraea/pull/409)
 separately verifies 19/19 imported NIDs against the independent author's pinned
 source declarations. Neither finding is a successful library binding,
 PS5 runtime service, guest instruction or gameplay. Production
@@ -137,9 +137,9 @@ demonstrates actual supervised host-linked two-ELF `JUMP_SLOT` execution in a
 **generic, research-only** profile. An opt-in Linux-only, source-pinned research path now applies those eight
 real relocations and reproduces the authored PS5-format `UD2` fault in two
 sealed worker launches, with tampered-source refusal. This is **not** evidence
-of Sony startup ABI correctness or any commercial game instruction. The next integration work is to complete the pinned source-to-ELF import
-identity check, then establish one authenticated test-only external-service boundary
-under separately reviewed native-worker containment. No full Sony process-entry
+of Sony startup ABI correctness or any commercial game instruction. The next integration work is one verified test-only external-service boundary
+for that pinned ELF, only after reviewing and strengthening the native worker's
+control-flow and syscall-containment guarantees. No full Sony process-entry
 contract or retail game execution has been established.
 
 For the exact PC-first gating sequence and the deliberately delayed firmware-13.00 hardware experiment, read the [C1 execution and hardware readiness plan](docs/research/c1_pc_first_execution_hardware_readiness_2026-10-09.md).

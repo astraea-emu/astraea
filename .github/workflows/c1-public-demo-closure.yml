@@ -1,0 +1,266 @@
+name: C1 public game-like ELF closure
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - '.github/workflows/c1-public-demo-closure.yml'
+      - 'src/app/**'
+      - 'tools/reference/public_breakout_import_audit.py'
+      - 'src/loader/**'
+      - 'include/astraea/loader/**'
+      - 'src/execution/linux_retail_diagnostic.cpp'
+      - 'CMakeLists.txt'
+      - 'cmake/**'
+
+permissions:
+  contents: read
+
+jobs:
+  public-demo-closure:
+    name: Public Breakout ELF static closure
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - name: Check out Astraea
+        uses: actions/checkout@v7
+
+      - name: Install host build tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends ninja-build
+
+      - name: Build production Astraea read-only diagnostics
+        run: |
+          cmake -S . -B "$RUNNER_TEMP/astraea-public-demo-profile" -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DBUILD_TESTING=OFF \
+            -DASTRAEA_WARNINGS_AS_ERRORS=ON
+          cmake --build "$RUNNER_TEMP/astraea-public-demo-profile" \
+            --target astraea --parallel 3
+
+      - name: Fetch and verify pinned independent Breakout demo
+        env:
+          DEMO_URL: https://github.com/sharpemu/sharpemu-demo/releases/download/49e6b3b/sharpemu-demo.zip
+        run: |
+          curl --fail --location --retry 3 --silent --show-error \
+            "$DEMO_URL" --output "$RUNNER_TEMP/sharpemu-demo.zip"
+          python3 - <<'PY'
+          import hashlib
+          import os
+          from pathlib import Path
+          import struct
+          import zipfile
+
+          root = Path(os.environ["RUNNER_TEMP"])
+          archive = root / "sharpemu-demo.zip"
+          pinned_zip_sha256 = "2413f587b6f310c7b0f5ae3f76019de53d5a419141e7392b48096648eb74def4"
+          actual_sha = hashlib.sha256(archive.read_bytes()).hexdigest()
+          if actual_sha != pinned_zip_sha256:
+              raise SystemExit(f"upstream release archive drift: sha256={actual_sha}")
+          with zipfile.ZipFile(archive) as zf:
+              binaries = [name for name in zf.namelist()
+                          if name == "eboot.bin" or name.endswith("/eboot.bin")]
+              if len(binaries) != 1:
+                  raise SystemExit(f"expected one eboot.bin, found {len(binaries)}")
+              executable = zf.read(binaries[0])
+          if len(executable) < 64 or executable[:7] != b"\x7fELF\x02\x01\x01":
+              raise SystemExit("upstream game executable is not ELF64 little-endian")
+          if executable[7] != 9 or executable[8] != 2:
+              raise SystemExit("upstream game ELF OSABI unexpectedly changed")
+          elf_type, machine = struct.unpack_from("<HH", executable, 16)
+          if machine != 62 or elf_type not in (2, 3, 0xfe10, 0xfe18):
+              raise SystemExit("unexpected ELF machine or type")
+          dest = root / "sharpemu-demo-eboot.elf"
+          dest.write_bytes(executable)
+          print("PUBLIC DEMO PIN PASS")
+          print("upstream_source=sharpemu/sharpemu-demo@49e6b3b25678f14ec57a70b907ee215fddb608d8")
+          print("upstream_code_license=GPL-2.0-or-later (per source README)")
+          print("archive_sha256=" + actual_sha)
+          print("elf_sha256=" + hashlib.sha256(executable).hexdigest())
+          print(f"elf_type={elf_type} elf_size={len(executable)}")
+          print("external_assets=not_extracted")
+          print("guest_execution=not_attempted")
+          PY
+
+      - name: Record the first exact Astraea static boundary
+        run: |
+          python3 - <<'PY'
+          import os
+          from pathlib import Path
+          import re
+          import subprocess
+
+          root = Path(os.environ["RUNNER_TEMP"])
+          executable = root / "astraea-public-demo-profile/astraea"
+          guest = root / "sharpemu-demo-eboot.elf"
+          if not executable.is_file() or not guest.is_file():
+              raise SystemExit("required executable missing")
+          for mode in ("profile", "dependencies", "diagnose"):
+              result = subprocess.run([str(executable), mode, str(guest)],
+                                      capture_output=True, text=True, timeout=30,
+                                      check=False)
+              if result.returncode < 0:
+                  raise SystemExit(f"{mode} terminated by signal {-result.returncode}")
+              if result.returncode > 10:
+                  raise SystemExit(f"{mode} unexpected return code {result.returncode}")
+              stdout, stderr = result.stdout, result.stderr
+              if len(stdout) > 250000 or len(stderr) > 250000:
+                  raise SystemExit(f"{mode} emitted unbounded output")
+              if result.returncode == 0 and not stdout.strip():
+                  raise SystemExit(f"{mode} returned success with no evidence")
+              if result.returncode != 0 and not stderr.strip():
+                  raise SystemExit(f"{mode} rejected without an explanation")
+              print(f"ASTRAEA_{mode.upper()}_RC={result.returncode}")
+              print(f"ASTRAEA_{mode.upper()}_STDOUT_BEGIN")
+              print(stdout[:11000].rstrip())
+              print(f"ASTRAEA_{mode.upper()}_STDOUT_END")
+              print(f"ASTRAEA_{mode.upper()}_STDERR_BEGIN")
+              print(stderr[:3000].rstrip())
+              print(f"ASTRAEA_{mode.upper()}_STDERR_END")
+              if mode == "diagnose":
+                  if result.returncode != 0:
+                      raise SystemExit("pinned production diagnostic unexpectedly errored")
+                  fields = dict(
+                      line.split("=", 1) for line in stdout.splitlines()
+                      if "=" in line
+                  )
+                  if any(fields.get(key) != value for key, value in {
+                      "boundary": "loader_rejected",
+                      "stage": "pre_entry",
+                      "guest_rip": "0x0",
+                  }.items()):
+                      raise SystemExit(
+                          "production diagnose admission drift on pinned raw ELF"
+                      )
+          for mode in ("profile", "dependencies"):
+              result = subprocess.run(
+                  [str(executable), mode, "--ps5-raw-elf", str(guest)],
+                  capture_output=True, text=True, timeout=30, check=False)
+              if result.returncode < 0 or result.returncode > 10:
+                  raise SystemExit(f"raw {mode} unexpectedly failed: {result.returncode}")
+              if result.returncode == 0 and not result.stdout.strip():
+                  raise SystemExit(f"raw {mode} returned empty success")
+              if result.returncode != 0 and not result.stderr.strip():
+                  raise SystemExit(f"raw {mode} refused without diagnostics")
+              if mode == "profile" and "dynamic_symbol_error=4" in result.stderr:
+                  raise SystemExit(
+                      "GNU hash symbol-count evidence did not retire the exact prior blocker")
+              if result.returncode != 0:
+                  raise SystemExit(f"pinned raw {mode} now rejected: {result.stderr[:400]}")
+              if mode == "profile":
+                  report = dict(line.split("=", 1)
+                                for line in result.stdout.splitlines()
+                                if "=" in line)
+                  expected = {
+                      "program_headers": "4",
+                      "load_segments": "3",
+                      "generic_needed": "5",
+                      "dynamic_symbols": "20",
+                      "rel_relocations": "0",
+                      "rela_relocations": "20",
+                      "plt_relocations": "0",
+                      "total_relocations": "20",
+                      "tls_present": "0",
+                  }
+                  if any(report.get(key) != value for key, value in expected.items()):
+                      raise SystemExit(f"pinned raw ELF profile drift: {report}")
+              else:
+                  report = dict(line.split("=", 1)
+                                for line in result.stdout.splitlines()
+                                if "=" in line)
+                  for key, value in {
+                      "generic_needed_records": "5",
+                      "dynamic_symbol_records": "20",
+                      "relocation_records": "20",
+                      "guest_instructions": "0",
+                      "relocation_application": "not_attempted",
+                      "resolution": "not_attempted",
+                  }.items():
+                      if report.get(key) != value:
+                          raise SystemExit(f"pinned dependency drift: {key}={report.get(key)}")
+                  relocation_types = [
+                      int(value) for value in
+                      re.findall(r"^relocation\[\d+\]\.type=(\d+)$",
+                                 result.stdout, re.MULTILINE)]
+                  if sorted(relocation_types) != [6] * 19 + [8]:
+                      raise SystemExit(f"unsupported pinned relocation census: {relocation_types}")
+              print(f"ASTRAEA_RAW_{mode.upper()}_RC={result.returncode}")
+              print(f"ASTRAEA_RAW_{mode.upper()}_STDOUT_BEGIN")
+              print(result.stdout[:12000].rstrip())
+              print(f"ASTRAEA_RAW_{mode.upper()}_STDOUT_END")
+              print(f"ASTRAEA_RAW_{mode.upper()}_STDERR_BEGIN")
+              print(result.stderr[:4000].rstrip())
+              print(f"ASTRAEA_RAW_{mode.upper()}_STDERR_END")
+          print("PUBLIC GAME-LIKE ELF READ-ONLY FIRST-BOUNDARY RECORD COMPLETE")
+          print("retail_first_instruction=not_attempted")
+          print("gameplay=not_claimed")
+          PY
+
+      - name: Verify the exact author's NID-to-library import declaration against ELF
+        run: |
+          curl --fail --location --retry 3 --silent --show-error \
+            "https://raw.githubusercontent.com/sharpemu/sharpemu-demo/49e6b3b25678f14ec57a70b907ee215fddb608d8/build.py" \
+            --output "$RUNNER_TEMP/independent-breakout-build.py"
+          "$RUNNER_TEMP/astraea-public-demo-profile/astraea" \
+            dependencies --ps5-raw-elf \
+            "$RUNNER_TEMP/sharpemu-demo-eboot.elf" \
+            > "$RUNNER_TEMP/independent-breakout-manifest.txt"
+          python3 tools/reference/public_breakout_import_audit.py \
+            --author-source "$RUNNER_TEMP/independent-breakout-build.py" \
+            --manifest "$RUNNER_TEMP/independent-breakout-manifest.txt" \
+            | tee "$RUNNER_TEMP/independent-breakout-import-identity.txt"
+          grep -Fx "source_to_elf_nid_matches=19" \
+            "$RUNNER_TEMP/independent-breakout-import-identity.txt"
+          grep -Fx "sony_export_resolution=not_attempted" \
+            "$RUNNER_TEMP/independent-breakout-import-identity.txt"
+          python3 - <<'PY'
+          from pathlib import Path
+          import os
+          import re
+          import subprocess
+          import sys
+
+          root = Path(os.environ["RUNNER_TEMP"])
+          original_source = root / "independent-breakout-build.py"
+          original_manifest = root / "independent-breakout-manifest.txt"
+          tool = Path("tools/reference/public_breakout_import_audit.py")
+          manifest = original_manifest.read_text(encoding="utf-8")
+
+          # A bounded mutation corpus: every mismatch must be rejected.
+          changes = {
+              "unknown_nid": (r"(?m)^symbol\[1\]\.name_hex=[0-9a-f]*$",
+                              "symbol[1].name_hex=" + "61" * 11),
+              "wrong_library": (r"(?m)^generic_needed\[0\]\.name_hex=[0-9a-f]*$",
+                                "generic_needed[0].name_hex=" + "61" * 11),
+              "incorrect_relocation": (r"(?m)^relocation\[1\]\.type=6$",
+                                       "relocation[1].type=8"),
+              "duplicated_symbol": (r"(?m)^symbol\[1\]\.name_hex=[0-9a-f]*$",
+                                    "symbol[1].name_hex=" + "61" * 11 +
+                                    "\nsymbol[1].name_hex=" + "61" * 11),
+          }
+          for name, (pattern, replacement) in changes.items():
+              mutated, count = re.subn(pattern, replacement, manifest)
+              if count != 1:
+                  raise SystemExit(f"test fixture selection failed: {name}")
+              path = root / f"negative-breakout-{name}.txt"
+              path.write_text(mutated, encoding="utf-8")
+              run = subprocess.run(
+                  [sys.executable, str(tool), "--author-source",
+                   str(original_source), "--manifest", str(path)],
+                  capture_output=True, text=True, timeout=15, check=False)
+              if run.returncode != 2 or "AUDIT REFUSED" not in run.stderr:
+                  raise SystemExit(f"invalid import corpus accepted: {name}")
+
+          altered_source = root / "negative-breakout-source.py"
+          altered_source.write_bytes(
+              original_source.read_bytes() + b"\n# intentional source drift\n")
+          run = subprocess.run(
+              [sys.executable, str(tool), "--author-source",
+               str(altered_source), "--manifest", str(original_manifest)],
+              capture_output=True, text=True, timeout=15, check=False)
+          if run.returncode != 2 or "author_source_blob_identity_drift" not in run.stderr:
+              raise SystemExit("unverified upstream author source accepted")
+          print("BREAKOUT IMPORT NEGATIVE AUDIT PASS")
+          print("guest_execution=none")
+          PY

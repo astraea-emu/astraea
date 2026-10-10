@@ -25,7 +25,9 @@ inline constexpr std::size_t
 
 [[nodiscard]] std::optional<astraea::memory::GuestRange>
 choose_retail_analysis_stack(
-    std::span<const std::byte> artifact) noexcept;
+    std::span<const std::byte> artifact,
+    astraea::loader::ElfParseProfile profile =
+        astraea::loader::ElfParseProfile::ps5_sce) noexcept;
 
 struct RetailStaticClosureProfile {
     std::uint64_t program_header_count = 0;
@@ -99,7 +101,9 @@ using RetailStaticClosureArtifactResult =
 // returns the same data-only closure profile. No guest instruction executes.
 [[nodiscard]] RetailStaticClosureArtifactResult
 profile_retail_artifact(
-    std::vector<std::byte> artifact_bytes);
+    std::vector<std::byte> artifact_bytes,
+    astraea::loader::ElfParseProfile profile =
+        astraea::loader::ElfParseProfile::ps5_sce);
 
 // Produces a data-only structural pressure profile from an already validated
 // GuestImage. The profile is intended for comparing candidate workloads and

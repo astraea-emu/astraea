@@ -5,6 +5,7 @@
 #include <cstdint>
 #include <iostream>
 #include <string_view>
+#include <variant>
 #include <utility>
 
 #include <astraea/execution/retail_closure_profile.hpp>
@@ -91,7 +92,8 @@ void write_retail_closure_profile(
 }
 
 int run_retail_closure_profile(
-    std::string_view artifact_path) {
+    std::string_view artifact_path,
+    astraea::loader::ElfParseProfile profile) {
     auto artifact =
         read_artifact_file(artifact_path);
     if (!artifact.has_value()) {
@@ -106,7 +108,7 @@ int run_retail_closure_profile(
 
     auto profiled =
         astraea::execution::profile_retail_artifact(
-            std::move(artifact.value()));
+            std::move(artifact.value()), profile);
     if (!profiled.has_value()) {
         const auto& error = profiled.error();
         std::cerr
@@ -129,6 +131,15 @@ int run_retail_closure_profile(
                             source_program_header_index.value() +
                         1U)
                     << "\n";
+            }
+            // Expose the first bounded nested parser failure instead of
+            // losing a real corpus blocker behind guest_image_failure.
+            if (const auto* symbols =
+                    std::get_if<astraea::loader::DynamicSymbolError>(
+                        &error.guest_image_error->cause)) {
+                std::cerr << "dynamic_symbol_error="
+                          << static_cast<std::uint32_t>(symbols->code)
+                          << "\n";
             }
         } else if (error.profile_error.has_value() &&
                    error.profile_error->

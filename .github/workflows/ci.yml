@@ -118,6 +118,7 @@ jobs:
           cmake --build out/build/linux-fuzz --target
           astraea_elf64_parser_fuzz
           astraea_dynamic_parser_fuzz
+          astraea_gnu_hash_fuzz
           astraea_agc_shader_binary_fuzz
           astraea_agc_shader_container_fuzz
 
@@ -126,6 +127,9 @@ jobs:
 
       - name: PT_DYNAMIC fuzz smoke
         run: ./out/build/linux-fuzz/fuzz/astraea_dynamic_parser_fuzz -runs=1000
+
+      - name: GNU hash fuzz smoke
+        run: ./out/build/linux-fuzz/fuzz/astraea_gnu_hash_fuzz -runs=1000
 
       - name: AGC shader binary fuzz smoke
         run: ./out/build/linux-fuzz/fuzz/astraea_agc_shader_binary_fuzz -runs=1000
