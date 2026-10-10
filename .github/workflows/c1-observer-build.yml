@@ -355,6 +355,15 @@ jobs:
           print("NO ABI PROMOTION; NO GUEST EXECUTION.")
           PY
 
+      - name: Prove pinned CRT symbol survives intermediate-to-SCE conversion
+        run: |
+          python3 tools/reference/ps5_process_entry_observer/verify_public_symbol_conversion.py --self-test
+          python3 tools/reference/ps5_process_entry_observer/verify_public_symbol_conversion.py \
+            --intermediate "$RUNNER_TEMP/ps5-native-app-boilerplate/build/llvm-pie.elf" \
+            --manifest "$RUNNER_TEMP/public-title-dependencies.txt" \
+            --symbol _init_env --expected-symbols 26 --expected-relocations 40
+          echo "PUBLIC CONVERTER SYMBOL CORRELATION ONLY; PROVIDER UNVERIFIED, NO GUEST ENTRY."
+
       - name: Verify opt-in public SCE packed identity profile on pinned title
         run: |
           python3 - <<'PY'
