@@ -33,6 +33,7 @@
 #if defined(__linux__) && defined(__x86_64__)
 #include <sys/mman.h>
 #include <unistd.h>
+#include "owned_two_elf_compiled_code.hpp"
 #endif
 
 namespace astraea::test {
@@ -164,23 +165,19 @@ make_owned_binary_pair(std::uint64_t code, std::uint64_t page) {
     detail::write_phdr(
         client_bytes, 176U, 6U, 2U * page + 0x400U,
         data + 0x400U, 9U * 16U, 8U, 2U);
-    std::size_t c = static_cast<std::size_t>(page);
-    client_bytes[c++] = std::byte{0x48};
-    client_bytes[c++] = std::byte{0xbf};
-    detail::write_le<std::uint64_t>(client_bytes, c, 42U);
-    c += 8U;
-    client_bytes[c++] = std::byte{0xff};
-    client_bytes[c++] = std::byte{0x15};
+    // The assembler-produced entry is copied from a build-time checked ELF
+    // object. Only its owned GOT displacement varies with guest placement.
+    std::copy(kCompiledOwnedClient.begin(), kCompiledOwnedClient.end(),
+        std::span<std::byte>{client_bytes}.subspan(
+            static_cast<std::size_t>(page), kCompiledOwnedClient.size()).begin());
     const auto next_rip = code + 16U;
     if (got < next_rip ||
         got - next_rip > static_cast<std::uint64_t>(
             std::numeric_limits<std::int32_t>::max()))
         return std::nullopt;
     detail::write_le<std::uint32_t>(
-        client_bytes, c, static_cast<std::uint32_t>(got - next_rip));
-    c += 4U;
-    client_bytes[c++] = std::byte{0x0f};
-    client_bytes[c] = std::byte{0x0b};
+        client_bytes, static_cast<std::size_t>(page) + 12U,
+        static_cast<std::uint32_t>(got - next_rip));
 
     constexpr char kImport[] = "ABCDEFGHIJK#owned-lib#owned-provider";
     const auto strings = static_cast<std::size_t>(2U * page + 0x100U);
@@ -215,13 +212,10 @@ make_owned_binary_pair(std::uint64_t code, std::uint64_t page) {
         provider_bytes, 64U, 5U, page,
         provider_address, page, page);
     const auto p = static_cast<std::size_t>(page);
-    provider_bytes[p] = std::byte{0x48};
-    provider_bytes[p + 1U] = std::byte{0xb8};
-    detail::write_le<std::uint64_t>(
-        provider_bytes, p + 2U, gate);
-    provider_bytes[p + 10U] = std::byte{0xff};
-    provider_bytes[p + 11U] = std::byte{0xe0};
-
+    std::copy(kCompiledOwnedProvider.begin(), kCompiledOwnedProvider.end(),
+        std::span<std::byte>{provider_bytes}.subspan(
+            p, kCompiledOwnedProvider.size()).begin());
+    detail::write_le<std::uint64_t>(provider_bytes, p + 2U, gate);
 
     return OwnedBinaryPair{
         .client = std::move(client_bytes),
