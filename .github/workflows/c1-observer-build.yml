@@ -792,6 +792,17 @@ jobs:
                       "sce_import_library_records"):
               if deps.get(key) != "0":
                   raise SystemExit(f"minimal title depends on unexpected runtime service: {key}={deps.get(key)}")
+          # All eight relocations are source-converter-owned RELATIVE
+          # process-parameter pointers, not unresolved external services.
+          relocation_count = int(deps["relocation_records"])
+          if relocation_count != 8:
+              raise SystemExit(f"minimal source relocation count drifted: {relocation_count}")
+          for index in range(relocation_count):
+              row = f"relocation[{index}]"
+              if (deps.get(row + ".type") != "8" or
+                  deps.get(row + ".symbol_index") != "0" or
+                  deps.get(row + ".has_addend") != "1"):
+                  raise SystemExit(f"unexpected minimal relative relocation: {row}")
           count = int(deps["dynamic_symbol_records"])
           if count > 8:
               raise SystemExit("minimal entry unexpectedly expanded its dynamic ABI")
@@ -799,9 +810,7 @@ jobs:
               if deps.get(f"symbol[{i}].undefined") == "1" and deps.get(
                       f"symbol[{i}].name_hex", ""):
                   raise SystemExit("minimal entry contains an undefined named import")
-          if stop.get("stage") != "pre_entry" or stop.get("boundary") not in (
-                  "unsupported_relocations", "unsupported_tls",
-                  "unsupported_initial_process_abi"):
+          if stop.get("stage") != "pre_entry" or stop.get("boundary") != "unsupported_relocations":
               raise SystemExit(f"unexpected minimal entry boundary: {stop}")
           if deps.get("resolution") != "not_attempted" or deps.get(
                   "guest_instructions") != "0":
