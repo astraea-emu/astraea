@@ -1,126 +1,16 @@
 # Development on macOS
 
-## Purpose
+macOS is supported for portable Astraea development. Apple Silicon is not a native x86-64 guest-execution host; the Linux x86-64 supervised diagnostic and the Windows x86-64 owned-execution tests are verified on their respective hosts.
 
-macOS is the primary control/development workstation for Astraea. The repository must remain pleasant to build and test on a Mac without pretending that an ARM64 Mac is an x86-64 PS5 execution host.
+## Prerequisites
 
-## 1. Required baseline
+- macOS with Xcode Command Line Tools (`xcode-select -p`);
+- Git, CMake 3.25 or later, Ninja and Python 3;
+- a C++23-capable compiler (Apple Clang is the default local choice).
 
-Use the current supported macOS and Xcode Command Line Tools.
+The bootstrap script checks these tools and reports the detected architecture. It does not install packages or request administrator privileges.
 
-Initial local tools will be standardized around:
-
-- Git
-- CMake
-- Ninja
-- Apple Clang for the default local build
-- Python 3 for project tooling
-- ccache where useful
-- GitHub CLI only when a local workflow needs it
-- current ChatGPT desktop/Codex tooling if used for implementation
-
-The bootstrap script verifies the documented project prerequisites rather than relying on undocumented machine state.
-
-## 2. Architecture detection
-
-Every setup/build script must detect:
-
-```sh
-uname -s
-uname -m
-```
-
-Expected Mac architectures:
-- `arm64` — Apple Silicon
-- `x86_64` — Intel Mac
-
-Architecture-sensitive code must be gated explicitly in CMake. Never silently treat ARM64 as native-x86 execution capable.
-
-## 3. Local build roles
-
-### Always supported locally
-- documentation
-- loader/parser development
-- serialization
-- trace/diff tooling
-- HLE contracts and platform-neutral implementations
-- fuzz corpus work
-- unit tests that do not execute guest x86-64 directly
-- shader decoder/IR logic
-- static analysis where available
-
-### x86-64-only initially
-- native guest entry/exit
-- direct native guest execution
-- architecture-specific fault/trap handling
-- x86-64 ABI transition tests
-
-On Apple Silicon these tests are built/validated in x86-64 CI or run on dedicated x86-64 hardware.
-
-## 4. Rosetta policy
-
-Rosetta may be useful for developer tools, but Astraea must not depend on Rosetta as the architectural solution for arbitrary PS5 guest execution.
-
-Any Rosetta experiment must be isolated behind an experimental flag and cannot become a correctness dependency without an ADR and repeatable tests.
-
-## 5. Graphics on macOS
-
-macOS has no native Vulkan implementation. Development may use Vulkan-on-Metal through MoltenVK for portability and UI/backend smoke testing.
-
-Policy:
-- Vulkan-facing abstractions must compile on macOS.
-- MoltenVK results are useful for portability testing.
-- Vulkan semantic/conformance conclusions are validated on native Vulkan hosts.
-- GPU command/shader correctness is tested independently of host presentation wherever possible.
-
-## 6. CI matrix
-
-Initial required matrix:
-
-- Ubuntu x86-64 — primary portable/core + future native execution
-- Windows x86-64 — primary portable/core + future native execution
-- macOS ARM64 — developer portability
-- optional macOS Intel — periodic compatibility if CI cost is justified
-
-Later:
-- Linux ARM64 — portability pressure-test
-- dedicated native-GPU runner — graphics validation
-- sanitizer/fuzzer-specialized Linux jobs
-
-## 7. Local directory convention
-
-Recommended clone location:
-
-```
-~/Projects/astraea
-```
-
-Do not store:
-- firmware dumps
-- keys
-- retail game assets
-- proprietary SDK material
-
-inside the repository.
-
-If private local research artifacts are ever needed, they must live outside the Git tree under an explicitly ignored local path with provenance documented separately.
-
-## 8. IDE/editor
-
-No IDE is required by the project.
-
-Supported workflow should work from:
-- VS Code
-- CLion
-- Xcode as an editor
-- terminal
-- Codex/ChatGPT desktop tooling
-
-Repository behavior must be driven by CMake/CTest/scripts, not IDE-specific project files.
-
-## 9. Reproducible build interface
-
-The target developer experience is:
+## Build and test
 
 ```sh
 git clone https://github.com/astraea-emu/astraea.git
@@ -131,13 +21,29 @@ cmake --build --preset macos-dev
 ctest --preset macos-dev
 ```
 
-The bootstrap script is tracked at `scripts/bootstrap-macos.sh`; changes to the documented developer workflow should keep it in sync.
+Build outputs live under `out/build/`. Native Linux guest execution, seccomp and platform-specific fault tests cannot be reproduced by running the ARM64 macOS preset; consult the CI results for those tests.
 
-## 10. Security
+## Architecture and graphics
 
-Treat downloaded fixtures, binaries, traces, and shader data as untrusted.
+- Detect host architecture using `uname -s` and `uname -m`. Keep x86-64 guest code behind explicit build/runtime guards.
+- The loader, metadata analyzers, traces, shader IR and many parser/graphics tests can be developed on Apple Silicon.
+- MoltenVK can help with Vulkan portability experiments, but native-Vulkan Linux tests are the authoritative CI proof for the bounded Vulkan execution path. MoltenVK success alone is not GPU semantic conformance evidence.
+- Rosetta may be used for tools and isolated research. It is not Astraea's supported route for arbitrary PS5 guest execution.
 
-- parser inputs are bounds-checked
-- risky parsers get fuzz targets
-- no setup script requests broad system permissions without a documented reason
-- self-hosted runners are not exposed to untrusted external PR code
+## Current CI gates
+
+Every pull request runs the standard CI jobs:
+
+- Linux x64 build, CTest and required software-Vulkan probes;
+- Windows x64 build and CTest;
+- macOS ARM64 build and CTest;
+- Linux AddressSanitizer/UndefinedBehaviorSanitizer;
+- Linux Clang parser fuzz smoke.
+
+Changes affecting the pinned external PS5-format title and observer also run the separate `C1 pinned observer build proof` workflow. Neither workflow executes on a physical PS5. See `README.md` and `docs/STATUS.md` for the current compatibility boundary.
+
+## Local files and security
+
+An editor or IDE is optional; the authoritative build and test interfaces are CMake and CTest. VS Code, CLion and terminal workflows must not need separate project-specific settings.
+
+Keep firmware, keys, copyrighted game assets, proprietary SDK material and private research captures **outside the Git tree**. Local inputs are untrusted: use bounded tools, preserve provenance and do not run arbitrary downloaded guest code outside the documented supervisor. The project does not require a particular AI coding assistant or editor.
