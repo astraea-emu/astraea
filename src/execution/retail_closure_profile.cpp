@@ -133,11 +133,11 @@ choose_retail_analysis_stack(
 RetailStaticClosureArtifactResult
 profile_retail_artifact(
     std::vector<std::byte> artifact_bytes,
-    astraea::loader::ElfParseProfile profile) {
+    astraea::loader::ElfParseProfile parse_profile) {
     try {
         const auto stack =
             choose_retail_analysis_stack(
-                artifact_bytes, profile);
+                artifact_bytes, parse_profile);
         if (!stack.has_value()) {
             return RetailStaticClosureArtifactResult::failure(
                 RetailStaticClosureArtifactError{
@@ -163,7 +163,7 @@ profile_retail_artifact(
                             .environment = {},
                             .auxiliary_vector = {},
                         },
-                    .elf_profile = profile,
+                    .elf_profile = parse_profile,
                 });
 
         if (!image.has_value()) {
