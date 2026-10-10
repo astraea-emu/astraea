@@ -493,7 +493,8 @@ constexpr std::uint64_t kMaxDependencyNameBytes = 256U;
 
 int run_retail_dependency_manifest(
     std::string_view artifact_path,
-    bool public_sce_pack_v1) {
+    bool public_sce_pack_v1,
+    astraea::loader::ElfParseProfile profile) {
     auto artifact = read_artifact_file(artifact_path);
     if (!artifact.has_value()) {
         std::cerr << "Astraea dependency manifest v0\n"
@@ -505,7 +506,7 @@ int run_retail_dependency_manifest(
 
     try {
         const auto stack = astraea::execution::choose_retail_analysis_stack(
-            artifact.value());
+            artifact.value(), profile);
         if (!stack.has_value()) {
             throw std::runtime_error("planning_stack_unavailable");
         }
@@ -518,8 +519,7 @@ int run_retail_dependency_manifest(
                     .environment = {},
                     .auxiliary_vector = {},
                 },
-                .elf_profile =
-                    astraea::loader::ElfParseProfile::ps5_sce,
+                .elf_profile = profile,
             });
         if (!image.has_value()) {
             throw std::runtime_error("guest_image_failure");
