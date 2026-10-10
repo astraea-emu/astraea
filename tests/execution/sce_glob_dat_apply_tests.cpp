@@ -1033,3 +1033,133 @@ TEST_CASE(
 }
 
 #endif
+
+
+TEST_CASE(
+    "owned RELATIVE batch is bounded and empty input is a no-op",
+    "[execution][c1][owned-relative][batch]") {
+    auto image = make_empty_image();
+    astraea::execution::LinuxPreparedMemory prepared;
+    GuestMemoryAccess memory{image, prepared};
+    const std::span<const astraea::execution::OwnedRelativePatch> empty{};
+    const auto valid =
+        astraea::execution::apply_owned_relative_batch(empty, memory);
+    REQUIRE(valid.has_value());
+    REQUIRE(valid->empty());
+
+    const std::vector<astraea::execution::OwnedRelativePatch> oversized(
+        4097U, make_owned_relative_patch(0x4000U));
+    const auto refused =
+        astraea::execution::apply_owned_relative_batch(oversized, memory);
+    REQUIRE_FALSE(refused.has_value());
+    REQUIRE(refused.error().code ==
+        astraea::execution::OwnedRelativeBatchErrorCode::too_many_patches);
+    REQUIRE(refused.error().applied_count == 0U);
+}
+
+#if defined(__linux__) && defined(__x86_64__) && defined(MAP_FIXED_NOREPLACE)
+
+TEST_CASE(
+    "eight owned RELATIVE records patch prepared native memory with readback",
+    "[execution][c1][owned-relative][batch][linux]") {
+    constexpr auto read = static_cast<std::uint8_t>(GuestPermission::read);
+    constexpr auto write = static_cast<std::uint8_t>(GuestPermission::write);
+    auto layout = make_layout(permissions(read | write), 64U);
+    auto prepared =
+        astraea::execution::prepare_linux_guest_memory(layout.image);
+    REQUIRE(prepared.has_value());
+    GuestMemoryAccess memory{layout.image, prepared.value()};
+    std::vector<astraea::execution::OwnedRelativePatch> patches;
+    patches.reserve(8U);
+    for (std::size_t i = 0U; i < 8U; ++i)
+        patches.push_back(make_owned_relative_patch(
+            layout.data_base + 8U * i));
+
+    const auto result =
+        astraea::execution::apply_owned_relative_batch(patches, memory);
+    REQUIRE(result.has_value());
+    REQUIRE(result->size() == 8U);
+    std::array<std::byte, 64U> observed{};
+    REQUIRE(memory.read(GuestAddress{layout.data_base}, observed).has_value());
+    for (std::size_t i = 0U; i < 8U; ++i) {
+        REQUIRE((*result)[i].target == patches[i].target);
+        REQUIRE((*result)[i].relocated_value ==
+            GuestAddress{0x1345U});
+        for (std::size_t j = 0U; j < 8U; ++j)
+            REQUIRE(observed[i * 8U + j] == patches[i].bytes[j]);
+    }
+}
+
+TEST_CASE(
+    "owned RELATIVE batch preflight rejects overlap without partial writes",
+    "[execution][c1][owned-relative][batch][linux]") {
+    constexpr auto read = static_cast<std::uint8_t>(GuestPermission::read);
+    constexpr auto write = static_cast<std::uint8_t>(GuestPermission::write);
+    auto layout = make_layout(permissions(read | write), 16U);
+    auto prepared =
+        astraea::execution::prepare_linux_guest_memory(layout.image);
+    REQUIRE(prepared.has_value());
+    GuestMemoryAccess memory{layout.image, prepared.value()};
+    const std::array patches{
+        make_owned_relative_patch(layout.data_base),
+        make_owned_relative_patch(layout.data_base + 4U),
+    };
+    std::array<std::byte, 16U> before{};
+    REQUIRE(memory.read(GuestAddress{layout.data_base}, before).has_value());
+    const auto result =
+        astraea::execution::apply_owned_relative_batch(patches, memory);
+    REQUIRE_FALSE(result.has_value());
+    REQUIRE(result.error().code ==
+        astraea::execution::OwnedRelativeBatchErrorCode::conflicting_target);
+    REQUIRE(result.error().applied_count == 0U);
+    REQUIRE(result.error().conflicting_patch_index.has_value());
+    std::array<std::byte, 16U> after{};
+    REQUIRE(memory.read(GuestAddress{layout.data_base}, after).has_value());
+    REQUIRE(after == before);
+}
+
+TEST_CASE(
+    "owned RELATIVE batch rejects invalid late target and encoding before writes",
+    "[execution][c1][owned-relative][batch][linux]") {
+    constexpr auto read = static_cast<std::uint8_t>(GuestPermission::read);
+    constexpr auto write = static_cast<std::uint8_t>(GuestPermission::write);
+    auto layout = make_layout(permissions(read | write), 16U);
+    auto prepared =
+        astraea::execution::prepare_linux_guest_memory(layout.image);
+    REQUIRE(prepared.has_value());
+    GuestMemoryAccess memory{layout.image, prepared.value()};
+    std::array<std::byte, 16U> before{};
+    REQUIRE(memory.read(GuestAddress{layout.data_base}, before).has_value());
+
+    std::array patches{
+        make_owned_relative_patch(layout.data_base),
+        make_owned_relative_patch(layout.unmapped_base),
+    };
+    const auto unmapped =
+        astraea::execution::apply_owned_relative_batch(patches, memory);
+    REQUIRE_FALSE(unmapped.has_value());
+    REQUIRE(unmapped.error().code ==
+        astraea::execution::OwnedRelativeBatchErrorCode::preflight_failure);
+    REQUIRE(unmapped.error().patch_index == 1U);
+    REQUIRE(unmapped.error().applied_count == 0U);
+    REQUIRE(unmapped.error().memory_error.has_value());
+    REQUIRE(unmapped.error().memory_error->code ==
+        GuestMemoryErrorCode::guest_memory_unmapped);
+
+    patches[1] = make_owned_relative_patch(layout.data_base + 8U);
+    patches[1].bytes[0] ^= std::byte{1U};
+    const auto forged =
+        astraea::execution::apply_owned_relative_batch(patches, memory);
+    REQUIRE_FALSE(forged.has_value());
+    REQUIRE(forged.error().code ==
+        astraea::execution::OwnedRelativeBatchErrorCode::
+            invalid_patch_encoding);
+    REQUIRE(forged.error().patch_index == 1U);
+    REQUIRE(forged.error().applied_count == 0U);
+
+    std::array<std::byte, 16U> after{};
+    REQUIRE(memory.read(GuestAddress{layout.data_base}, after).has_value());
+    REQUIRE(after == before);
+}
+
+#endif
