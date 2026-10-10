@@ -10,6 +10,7 @@ project(
 option(ASTRAEA_WARNINGS_AS_ERRORS "Treat Astraea compiler warnings as errors" OFF)
 option(ASTRAEA_ENABLE_SANITIZERS "Enable AddressSanitizer and UndefinedBehaviorSanitizer" OFF)
 option(ASTRAEA_BUILD_FUZZERS "Build libFuzzer targets when supported" OFF)
+option(ASTRAEA_BUILD_C1_RESEARCH "Build opt-in pinned source-owned C1 execution proof" OFF)
 
 include(CTest)
 include(FetchContent)
@@ -229,6 +230,22 @@ add_executable(astraea
 target_link_libraries(astraea PRIVATE Astraea::core)
 astraea_set_project_warnings(astraea)
 astraea_enable_sanitizers(astraea)
+
+if(ASTRAEA_BUILD_C1_RESEARCH)
+    if(NOT CMAKE_SYSTEM_NAME STREQUAL "Linux" OR
+       NOT CMAKE_SYSTEM_PROCESSOR MATCHES "^(x86_64|AMD64)$")
+        message(FATAL_ERROR "C1 research-only native entry requires Linux x86-64")
+    endif()
+    add_executable(astraea_c1_owned_entry_research
+        tests/execution/ps5_format_owned_entry_research.cpp
+    )
+    target_link_libraries(astraea_c1_owned_entry_research PRIVATE Astraea::core)
+    target_include_directories(astraea_c1_owned_entry_research PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/tests/execution"
+    )
+    astraea_set_project_warnings(astraea_c1_owned_entry_research)
+    astraea_enable_sanitizers(astraea_c1_owned_entry_research)
+endif()
 
 astraea_verify_explicit_cpp_sources(
     ROOT src
