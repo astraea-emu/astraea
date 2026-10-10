@@ -1,6 +1,7 @@
 #include <astraea/execution/linux_execution.hpp>
 
 #include <array>
+#include <cerrno>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
@@ -14,6 +15,7 @@
 
 #if defined(__linux__) && defined(__x86_64__)
 #include <linux/audit.h>
+#include <fcntl.h>
 #include <sys/mman.h>
 #include <sys/syscall.h>
 #include <unistd.h>
@@ -43,6 +45,61 @@ using astraea::memory::GuestSize;
 using astraea::memory::MappingBacking;
 using astraea::memory::MappingBackingKind;
 using astraea::memory::MappingIntent;
+
+// Exactly one harmless host-side filesystem probe. Invoking this address
+// from guest-owned code demonstrates that the original IP-range filter did
+// not mediate syscalls executed in host code. The added per-syscall denial
+// must refuse it without opening /dev/null or creating an external effect.
+[[gnu::noinline]] std::int64_t outside_guest_ip_openat_probe() noexcept {
+    errno = 0;
+    const long fd = ::syscall(
+        SYS_openat, AT_FDCWD, "/dev/null", O_RDONLY | O_CLOEXEC, 0);
+    if (fd >= 0) {
+        static_cast<void>(::close(static_cast<int>(fd)));
+        return 0;
+    }
+    return -static_cast<std::int64_t>(errno);
+}
+
+// The same harmless path with the x32 syscall tag. This must return EPERM
+// from seccomp, even when the host kernel has no x32 support.
+[[gnu::noinline]] std::int64_t outside_guest_ip_x32_probe() noexcept {
+    constexpr long kX32SyscallBit = 0x40000000L;
+    errno = 0;
+    const long fd = ::syscall(
+        SYS_openat | kX32SyscallBit, AT_FDCWD,
+        "/dev/null", O_RDONLY | O_CLOEXEC, 0);
+    if (fd >= 0) {
+        static_cast<void>(::close(static_cast<int>(fd)));
+        return 0;
+    }
+    return -static_cast<std::int64_t>(errno);
+}
+
+// Linux kernels before 5.4 could route native syscall numbers 512..547
+// through the x32 table. A reserved number must be denied by this filter,
+// not merely return ENOSYS on a current host kernel.
+[[gnu::noinline]] std::int64_t outside_guest_ip_legacy_x32_probe() noexcept {
+    constexpr long kLegacyX32Alias = 521L;
+    errno = 0;
+    const long result = ::syscall(kLegacyX32Alias);
+    if (result >= 0) {
+        return 0;
+    }
+    return -static_cast<std::int64_t>(errno);
+}
+
+// The 32-bit syscall entry shares the CPU with native x86-64. It must not
+// become a host-side escape, though in-range guest INT 0x80 remains trapped.
+[[gnu::noinline]] std::int64_t outside_guest_ip_int80_probe() noexcept {
+    std::uint64_t result = 0;
+    constexpr std::uint64_t kI386Getpid = 20U;
+    asm volatile("int $0x80"
+                 : "=a"(result)
+                 : "a"(kI386Getpid)
+                 : "memory", "cc");
+    return static_cast<std::int32_t>(result);
+}
 
 GuestRange range(std::uint64_t base, std::uint64_t size) {
     auto result =
@@ -320,6 +377,84 @@ TEST_CASE(
 }
 
 #if defined(__linux__) && defined(__x86_64__) && defined(MAP_FIXED_NOREPLACE)
+
+TEST_CASE(
+    "Linux refuses selected host and alternate ABI syscalls after guest-IP escape",
+    "[execution][linux-transition][c1][seccomp][host-ip][security]") {
+    const auto prove_refusal =
+        [](std::uint64_t host_function_address) {
+            const auto page = page_size();
+            const auto base =
+                find_free_block(static_cast<std::size_t>(page * 3U));
+            const auto stack_base = base + page;
+
+            // Source-owned guest makes one controlled call outside the
+            // guest mapping, then returns to a deterministic UD2. This is
+            // a bounded regression, NOT untrusted-binary containment.
+            std::vector<std::byte> code{
+                std::byte{0x48}, std::byte{0x83},
+                std::byte{0xec}, std::byte{0x08},
+            };
+            append_mov_imm64(code, 0U, host_function_address);
+            code.push_back(std::byte{0xff});
+            code.push_back(std::byte{0xd0});
+            code.push_back(std::byte{0x48});
+            code.push_back(std::byte{0x83});
+            code.push_back(std::byte{0xc4});
+            code.push_back(std::byte{0x08});
+            const auto fault_offset = code.size();
+            code.push_back(std::byte{0x0f});
+            code.push_back(std::byte{0x0b});
+
+            auto image =
+                make_guest_image(base, stack_base, page, std::move(code));
+            auto prepared =
+                astraea::execution::prepare_linux_guest_memory(image);
+            REQUIRE(prepared.has_value());
+
+            const auto result =
+                astraea::execution::
+                    enter_linux_guest_with_seccomp_syscall_trap(
+                        image, prepared.value(),
+                        astraea::execution::
+                            make_synthetic_initial_context(image));
+            REQUIRE(result.has_value());
+            const auto* stopped =
+                std::get_if<astraea::execution::ExecutionStop>(
+                    &result.value());
+            REQUIRE(stopped != nullptr);
+            REQUIRE(stopped->reason == ExecutionStopReason::guest_fault);
+            REQUIRE(stopped->has_fault);
+            REQUIRE(stopped->fault.kind ==
+                    GuestFaultKind::illegal_instruction);
+            REQUIRE(stopped->context.rip ==
+                    base + static_cast<std::uint64_t>(fault_offset));
+            REQUIRE(stopped->context.rax ==
+                    static_cast<std::uint64_t>(
+                        -static_cast<std::int64_t>(EPERM)));
+        };
+
+    SECTION("native host openat") {
+        prove_refusal(static_cast<std::uint64_t>(
+            reinterpret_cast<std::uintptr_t>(
+                &outside_guest_ip_openat_probe)));
+    }
+    SECTION("x32 tagged host openat") {
+        prove_refusal(static_cast<std::uint64_t>(
+            reinterpret_cast<std::uintptr_t>(
+                &outside_guest_ip_x32_probe)));
+    }
+    SECTION("reserved legacy x32 syscall alias") {
+        prove_refusal(static_cast<std::uint64_t>(
+            reinterpret_cast<std::uintptr_t>(
+                &outside_guest_ip_legacy_x32_probe)));
+    }
+    SECTION("i386 legacy int80 host getpid") {
+        prove_refusal(static_cast<std::uint64_t>(
+            reinterpret_cast<std::uintptr_t>(
+                &outside_guest_ip_int80_probe)));
+    }
+}
 
 TEST_CASE(
     "Linux seccomp guest syscall interception availability matches native host",
