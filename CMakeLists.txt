@@ -237,7 +237,7 @@ if(ASTRAEA_BUILD_C1_RESEARCH)
         message(FATAL_ERROR "C1 research-only native entry requires Linux x86-64")
     endif()
     add_executable(astraea_c1_owned_entry_research
-        tests/execution/ps5_format_owned_entry_research.cpp
+        tools/reference/ps5_process_entry_observer/owned_ps5_format_entry_research.cpp
     )
     target_link_libraries(astraea_c1_owned_entry_research PRIVATE Astraea::core)
     target_include_directories(astraea_c1_owned_entry_research PRIVATE
