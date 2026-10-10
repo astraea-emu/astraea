@@ -25,6 +25,7 @@ Sony Interactive Entertainment.
 | Graphics V0-V3 | **Complete for bounded owned workloads** — AGC/RDNA2 input through typed guest GPU state to deterministic Vulkan execution/readback |
 | Retail C0 | **Complete on Linux x86-64** — supervised sealed-artifact diagnostic with typed first-boundary reporting |
 | Retail C1 | **Active, commercial entry blocked** — supervised generic two-ELF `JUMP_SLOT` execution and an exact source-built PS5-format `UD2` first-instruction fault after eight checked `RELATIVE` relocations; synthetic entry only |
+| Public homebrew static closure | **Read-only only** — opted-in PS5-marked raw ET_DYN analysis merged in #406; GNU-hash counting and independently pinned Breakout 5-library/20-relocation inventory are under validation in #408 |
 | Verification S0 | **Established** — multi-platform CI, ASan/UBSan, fuzz smoke, traces, probes, typed unsupported behavior, ADR/provenance discipline |
 | Commercial game boot/playability | **Not claimed** |
 
@@ -62,6 +63,22 @@ records). These are intentional **production** pre-entry boundaries. An
 minimal image, applies all eight relocations and twice reaches its authored
 `UD2` fault under a synthetic entry profile ([PR #403](https://github.com/astraea-emu/astraea/pull/403)).
 That does not admit any commercial PS5 title.
+
+### Independent game-like corpus
+
+[PR #404](https://github.com/astraea-emu/astraea/pull/404) added a
+hash-pinned, independently authored PS5-marked Breakout ELF as a **read-only**
+CI compatibility oracle. Its original production `diagnose` result is
+`loader_rejected` before entry. [PR #406](https://github.com/astraea-emu/astraea/pull/406)
+merged a separately opted-in `profile --ps5-raw-elf` and
+`dependencies --ps5-raw-elf` structural parser without admitting execution.
+
+A separate, currently unmerged [PR #408](https://github.com/astraea-emu/astraea/pull/408)
+is validating bounded GNU-hash symbol counts and a frozen external report
+of five needed libraries, 20 dynamic symbols and 20 relocations
+(1 `RELATIVE`, 19 `GLOB_DAT`). Those are **not** successful library bindings,
+PS5 runtime services, guest instructions or gameplay. Production
+`diagnose` remains deliberately strict. See [current status](docs/STATUS.md).
 
 ### Graphics
 
@@ -118,9 +135,10 @@ demonstrates actual supervised host-linked two-ELF `JUMP_SLOT` execution in a
 **generic, research-only** profile. An opt-in Linux-only, source-pinned research path now applies those eight
 real relocations and reproduces the authored PS5-format `UD2` fault in two
 sealed worker launches, with tampered-source refusal. This is **not** evidence
-of Sony startup ABI correctness or any commercial game instruction. The next
-useful integration work is a lawful game-like application dependency profile
-and its first measured real runtime blocker.
+of Sony startup ABI correctness or any commercial game instruction. The next integration work is to finalize the pinned game-like dependency
+inventory, then establish one authenticated test-only external-service boundary
+under separately reviewed native-worker containment. No full Sony process-entry
+contract or retail game execution has been established.
 
 For the exact PC-first gating sequence and the deliberately delayed firmware-13.00 hardware experiment, read the [C1 execution and hardware readiness plan](docs/research/c1_pc_first_execution_hardware_readiness_2026-10-09.md).
 
