@@ -21,6 +21,10 @@ MAX_SOURCE_BYTES = 128 * 1024
 MAIN_SEED = "0xdecafbad"
 ALTERNATE_SEED = "0x12345"
 PIXEL_COUNT = 480 * 270
+# First measured Linux Ubuntu 24.04 GCC 13.3 source-only result,
+# CI 38095224065. This is a frozen CPU reference, not PS5 truth.
+PINNED_MAIN_FINGERPRINT = "11521d6d6940fe57"
+PINNED_ALTERNATE_FINGERPRINT = "8ed0d34c72e028e9"
 
 
 class OracleRefusal(ValueError):
@@ -103,6 +107,10 @@ def main() -> int:
                 raise OracleRefusal("same_binary_repeat_diverged")
             if first[1] == alternate[1]:
                 raise OracleRefusal("different_seeds_produced_identical_canvas")
+            if first[1] != PINNED_MAIN_FINGERPRINT:
+                raise OracleRefusal("pinned_primary_canvas_regression")
+            if alternate[1] != PINNED_ALTERNATE_FINGERPRINT:
+                raise OracleRefusal("pinned_alternate_canvas_regression")
         print("BREAKOUT CPU CANVAS REFERENCE PASS")
         print("independent_source_revision=49e6b3b25678f14ec57a70b907ee215fddb608d8")
         print("source_game_c_git_blob=" + PINNED_GAME_C_BLOB)
@@ -114,6 +122,7 @@ def main() -> int:
         print(f"canvas_fnv1a64={first[1]}")
         print(f"alternate_seed_fnv1a64={alternate[1]}")
         print("same_binary_repeat=identical")
+        print("pinned_cpu_reference=matched")
         print("guest_execution=not_attempted")
         print("ps5_video_out=not_attempted")
         print("emulator_frame=not_claimed")
