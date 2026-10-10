@@ -1045,8 +1045,10 @@ install_guest_executable_syscall_filter(
         SYS_ptrace,
     };
     constexpr std::size_t kInstructionsPerRange = 11U;
+    // After registered guest ranges: architecture + x32 ABI guard (6 BPF
+    // instructions), 14 selected syscall checks, then the host fallback.
     constexpr std::size_t kTrailingInstructions =
-        2U + 2U * kDeniedOutsideGuestIp.size();
+        7U + 2U * kDeniedOutsideGuestIp.size();
     constexpr auto kMaxProgramLength =
         static_cast<std::size_t>(
             std::numeric_limits<
@@ -1196,15 +1198,39 @@ install_guest_executable_syscall_filter(
                     SECCOMP_RET_TRAP));
         }
 
-        // All original guest-IP syscall traps take precedence. Outside
-        // those ranges, refuse selected host resource acquisitions rather
-        // than allowing a guest-to-host control-flow escape to open files,
-        // create sockets, execute programs, or ptrace another process.
+        // Guest-IP traps deliberately come first, including INT 0x80:
+        // they report the attempted ABI as a typed guest event. Only after
+        // missing all guest ranges do we enforce a native-host ABI policy.
+        // The x32 calling convention shares AUDIT_ARCH_X86_64 but sets
+        // bit 30 of seccomp_data.nr; a plain denylist would miss it.
+        constexpr std::uint32_t kX32SyscallBit = 0x40000000U;
+        constexpr auto kRefuseHostSyscall =
+            SECCOMP_RET_ERRNO | static_cast<std::uint32_t>(EPERM);
+        program.push_back(
+            bpf_statement(
+                kLoadAbsoluteWord,
+                static_cast<std::uint32_t>(
+                    offsetof(seccomp_data, arch))));
+        program.push_back(
+            bpf_jump(
+                kJumpEqual,
+                static_cast<std::uint32_t>(AUDIT_ARCH_X86_64),
+                1U,
+                0U));
+        program.push_back(
+            bpf_statement(kReturnConstant, kRefuseHostSyscall));
         program.push_back(
             bpf_statement(
                 kLoadAbsoluteWord,
                 static_cast<std::uint32_t>(
                     offsetof(seccomp_data, nr))));
+        program.push_back(
+            bpf_jump(kJumpGreaterEqual, kX32SyscallBit, 0U, 1U));
+        program.push_back(
+            bpf_statement(kReturnConstant, kRefuseHostSyscall));
+
+        // Defense in depth for selected host resource acquisitions after
+        // guest-to-host control flow; it is not an allowlist or sandbox.
         for (const int syscall_number : kDeniedOutsideGuestIp) {
             program.push_back(
                 bpf_jump(
