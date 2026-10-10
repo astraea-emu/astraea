@@ -8,8 +8,8 @@ from pathlib import Path
 import subprocess
 
 PIN = "2f672d1c2f508e26f82ce6e27cef289a0861413c"
-OLD = 'link_inputs=("$build/obj/app_crt.o" "$build/obj/app_cpp_runtime.o" "\${objects[@]}")'
-NEW = 'link_inputs=("$build/obj/app_crt.o" "\${objects[@]}")'
+OLD = 'link_inputs=("$build/obj/app_crt.o" "$build/obj/app_cpp_runtime.o" "${objects[@]}")'
+NEW = 'link_inputs=("$build/obj/app_crt.o" "${objects[@]}")'
 ENTRY = """
 /* Astraea-authored minimal entry; no Sony process ABI is inferred. */
 extern "C" __attribute__((naked, visibility("default"))) void _start() {
