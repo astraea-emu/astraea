@@ -6,6 +6,7 @@
 
 #include <astraea/core/result.hpp>
 #include <astraea/loader/dynamic.hpp>
+#include <astraea/loader/gnu_hash.hpp>
 #include <astraea/loader/sysv_hash.hpp>
 #include <astraea/memory/guest_address.hpp>
 #include <astraea/memory/initialized_image_view.hpp>
@@ -25,6 +26,7 @@ enum class DynamicSymbolErrorCode {
     symbol_index_out_of_bounds,
     symbol_entry_unreadable,
     invalid_undefined_symbol,
+    gnu_hash_failure,
 };
 
 struct DynamicSymbolError {
@@ -36,6 +38,7 @@ struct DynamicSymbolError {
     std::optional<astraea::memory::GuestAddress> guest_address;
     std::optional<SysvHashError> sysv_hash_error;
     std::optional<astraea::memory::InitializedImageError> image_error;
+    std::optional<GnuHashError> gnu_hash_error;
 };
 
 struct DynamicSymbolTableDescriptor {
@@ -48,6 +51,8 @@ struct DynamicSymbolTableDescriptor {
     std::size_t syment_source_entry_index;
     std::optional<std::size_t> symtabsz_source_entry_index;
     std::optional<std::size_t> hash_source_entry_index;
+    bool count_from_gnu_hash = false;
+    std::optional<std::size_t> gnu_hash_source_entry_index = std::nullopt;
 };
 
 struct DynamicSymbol {
