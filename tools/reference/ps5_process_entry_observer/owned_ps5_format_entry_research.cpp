@@ -219,6 +219,16 @@ struct Terminal {
         mapping.range = shifted.value();
     }
     image.elf.header.entry = base.value() + 0x10U;
+    // The pinned source-built converter may retain a zero-length PT_TLS.
+    // Native entry rejects any TLS descriptor. In this deliberately owned
+    // first-UD2 experiment, only an empty descriptor may be dropped from
+    // the transient image. Non-empty TLS and retail entry remain blocked.
+    if (image.tls.has_value()) {
+        if (image.tls->total_size.value() != 0U ||
+            image.tls->initialized_size.value() != 0U)
+            return std::nullopt;
+        image.tls.reset();
+    }
     stage = 6U;
     auto prepared = e::prepare_linux_guest_memory(image);
     if (!prepared.has_value()) return std::nullopt;
@@ -248,7 +258,10 @@ struct Terminal {
     stage = 8U;
     auto run = e::enter_linux_guest_with_seccomp_syscall_trap(
         image, prepared.value(), e::make_synthetic_initial_context(image));
-    if (!run.has_value()) return std::nullopt;
+    if (!run.has_value()) {
+        stage = 8000U + static_cast<std::uint64_t>(run.error().code);
+        return std::nullopt;
+    }
     stage = 9U;
     const auto* stop = std::get_if<e::ExecutionStop>(&run.value());
     if (stop == nullptr ||
