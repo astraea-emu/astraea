@@ -174,6 +174,16 @@ struct Terminal {
     stage = 4U;
     auto initial_view = original->initialized_image_view();
     if (!initial_view.has_value()) return std::nullopt;
+    // Verify the exact first instruction through the source-backed image
+    // view, which does not imply the eventual guest RX mapping grants READ.
+    const auto first_range = m::GuestRange::create(
+        m::GuestAddress{original->elf.header.entry}, m::GuestSize{2U});
+    std::array<std::byte, 2U> verified_entry{};
+    if (!first_range.has_value() ||
+        !initial_view->copy_bytes(first_range.value(), verified_entry).has_value() ||
+        verified_entry != std::array<std::byte, 2U>{
+            std::byte{0x0f}, std::byte{0x0b}})
+        return std::nullopt;
     std::vector<e::OwnedRelativePatch> patches;
     patches.reserve(8U);
     for (std::uint64_t i = 0U; i < 8U; ++i) {
@@ -229,12 +239,9 @@ struct Terminal {
         stage = 7999U;
         return std::nullopt;
     }
-    std::array<std::byte, 2U> first_opcode{};
-    if (!memory.read(m::GuestAddress{image.elf.header.entry},
-                     first_opcode).has_value() ||
-        first_opcode != std::array<std::byte, 2U>{
-            std::byte{0x0f}, std::byte{0x0b}})
-        return std::nullopt;
+    // The RX entry segment need not grant guest READ. Its exact source
+    // bytes were checked before mapping; a native SIGILL at that RIP is the
+    // end-to-end instruction-fetch observation (no synthetic fault event).
 
     // Explicitly synthetic entry context: UD2 consumes no PS5 process
     // parameters. This NEVER promotes an initial-process ABI contract.
