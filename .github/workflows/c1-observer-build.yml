@@ -728,10 +728,10 @@ jobs:
         run: |
           git -C "$RUNNER_TEMP/ps5-native-app-boilerplate" worktree add --detach \
             "$RUNNER_TEMP/astraea-minimal-native-title" "$PINNED_BLACKBEAR"
-          ln -s "$RUNNER_TEMP/ps5-native-app-boilerplate/.deps" \
-            "$RUNNER_TEMP/astraea-minimal-native-title/.deps"
           python3 tools/reference/ps5_process_entry_observer/prepare_minimal_public_title.py \
             --checkout "$RUNNER_TEMP/astraea-minimal-native-title"
+          ln -s "$RUNNER_TEMP/ps5-native-app-boilerplate/.deps" \
+            "$RUNNER_TEMP/astraea-minimal-native-title/.deps"
           make --directory="$RUNNER_TEMP/astraea-minimal-native-title" \
             USE_CCACHE=0 APP_SOURCE_DIR=astraea_minimal APP_ASSETS= app
 
