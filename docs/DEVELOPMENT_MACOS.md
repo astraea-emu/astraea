@@ -46,4 +46,4 @@ Changes affecting the pinned external PS5-format title and observer also run the
 
 An editor or IDE is optional; the authoritative build and test interfaces are CMake and CTest. VS Code, CLion and terminal workflows must not need separate project-specific settings.
 
-Keep firmware, keys, copyrighted game assets, proprietary SDK material and private research captures **outside the Git tree**. Local inputs are untrusted: use bounded tools, preserve provenance and do not run arbitrary downloaded guest code outside the documented supervisor. The project does not require a particular AI coding assistant or editor.
+Keep firmware, keys, copyrighted game assets, proprietary SDK material and private research captures **outside the Git tree**. Local inputs are untrusted: use bounded tools, preserve provenance and do not run arbitrary downloaded guest code outside the documented supervisor. 
