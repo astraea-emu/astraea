@@ -85,12 +85,11 @@ constexpr std::uint32_t kPfExecute = 0x1U;
 
 std::optional<astraea::memory::GuestRange>
 choose_retail_analysis_stack(
-    std::span<const std::byte> artifact) noexcept {
+    std::span<const std::byte> artifact,
+    astraea::loader::ElfParseProfile profile) noexcept {
     try {
         const auto parsed =
-            astraea::loader::parse_elf64(
-                artifact,
-                astraea::loader::ElfParseProfile::ps5_sce);
+            astraea::loader::parse_elf64(artifact, profile);
 
         for (std::size_t index = 0U;
              index < kRetailAnalysisStackCandidateCount;
@@ -133,11 +132,12 @@ choose_retail_analysis_stack(
 
 RetailStaticClosureArtifactResult
 profile_retail_artifact(
-    std::vector<std::byte> artifact_bytes) {
+    std::vector<std::byte> artifact_bytes,
+    astraea::loader::ElfParseProfile profile) {
     try {
         const auto stack =
             choose_retail_analysis_stack(
-                artifact_bytes);
+                artifact_bytes, profile);
         if (!stack.has_value()) {
             return RetailStaticClosureArtifactResult::failure(
                 RetailStaticClosureArtifactError{
@@ -163,9 +163,7 @@ profile_retail_artifact(
                             .environment = {},
                             .auxiliary_vector = {},
                         },
-                    .elf_profile =
-                        astraea::loader::ElfParseProfile::
-                            ps5_sce,
+                    .elf_profile = profile,
                 });
 
         if (!image.has_value()) {
