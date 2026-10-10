@@ -25,7 +25,7 @@ Sony Interactive Entertainment.
 | Graphics V0-V3 | **Complete for bounded owned workloads** — AGC/RDNA2 input through typed guest GPU state to deterministic Vulkan execution/readback |
 | Retail C0 | **Complete on Linux x86-64** — supervised sealed-artifact diagnostic with typed first-boundary reporting |
 | Retail C1 | **Active, commercial entry blocked** — supervised generic two-ELF `JUMP_SLOT` execution and an exact source-built PS5-format `UD2` first-instruction fault after eight checked `RELATIVE` relocations; synthetic entry only |
-| Public homebrew static closure | **Read-only only** — opted-in PS5-marked raw ET_DYN analysis merged in #406; GNU-hash counting and independently pinned Breakout 5-library/20-relocation inventory are under validation in #408 |
+| Public homebrew static closure | **Read-only only** — PS5-marked raw ET_DYN analysis (#406) and bounded GNU-hash symbol counts (#408) are merged; independent Breakout corpus has 5 libraries, 20 dynamic symbols and 20 relocations |
 | Verification S0 | **Established** — multi-platform CI, ASan/UBSan, fuzz smoke, traces, probes, typed unsupported behavior, ADR/provenance discipline |
 | Commercial game boot/playability | **Not claimed** |
 
@@ -73,11 +73,13 @@ CI compatibility oracle. Its original production `diagnose` result is
 merged a separately opted-in `profile --ps5-raw-elf` and
 `dependencies --ps5-raw-elf` structural parser without admitting execution.
 
-A separate, currently unmerged [PR #408](https://github.com/astraea-emu/astraea/pull/408)
-is validating bounded GNU-hash symbol counts and a frozen external report
+Merged [PR #408](https://github.com/astraea-emu/astraea/pull/408)
+validates bounded GNU-hash symbol counts and a frozen external report
 of five needed libraries, 20 dynamic symbols and 20 relocations
-(1 `RELATIVE`, 19 `GLOB_DAT`). Those are **not** successful library bindings,
-PS5 runtime services, guest instructions or gameplay. Production
+(1 `RELATIVE`, 19 `GLOB_DAT`). Draft [PR #409](https://github.com/astraea-emu/astraea/pull/409)
+separately verifies 19/19 imported NIDs against the independent author's pinned
+source declarations. Neither finding is a successful library binding,
+PS5 runtime service, guest instruction or gameplay. Production
 `diagnose` remains deliberately strict. See [current status](docs/STATUS.md).
 
 ### Graphics
@@ -135,8 +137,8 @@ demonstrates actual supervised host-linked two-ELF `JUMP_SLOT` execution in a
 **generic, research-only** profile. An opt-in Linux-only, source-pinned research path now applies those eight
 real relocations and reproduces the authored PS5-format `UD2` fault in two
 sealed worker launches, with tampered-source refusal. This is **not** evidence
-of Sony startup ABI correctness or any commercial game instruction. The next integration work is to finalize the pinned game-like dependency
-inventory, then establish one authenticated test-only external-service boundary
+of Sony startup ABI correctness or any commercial game instruction. The next integration work is to complete the pinned source-to-ELF import
+identity check, then establish one authenticated test-only external-service boundary
 under separately reviewed native-worker containment. No full Sony process-entry
 contract or retail game execution has been established.
 
