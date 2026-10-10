@@ -52,7 +52,7 @@ struct DynamicSymbolTableDescriptor {
     std::optional<std::size_t> symtabsz_source_entry_index;
     std::optional<std::size_t> hash_source_entry_index;
     bool count_from_gnu_hash = false;
-    std::optional<std::size_t> gnu_hash_source_entry_index;
+    std::optional<std::size_t> gnu_hash_source_entry_index = std::nullopt;
 };
 
 struct DynamicSymbol {
