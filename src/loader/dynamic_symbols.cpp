@@ -1,4 +1,5 @@
 #include <astraea/loader/dynamic_symbols.hpp>
+#include <astraea/loader/gnu_hash.hpp>
 
 #include <array>
 #include <cstddef>
@@ -13,6 +14,7 @@ namespace astraea::loader {
 namespace {
 
 constexpr std::int64_t kDtHash = 4;
+constexpr std::int64_t kDtGnuHash = 0x6ffffef5;
 constexpr std::int64_t kDtSymtab = 6;
 constexpr std::int64_t kDtSyment = 11;
 constexpr std::int64_t kDtSymtabsz = 39;
@@ -183,6 +185,7 @@ DynamicSymbolDescriptorResult build_dynamic_symbol_table_descriptor(
     std::optional<SingletonValue> syment;
     std::optional<SingletonValue> symtabsz;
     bool has_hash = false;
+    bool has_gnu_hash = false;
 
     for (const auto& entry : table.entries) {
         switch (entry.tag) {
@@ -210,13 +213,17 @@ DynamicSymbolDescriptorResult build_dynamic_symbol_table_descriptor(
         case kDtHash:
             has_hash = true;
             break;
+        case kDtGnuHash:
+            has_gnu_hash = true;
+            break;
         default:
             break;
         }
     }
 
     const bool any_symbol_metadata =
-        symtab.has_value() || syment.has_value() || symtabsz.has_value() || has_hash;
+        symtab.has_value() || syment.has_value() || symtabsz.has_value() ||
+        has_hash || has_gnu_hash;
     if (!any_symbol_metadata) {
         return DynamicSymbolDescriptorResult::success(std::nullopt);
     }
@@ -284,7 +291,27 @@ DynamicSymbolDescriptorResult build_dynamic_symbol_table_descriptor(
         hash_source_index = sysv->value().source_entry_index;
     }
 
-    if (!symtabsz_count.has_value() && !hash_count.has_value()) {
+    auto gnu = build_gnu_hash_count_evidence(table, image_view);
+    if (!gnu.has_value()) {
+        auto failure = symbol_error(
+            DynamicSymbolErrorCode::gnu_hash_failure,
+            kDtGnuHash,
+            gnu.error().source_entry_index,
+            gnu.error().conflicting_entry_index,
+            std::nullopt,
+            gnu.error().guest_address);
+        failure.gnu_hash_error = gnu.error();
+        return DynamicSymbolDescriptorResult::failure(std::move(failure));
+    }
+    std::optional<std::uint64_t> gnu_count;
+    std::optional<std::size_t> gnu_source;
+    if (gnu->has_value()) {
+        gnu_count = gnu->value().symbol_count;
+        gnu_source = gnu->value().source_entry_index;
+    }
+
+    if (!symtabsz_count.has_value() && !hash_count.has_value() &&
+        !gnu_count.has_value()) {
         return DynamicSymbolDescriptorResult::failure(
             symbol_error(
                 DynamicSymbolErrorCode::symbol_count_unavailable,
@@ -302,9 +329,23 @@ DynamicSymbolDescriptorResult build_dynamic_symbol_table_descriptor(
                 symtabsz->source_entry_index,
                 hash_source_index));
     }
+    if (gnu_count.has_value() &&
+        ((symtabsz_count.has_value() &&
+          *gnu_count != *symtabsz_count) ||
+         (hash_count.has_value() && *gnu_count != *hash_count))) {
+        return DynamicSymbolDescriptorResult::failure(
+            symbol_error(
+                DynamicSymbolErrorCode::conflicting_symbol_count,
+                std::nullopt,
+                gnu_source,
+                symtabsz_count.has_value()
+                    ? std::optional<std::size_t>{symtabsz->source_entry_index}
+                    : hash_source_index));
+    }
 
-    const auto count =
-        symtabsz_count.has_value() ? *symtabsz_count : *hash_count;
+    const auto count = symtabsz_count.has_value()
+        ? *symtabsz_count
+        : hash_count.has_value() ? *hash_count : *gnu_count;
     if (count == 0) {
         return DynamicSymbolDescriptorResult::failure(
             symbol_error(
@@ -349,6 +390,8 @@ DynamicSymbolDescriptorResult build_dynamic_symbol_table_descriptor(
                 ? std::optional<std::size_t>{symtabsz->source_entry_index}
                 : std::nullopt,
         .hash_source_entry_index = hash_source_index,
+        .count_from_gnu_hash = gnu_count.has_value(),
+        .gnu_hash_source_entry_index = gnu_source,
     };
 
     auto zero = read_symbol(descriptor, 0, image_view, false);
