@@ -87,6 +87,7 @@ jobs:
           python3 - <<'PY'
           import os
           from pathlib import Path
+          import re
           import subprocess
 
           root = Path(os.environ["RUNNER_TEMP"])
@@ -131,6 +132,48 @@ jobs:
                   raise SystemExit(f"raw {mode} returned empty success")
               if result.returncode != 0 and not result.stderr.strip():
                   raise SystemExit(f"raw {mode} refused without diagnostics")
+              if mode == "profile" and "dynamic_symbol_error=4" in result.stderr:
+                  raise SystemExit(
+                      "GNU hash symbol-count evidence did not retire the exact prior blocker")
+              if result.returncode != 0:
+                  raise SystemExit(f"pinned raw {mode} now rejected: {result.stderr[:400]}")
+              if mode == "profile":
+                  report = dict(line.split("=", 1)
+                                for line in result.stdout.splitlines()
+                                if "=" in line)
+                  expected = {
+                      "program_headers": "4",
+                      "load_segments": "3",
+                      "generic_needed": "5",
+                      "dynamic_symbols": "20",
+                      "rel_relocations": "0",
+                      "rela_relocations": "20",
+                      "plt_relocations": "0",
+                      "total_relocations": "20",
+                      "tls_present": "0",
+                  }
+                  if any(report.get(key) != value for key, value in expected.items()):
+                      raise SystemExit(f"pinned raw ELF profile drift: {report}")
+              else:
+                  report = dict(line.split("=", 1)
+                                for line in result.stdout.splitlines()
+                                if "=" in line)
+                  for key, value in {
+                      "generic_needed_records": "5",
+                      "dynamic_symbol_records": "20",
+                      "relocation_records": "20",
+                      "guest_instructions": "0",
+                      "relocation_application": "not_attempted",
+                      "resolution": "not_attempted",
+                  }.items():
+                      if report.get(key) != value:
+                          raise SystemExit(f"pinned dependency drift: {key}={report.get(key)}")
+                  relocation_types = [
+                      int(value) for value in
+                      re.findall(r"^relocation\[\d+\]\.type=(\d+)$",
+                                 result.stdout, re.MULTILINE)]
+                  if sorted(relocation_types) != [6] * 19 + [8]:
+                      raise SystemExit(f"unsupported pinned relocation census: {relocation_types}")
               print(f"ASTRAEA_RAW_{mode.upper()}_RC={result.returncode}")
               print(f"ASTRAEA_RAW_{mode.upper()}_STDOUT_BEGIN")
               print(result.stdout[:12000].rstrip())
