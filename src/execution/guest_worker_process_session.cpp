@@ -2754,6 +2754,18 @@ run_guest_worker_process_session(
                             worker_identity_mismatch));
             }
 
+            // Worker messages cross a process trust boundary. The wire
+            // format can represent absent identity fields; never invoke
+            // the controller's syscall service for such a request.
+            if (syscall_request->request_id.value == 0U ||
+                syscall_request->thread_id.value == 0U ||
+                syscall_request->guest_rip.value() == 0U) {
+                return GuestWorkerProcessSessionRunResult::failure(
+                    error(
+                        GuestWorkerProcessSessionErrorCode::
+                            protocol_failure));
+            }
+
             if (!config.syscall_service) {
                 return GuestWorkerProcessSessionRunResult::failure(
                     error(
