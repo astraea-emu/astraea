@@ -1,0 +1,63 @@
+name: C1 independent Breakout CPU canvas reference
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/c1-breakout-canvas-reference.yml'
+      - 'tools/reference/public_breakout_canvas_reference.c'
+      - 'tools/reference/public_breakout_canvas_reference.py'
+  push:
+    branches:
+      - main
+    paths:
+      - '.github/workflows/c1-breakout-canvas-reference.yml'
+      - 'tools/reference/public_breakout_canvas_reference.c'
+      - 'tools/reference/public_breakout_canvas_reference.py'
+
+permissions:
+  contents: read
+
+jobs:
+  cpu-canvas:
+    name: Pinned Breakout host CPU canvas only
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+      - name: Download exact independent game logic source
+        shell: bash
+        run: |
+          set -euo pipefail
+          url="https://raw.githubusercontent.com/sharpemu/sharpemu-demo/49e6b3b25678f14ec57a70b907ee215fddb608d8/src"
+          curl --fail --location --retry 3 --silent --show-error \
+            "$url/game.c" -o "$RUNNER_TEMP/game.c"
+          curl --fail --location --retry 3 --silent --show-error \
+            "$url/game.h" -o "$RUNNER_TEMP/game.h"
+          cc --version | head -n 1
+      - name: Repeat exact source-owned CPU frame and vary seed
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 tools/reference/public_breakout_canvas_reference.py \
+            --game-c "$RUNNER_TEMP/game.c" \
+            --game-h "$RUNNER_TEMP/game.h" \
+            | tee "$RUNNER_TEMP/canvas-reference.txt"
+          grep -Fx 'same_binary_repeat=identical' "$RUNNER_TEMP/canvas-reference.txt"
+          grep -Fx 'guest_execution=not_attempted' "$RUNNER_TEMP/canvas-reference.txt"
+          grep -Fx 'emulator_frame=not_claimed' "$RUNNER_TEMP/canvas-reference.txt"
+      - name: Reject source identity drift before host compilation
+        shell: bash
+        run: |
+          set -euo pipefail
+          cp "$RUNNER_TEMP/game.c" "$RUNNER_TEMP/altered-game.c"
+          printf '\n/* intentional source identity drift */\n' >> "$RUNNER_TEMP/altered-game.c"
+          if python3 tools/reference/public_breakout_canvas_reference.py \
+            --game-c "$RUNNER_TEMP/altered-game.c" \
+            --game-h "$RUNNER_TEMP/game.h" \
+            > "$RUNNER_TEMP/altered-result.txt" 2>&1; then
+            echo "ERROR: altered external source accepted"
+            exit 1
+          fi
+          grep -F 'source_blob_identity_drift' "$RUNNER_TEMP/altered-result.txt"
+          echo "BREAKOUT HOST-ONLY CANVAS NEGATIVE PASS"
