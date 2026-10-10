@@ -1045,11 +1045,16 @@ install_guest_executable_syscall_filter(
         SYS_ptrace,
     };
     constexpr std::size_t kInstructionsPerRange = 11U;
-    // After registered guest ranges: six ABI-guard operations, three
-    // legacy-x32 range operations, the syscall-number load and host
-    // fallback, plus two instructions per explicitly denied syscall.
+    // Count the emitted BPF statements exactly: arch guard 3, x32 guard 3,
+    // legacy-x32 alias guard 3, final host ALLOW 1, plus 2 per deny entry.
+    constexpr std::size_t kArchGuardInstructions = 3U;
+    constexpr std::size_t kX32GuardInstructions = 3U;
+    constexpr std::size_t kLegacyAliasGuardInstructions = 3U;
+    constexpr std::size_t kHostFallbackInstructions = 1U;
     constexpr std::size_t kTrailingInstructions =
-        11U + 2U * kDeniedOutsideGuestIp.size();
+        kArchGuardInstructions + kX32GuardInstructions +
+        kLegacyAliasGuardInstructions + kHostFallbackInstructions +
+        2U * kDeniedOutsideGuestIp.size();
     constexpr auto kMaxProgramLength =
         static_cast<std::size_t>(
             std::numeric_limits<
