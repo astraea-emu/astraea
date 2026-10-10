@@ -117,11 +117,21 @@ jobs:
               print(f"ASTRAEA_{mode.upper()}_STDERR_BEGIN")
               print(stderr[:3000].rstrip())
               print(f"ASTRAEA_{mode.upper()}_STDERR_END")
-              if mode == "diagnose" and result.returncode == 0:
-                  if "stage=pre_entry" not in stdout:
-                      raise SystemExit("unexpected post-entry or untyped diagnostic")
-                  if "boundary=" not in stdout:
-                      raise SystemExit("missing diagnostic boundary")
+              if mode == "diagnose":
+                  if result.returncode != 0:
+                      raise SystemExit("pinned production diagnostic unexpectedly errored")
+                  fields = dict(
+                      line.split("=", 1) for line in stdout.splitlines()
+                      if "=" in line
+                  )
+                  if any(fields.get(key) != value for key, value in {
+                      "boundary": "loader_rejected",
+                      "stage": "pre_entry",
+                      "guest_rip": "0x0",
+                  }.items()):
+                      raise SystemExit(
+                          "production diagnose admission drift on pinned raw ELF"
+                      )
           for mode in ("profile", "dependencies"):
               result = subprocess.run(
                   [str(executable), mode, "--ps5-raw-elf", str(guest)],
