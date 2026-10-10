@@ -9,10 +9,11 @@ AGC/RDNA2 graphics, and Vulkan translation with an evidence-first rule:
 unknown platform behavior stays explicit instead of becoming a compatibility
 guess.
 
-> **Research status:** Astraea is not yet a commercial-title emulator.
-> Linux x86-64 can safely admit a legally obtained executable to a supervised
-> diagnostic path, but a structurally ready title still stops before its first
-> retail instruction while the remaining PS5 process-entry state is established.
+> **Research status:** Astraea has not executed a commercial PS5 game's first
+> instruction or rendered a commercial-title frame. Linux x86-64 provides a
+> supervised, fail-closed diagnostic path. Independently authored generic ELFs
+> can execute in a separate research-only path; production PS5-format entry
+> remains disabled pending verified loader and process-start contracts.
 
 Astraea is an independent project and is not affiliated with or endorsed by
 Sony Interactive Entertainment.
@@ -23,7 +24,7 @@ Sony Interactive Entertainment.
 | --- | --- |
 | Graphics V0-V3 | **Complete for bounded owned workloads** — AGC/RDNA2 input through typed guest GPU state to deterministic Vulkan execution/readback |
 | Retail C0 | **Complete on Linux x86-64** — supervised sealed-artifact diagnostic with typed first-boundary reporting |
-| Retail C1 | **Active** — corroborated startup-block prefix and process-entry observation validator are merged; RSI/RSP, procparam, TLS/TCB, and pre-entry bootstrap evidence remain |
+| Retail C1 | **Active** — two host-linked generic ELF modules execute through a real `JUMP_SLOT` in a supervised research-only worker; a newly source-built minimal PS5-format ELF stops at eight unsupported `RELATIVE` relocations before entry |
 | Verification S0 | **Established** — multi-platform CI, ASan/UBSan, fuzz smoke, traces, probes, typed unsupported behavior, ADR/provenance discipline |
 | Commercial game boot/playability | **Not claimed** |
 
@@ -53,9 +54,11 @@ Linux x86-64 has a production diagnostic path with:
 - typed syscall/fault/diagnostic boundaries;
 - deterministic loader, dependency, relocation, TLS, and process-entry stops.
 
-A currently otherwise-ready image stops at
-`unsupported_initial_process_abi`. That is an intentional correctness
-boundary, not a boot failure hidden behind a success stub.
+An input with no earlier dependency, relocation or TLS blockers reaches
+`unsupported_initial_process_abi`; the selected source-built minimal PS5-format
+ELF instead stops earlier at `unsupported_relocations` (eight `R_X86_64_RELATIVE`
+records). Both are intentional pre-entry boundaries, not successful guest
+execution. See [PR #400](https://github.com/astraea-emu/astraea/pull/400).
 
 ### Graphics
 
@@ -100,16 +103,19 @@ Astraea tracks three orthogonal axes:
 - **C — compatibility:** diagnostic -> first retail instruction -> first deterministic post-entry divergence -> runtime closure -> boot -> headless frame -> presentation -> in-game/playable -> reference-guarded support;
 - **S — scalability/readiness:** first-divergence coverage, cross-title regression guards, architecture ratchets, measured performance, and eventual release quality.
 
-The current critical path is **C1, software-first**. The first
-independently authored PS5-format title is pinned in CI and reaches an
-explicit pre-entry `unsupported_dynamic_dependencies` stop in Astraea's
-supervised diagnostic. Its read-only dependency manifest now identifies
-exact module names, source-attributed SCE symbol IDs and relocation demand.
-A second **source-generated, non-Sony PRX** is also pinned in CI, with
-2,669 dynamic symbols, 1,896 relocations and nonempty TLS metadata.
-The generic owned-code linker, mapped-memory and relocation primitives
-continue to expand under their own negative tests. None of this is
-commercial guest execution, PS5 firmware ABI evidence or gameplay.
+The current critical path is **C1, software-first**. The larger pinned
+public native-title boilerplate stops at `unsupported_dynamic_dependencies`;
+its source-generated non-Sony PRX companion supplies structural research
+coverage but not working Sony runtime services. The smaller, independently
+source-built PS5-format diagnostic from [PR #400](https://github.com/astraea-emu/astraea/pull/400)
+has no runtime imports and eight standard `R_X86_64_RELATIVE` relocations;
+production `diagnose` stops at `unsupported_relocations` before entry.
+Separately, [PR #399](https://github.com/astraea-emu/astraea/pull/399)
+demonstrates actual supervised host-linked two-ELF `JUMP_SLOT` execution in a
+**generic, research-only** profile. The next integration proof is to validate
+and apply the selected PS5-format image's relative relocations in the
+research-only supervised path, then reach a controlled first-instruction
+terminal fault. Do not infer a commercial-title ABI from this test.
 
 For the exact PC-first gating sequence and the deliberately delayed firmware-13.00 hardware experiment, read the [C1 execution and hardware readiness plan](docs/research/c1_pc_first_execution_hardware_readiness_2026-10-09.md).
 
