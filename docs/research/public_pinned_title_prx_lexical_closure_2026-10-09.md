@@ -67,6 +67,49 @@ which provider the real loader selects, imported symbol version, calling
 convention, strong/weak behavior, runtime initialization or correctness of
 the actual function implementation.
 
+## Pinned compiled CRT startup-dependency ratchet
+
+The next independent source-only probe (PR #391) inspected the actual pinned
+observer-equipped *relocatable CRT object*, built from the external project's
+tooling/native/app_crt.cpp with the original entry renamed to
+astraea_reference_crt_start. That source calls _init_env before application
+constructors and main. Astraea's project-authored pre-CRT register observer
+tail-jumps to this CRT entry after its MOV-family state capture.
+
+[Passing source-build workflow 37988064248](https://github.com/astraea-emu/astraea/actions/runs/37988064248)
+established the following bounded **compiled-object**, not runtime, evidence:
+
+| Compiled-object observation | Pinned value |
+| --- | --- |
+| Source-authored object | build/obj/app_crt.o |
+| Object size | 3,192 bytes |
+| SHA-256 | 72b7838f3e7595002fb8b7a23803f877c7da54d0db117fb7305832301c00823c |
+| Defined CRT entry function | astraea_reference_crt_start |
+| Referenced undefined external symbol | _init_env |
+| ELF64 x86-64 RELA references in that entry function | 1 |
+| Raw ELF relocation type | 41 |
+| Object-section relocation offset | 0x15 |
+
+The analyzer
+tools/reference/ps5_process_entry_observer/verify_crt_external_relocation.py
+verifies the definition, undefined symbol and cross-reference within the
+bounded compiled CRT entry section. It also rejects an intentionally absent
+symbol in the pinned CI job. The *type-41 record is not itself a proven
+call trace*; the ordering of _init_env before constructors/main is established
+separately by the reviewed authored CRT source.
+
+This is an important narrower dependency than guessing all 25 external
+symbols are immediately required, but it **does not** reveal which final
+NID/module/library triplet the linker emits for _init_env, which PS5 runtime
+module defines it, its actual semantics, or whether the call would run under
+a real normal-title process entry.
+
+**Next source-only check:** connect the intermediate linked ELF's import
+symbol to its final SCE-format symbol identity using *independently verified
+pinned toolchain provenance*, then fail closed when a provider association
+cannot be proven. Do not identify any of the raw PRX's eight shared NID text
+rows as _init_env without explicit evidence.
+
 ## Fail-closed boundary and next decision
 
 1. Preserve original source revision, both binary hashes, complete manifest
