@@ -542,3 +542,63 @@ TEST_CASE("dynamic symbol descriptor preserves SysV hash failures", "[loader][dy
         astraea::loader::SysvHashErrorCode::hash_header_unreadable);
     REQUIRE(result.error().sysv_hash_error->image_error.has_value());
 }
+
+
+TEST_CASE(
+    "GNU hash inferred count requires every claimed symbol entry mapped",
+    "[loader][dynamic-symbols][gnu-hash][refusal]") {
+    constexpr std::int64_t kDtGnuHash = 0x6ffffef5;
+    constexpr std::size_t kHashOffset = 3U * kSymSize;
+    // GNU hash: one bucket, one bloom word, first hashed symbol 1.
+    // Chain[0] continues, chain[1] terminates => three .dynsym entries.
+    std::vector<std::byte> image(kHashOffset + 36U, std::byte{0});
+    write_u32(image, kHashOffset + 0U, 1U);
+    write_u32(image, kHashOffset + 4U, 1U);
+    write_u32(image, kHashOffset + 8U, 1U);
+    write_u32(image, kHashOffset + 12U, 5U);
+    write_u32(image, kHashOffset + 24U, 1U);
+    write_u32(image, kHashOffset + 28U, 2U);
+    write_u32(image, kHashOffset + 32U, 3U);
+
+    const auto metadata = table({
+        entry(kDtSymtab, 0xc000U, 0U),
+        entry(kDtSyment, kSymSize, 1U),
+        entry(kDtGnuHash, 0xd000U, 2U),
+    });
+
+    SECTION("fully mapped symbol table admits count") {
+        std::array intents{
+            file_intent(0xc000U, 3U * kSymSize, 0U, 0U),
+            file_intent(0xd000U, 36U, kHashOffset, 1U),
+        };
+        auto view = InitializedImageView::create(image, intents);
+        REQUIRE(view.has_value());
+        const auto result =
+            astraea::loader::build_dynamic_symbol_table_descriptor(
+                metadata, view.value());
+        REQUIRE(result.has_value());
+        REQUIRE(result->has_value());
+        REQUIRE(result->value().symbol_count == 3U);
+        REQUIRE(result->value().count_from_gnu_hash);
+    }
+
+    SECTION("truncated symbol table refuses otherwise valid hash count") {
+        std::array intents{
+            file_intent(0xc000U, 2U * kSymSize, 0U, 0U),
+            file_intent(0xd000U, 36U, kHashOffset, 1U),
+        };
+        auto view = InitializedImageView::create(image, intents);
+        REQUIRE(view.has_value());
+        const auto result =
+            astraea::loader::build_dynamic_symbol_table_descriptor(
+                metadata, view.value());
+        REQUIRE_FALSE(result.has_value());
+        REQUIRE(result.error().code ==
+                DynamicSymbolErrorCode::symbol_entry_unreadable);
+        REQUIRE(result.error().image_error.has_value());
+        REQUIRE(result.error().image_error->code ==
+                astraea::memory::InitializedImageErrorCode::
+                    unmapped_guest_address);
+        REQUIRE(result.error().guest_address == GuestAddress{0xc030U});
+    }
+}
