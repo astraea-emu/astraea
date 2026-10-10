@@ -43,6 +43,7 @@ struct SingletonValue {
         .guest_address = guest_address,
         .sysv_hash_error = std::move(sysv_hash_error),
         .image_error = std::move(image_error),
+        .gnu_hash_error = std::nullopt,
     };
 }
 
