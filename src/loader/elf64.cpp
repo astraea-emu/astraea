@@ -93,6 +93,8 @@ template <typename T>
 
 [[nodiscard]] bool supported_file_type(
     std::uint16_t type,
+    std::uint8_t os_abi,
+    std::uint8_t abi_version,
     ElfParseProfile profile) noexcept {
     switch (profile) {
     case ElfParseProfile::generic:
@@ -100,6 +102,8 @@ template <typename T>
     case ElfParseProfile::ps5_sce:
         return type == kEtSceDynExec ||
                type == kEtSceDynModule;
+    case ElfParseProfile::ps5_marked_raw:
+        return type == kEtDyn && os_abi == 9U && abi_version == 2U;
     }
 
     return false;
@@ -158,7 +162,8 @@ ElfParseResult parse_elf64(
     if (header.machine != kEmX86_64) {
         return ElfParseResult::failure(header_error(ElfErrorCode::unsupported_machine, 18));
     }
-    if (!supported_file_type(header.type, profile)) {
+    if (!supported_file_type(
+            header.type, header.os_abi, header.abi_version, profile)) {
         return ElfParseResult::failure(header_error(ElfErrorCode::unsupported_file_type, 16));
     }
     if (header.header_size != kElf64HeaderSize) {
