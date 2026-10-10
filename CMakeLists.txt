@@ -94,6 +94,7 @@ add_library(astraea_core STATIC
     src/loader/dynamic_metadata.cpp
     src/loader/dynamic_string.cpp
     src/loader/sysv_hash.cpp
+    src/loader/gnu_hash.cpp
     src/loader/dynamic_symbols.cpp
     src/loader/sce_symbol_identity.cpp
     src/loader/sce_dynamic_symbol.cpp
