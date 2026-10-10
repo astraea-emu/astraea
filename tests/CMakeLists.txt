@@ -170,6 +170,55 @@ add_dependencies(
     astraea_guest_worker_probe
     astraea
 )
+# Linux-only source-assembled code is consumed by the existing sealed
+# two-ELF test. The ELF envelopes remain test-owned and synthetic.
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND
+   CMAKE_SYSTEM_PROCESSOR MATCHES "^(x86_64|AMD64)$")
+    find_package(Python3 REQUIRED COMPONENTS Interpreter)
+    set(ASTRAEA_OWNED_ELF_GENERATED_DIR
+        "${CMAKE_CURRENT_BINARY_DIR}/generated")
+    set(ASTRAEA_OWNED_ELF_GENERATED_HEADER
+        "${ASTRAEA_OWNED_ELF_GENERATED_DIR}/owned_two_elf_compiled_code.hpp")
+    set(ASTRAEA_OWNED_ELF_CLIENT_OBJ
+        "${ASTRAEA_OWNED_ELF_GENERATED_DIR}/owned_elf_client.o")
+    set(ASTRAEA_OWNED_ELF_PROVIDER_OBJ
+        "${ASTRAEA_OWNED_ELF_GENERATED_DIR}/owned_elf_provider.o")
+    add_custom_command(
+        OUTPUT "${ASTRAEA_OWNED_ELF_GENERATED_HEADER}"
+        BYPRODUCTS
+            "${ASTRAEA_OWNED_ELF_CLIENT_OBJ}"
+            "${ASTRAEA_OWNED_ELF_PROVIDER_OBJ}"
+        COMMAND "${CMAKE_COMMAND}" -E make_directory
+            "${ASTRAEA_OWNED_ELF_GENERATED_DIR}"
+        COMMAND "${CMAKE_C_COMPILER}" -c -x assembler
+            "${CMAKE_CURRENT_SOURCE_DIR}/execution/owned_elf_client.S"
+            -o "${ASTRAEA_OWNED_ELF_CLIENT_OBJ}"
+        COMMAND "${CMAKE_C_COMPILER}" -c -x assembler
+            "${CMAKE_CURRENT_SOURCE_DIR}/execution/owned_elf_provider.S"
+            -o "${ASTRAEA_OWNED_ELF_PROVIDER_OBJ}"
+        COMMAND "${Python3_EXECUTABLE}"
+            "${CMAKE_CURRENT_SOURCE_DIR}/execution/assemble_owned_text.py"
+            --client "${ASTRAEA_OWNED_ELF_CLIENT_OBJ}"
+            --provider "${ASTRAEA_OWNED_ELF_PROVIDER_OBJ}"
+            --output "${ASTRAEA_OWNED_ELF_GENERATED_HEADER}"
+        DEPENDS
+            execution/owned_elf_client.S
+            execution/owned_elf_provider.S
+            execution/assemble_owned_text.py
+        VERBATIM
+    )
+    add_custom_target(astraea_owned_two_elf_compiled_code
+        DEPENDS "${ASTRAEA_OWNED_ELF_GENERATED_HEADER}")
+    add_dependencies(astraea_guest_worker_probe
+        astraea_owned_two_elf_compiled_code)
+    add_dependencies(astraea_core_tests
+        astraea_owned_two_elf_compiled_code)
+    target_include_directories(astraea_guest_worker_probe PRIVATE
+        "${ASTRAEA_OWNED_ELF_GENERATED_DIR}")
+    target_include_directories(astraea_core_tests PRIVATE
+        "${ASTRAEA_OWNED_ELF_GENERATED_DIR}")
+endif()
+
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux" OR
    CMAKE_SYSTEM_NAME STREQUAL "Windows")
     target_compile_definitions(astraea_core_tests PRIVATE
