@@ -1,6 +1,7 @@
 #include <astraea/execution/linux_execution.hpp>
 
 #include <array>
+#include <cerrno>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
@@ -14,6 +15,7 @@
 
 #if defined(__linux__) && defined(__x86_64__)
 #include <linux/audit.h>
+#include <fcntl.h>
 #include <sys/mman.h>
 #include <sys/syscall.h>
 #include <unistd.h>
@@ -43,6 +45,21 @@ using astraea::memory::GuestSize;
 using astraea::memory::MappingBacking;
 using astraea::memory::MappingBackingKind;
 using astraea::memory::MappingIntent;
+
+// Exactly one harmless host-side filesystem probe. Invoking this address
+// from guest-owned code demonstrates that the original IP-range filter did
+// not mediate syscalls executed in host code. The added per-syscall denial
+// must refuse it without opening /dev/null or creating an external effect.
+[[gnu::noinline]] std::int64_t outside_guest_ip_openat_probe() noexcept {
+    errno = 0;
+    const long fd = ::syscall(
+        SYS_openat, AT_FDCWD, "/dev/null", O_RDONLY | O_CLOEXEC, 0);
+    if (fd >= 0) {
+        static_cast<void>(::close(static_cast<int>(fd)));
+        return 0;
+    }
+    return -static_cast<std::int64_t>(errno);
+}
 
 GuestRange range(std::uint64_t base, std::uint64_t size) {
     auto result =
@@ -320,6 +337,61 @@ TEST_CASE(
 }
 
 #if defined(__linux__) && defined(__x86_64__) && defined(MAP_FIXED_NOREPLACE)
+
+TEST_CASE(
+    "Linux refuses host openat even after owned guest branches outside its IP",
+    "[execution][linux-transition][c1][seccomp][host-ip][security]") {
+    const auto page = page_size();
+    const auto base =
+        find_free_block(static_cast<std::size_t>(page * 3U));
+    const auto stack_base = base + page;
+
+    // A source-authored synthetic guest calls one fixed harmless function
+    // outside its own executable range and returns to guest UD2. This is
+    // NOT admission of an arbitrary binary, or proof of full containment.
+    std::vector<std::byte> code{
+        std::byte{0x48}, std::byte{0x83},
+        std::byte{0xec}, std::byte{0x08}, // sub rsp, 8 (SysV alignment)
+    };
+    append_mov_imm64(
+        code, 0U,
+        static_cast<std::uint64_t>(
+            reinterpret_cast<std::uintptr_t>(
+                &outside_guest_ip_openat_probe)));
+    code.push_back(std::byte{0xff});
+    code.push_back(std::byte{0xd0}); // call rax
+    code.push_back(std::byte{0x48});
+    code.push_back(std::byte{0x83});
+    code.push_back(std::byte{0xc4});
+    code.push_back(std::byte{0x08}); // add rsp, 8
+    const auto fault_offset = code.size();
+    code.push_back(std::byte{0x0f});
+    code.push_back(std::byte{0x0b}); // UD2
+
+    auto image = make_guest_image(base, stack_base, page, std::move(code));
+    auto prepared =
+        astraea::execution::prepare_linux_guest_memory(image);
+    REQUIRE(prepared.has_value());
+
+    const auto result =
+        astraea::execution::enter_linux_guest_with_seccomp_syscall_trap(
+            image,
+            prepared.value(),
+            astraea::execution::make_synthetic_initial_context(image));
+    REQUIRE(result.has_value());
+    const auto* stopped =
+        std::get_if<astraea::execution::ExecutionStop>(&result.value());
+    REQUIRE(stopped != nullptr);
+    REQUIRE(stopped->reason == ExecutionStopReason::guest_fault);
+    REQUIRE(stopped->has_fault);
+    REQUIRE(stopped->fault.kind == GuestFaultKind::illegal_instruction);
+    REQUIRE(stopped->context.rip ==
+            base + static_cast<std::uint64_t>(fault_offset));
+    // EPERM, not a successful host FD and not an untyped guest syscall.
+    REQUIRE(stopped->context.rax ==
+            static_cast<std::uint64_t>(
+                -static_cast<std::int64_t>(EPERM)));
+}
 
 TEST_CASE(
     "Linux seccomp guest syscall interception availability matches native host",

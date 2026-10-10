@@ -1024,8 +1024,29 @@ install_guest_executable_syscall_filter(
         std::endian::native ==
         std::endian::little);
 
+    // These host-resource syscalls must not succeed even when guest control
+    // flow reaches an instruction outside the registered guest IP ranges.
+    // This is defense in depth, NOT a sandbox: many host syscalls and any
+    // already-open file descriptors remain outside this scoped policy.
+    constexpr std::array<int, 14U> kDeniedOutsideGuestIp{
+        SYS_open,
+        SYS_openat,
+        SYS_openat2,
+        SYS_creat,
+        SYS_socket,
+        SYS_socketpair,
+        SYS_connect,
+        SYS_bind,
+        SYS_listen,
+        SYS_accept,
+        SYS_accept4,
+        SYS_execve,
+        SYS_execveat,
+        SYS_ptrace,
+    };
     constexpr std::size_t kInstructionsPerRange = 11U;
-    constexpr std::size_t kTrailingInstructions = 1U;
+    constexpr std::size_t kTrailingInstructions =
+        2U + 2U * kDeniedOutsideGuestIp.size();
     constexpr auto kMaxProgramLength =
         static_cast<std::size_t>(
             std::numeric_limits<
@@ -1175,6 +1196,31 @@ install_guest_executable_syscall_filter(
                     SECCOMP_RET_TRAP));
         }
 
+        // All original guest-IP syscall traps take precedence. Outside
+        // those ranges, refuse selected host resource acquisitions rather
+        // than allowing a guest-to-host control-flow escape to open files,
+        // create sockets, execute programs, or ptrace another process.
+        program.push_back(
+            bpf_statement(
+                kLoadAbsoluteWord,
+                static_cast<std::uint32_t>(
+                    offsetof(seccomp_data, nr))));
+        for (const int syscall_number : kDeniedOutsideGuestIp) {
+            program.push_back(
+                bpf_jump(
+                    kJumpEqual,
+                    static_cast<std::uint32_t>(syscall_number),
+                    0U,
+                    1U));
+            program.push_back(
+                bpf_statement(
+                    kReturnConstant,
+                    SECCOMP_RET_ERRNO |
+                        static_cast<std::uint32_t>(EPERM)));
+        }
+        // Existing worker protocol/teardown needs host syscalls after the
+        // guest stop. Remaining ALLOW is intentionally NOT a hostile-code
+        // security guarantee; the wider escape remains open under #410.
         program.push_back(
             bpf_statement(
                 kReturnConstant,
