@@ -484,7 +484,8 @@ TEST_CASE(
             ElfErrorCode::unsupported_file_type);
 
     image[8] = std::byte{2U};
-    for (const std::uint16_t type : {2U, 0xfe10U, 0xfe18U}) {
+    for (const auto type : std::array<std::uint16_t, 3U>{
+             2U, 0xfe10U, 0xfe18U}) {
         write_u16(image, 16U, type);
         const auto rejected = astraea::loader::parse_elf64(
             image, ElfParseProfile::ps5_marked_raw);
