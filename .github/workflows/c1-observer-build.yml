@@ -721,3 +721,104 @@ jobs:
             --report "$RUNNER_TEMP/public-two-elf-lexical-closure.json"
           test -s "$RUNNER_TEMP/public-two-elf-lexical-closure.json"
           echo "HOST-ONLY TWO-ARTIFACT DEMAND REPORT PASS; NO GUEST EXECUTION OR BINDING."
+
+      - name: Build independently authored minimal PS5-format entry in isolated pinned worktree
+        env:
+          PINNED_BLACKBEAR: 2f672d1c2f508e26f82ce6e27cef289a0861413c
+        run: |
+          git -C "$RUNNER_TEMP/ps5-native-app-boilerplate" worktree add --detach \
+            "$RUNNER_TEMP/astraea-minimal-native-title" "$PINNED_BLACKBEAR"
+          python3 tools/reference/ps5_process_entry_observer/prepare_minimal_public_title.py \
+            --checkout "$RUNNER_TEMP/astraea-minimal-native-title"
+          ln -s "$RUNNER_TEMP/ps5-native-app-boilerplate/.deps" \
+            "$RUNNER_TEMP/astraea-minimal-native-title/.deps"
+          make --directory="$RUNNER_TEMP/astraea-minimal-native-title" \
+            USE_CCACHE=0 APP_SOURCE_DIR=astraea_minimal APP_ASSETS= app
+
+      - name: Require exact minimal PS5-format entry and pre-entry refusal
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import hashlib
+          import os
+          import struct
+          import subprocess
+
+          root = Path(os.environ["RUNNER_TEMP"])
+          title = root / "astraea-minimal-native-title/build/eboot.elf"
+          cli = root / "astraea-native-title-smoke/astraea"
+          data = title.read_bytes()
+          if len(data) < 64 or data[:6] != b"\x7fELF\x02\x01":
+              raise SystemExit("minimal title is not ELF64 little endian")
+          typ, machine = struct.unpack_from("<HH", data, 16)
+          entry, phoff = struct.unpack_from("<QQ", data, 24)
+          phentsize, phnum = struct.unpack_from("<HH", data, 54)
+          if (typ, machine) != (0xfe10, 62) or phentsize != 56 or not 1 <= phnum <= 32:
+              raise SystemExit("minimal title ELF identity unexpected")
+          if phoff > len(data) or phnum * 56 > len(data) - phoff:
+              raise SystemExit("minimal title program headers out of bounds")
+          matches = []
+          for index in range(phnum):
+              typ, flags, off, vaddr, _paddr, fsize, _msize, _align = (
+                  struct.unpack_from("<IIQQQQQQ", data, phoff + 56 * index))
+              if typ != 1 or not flags & 1 or entry < vaddr:
+                  continue
+              delta = entry - vaddr
+              if delta < fsize and off <= len(data) and delta <= len(data) - off:
+                  matches.append(off + delta)
+          if len(matches) != 1 or data[matches[0]:matches[0]+2] != b"\x0f\x0b":
+              raise SystemExit("authored first instruction is not the exact UD2 stop")
+
+          def report(mode):
+              run = subprocess.run(
+                  [str(cli), mode, str(title)], capture_output=True,
+                  text=True, timeout=30, check=False)
+              if run.returncode or run.stderr.strip():
+                  raise SystemExit(f"{mode}: diagnostic failed: {run.stderr[:400]}")
+              fields = {}
+              for row in run.stdout.splitlines()[1:]:
+                  if "=" not in row:
+                      continue
+                  key, value = row.split("=", 1)
+                  if key in fields:
+                      raise SystemExit(f"duplicate {mode} field {key}")
+                  fields[key] = value
+              return fields
+
+          profile = report("profile")
+          deps = report("dependencies")
+          stop = report("diagnose")
+          for key in ("generic_needed_records", "sce_needed_module_records",
+                      "sce_import_library_records"):
+              if deps.get(key) != "0":
+                  raise SystemExit(f"minimal title depends on unexpected runtime service: {key}={deps.get(key)}")
+          # All eight relocations are source-converter-owned RELATIVE
+          # process-parameter pointers, not unresolved external services.
+          relocation_count = int(deps["relocation_records"])
+          if relocation_count != 8:
+              raise SystemExit(f"minimal source relocation count drifted: {relocation_count}")
+          for index in range(relocation_count):
+              row = f"relocation[{index}]"
+              if (deps.get(row + ".type") != "8" or
+                  deps.get(row + ".symbol_index") != "0" or
+                  deps.get(row + ".has_addend") != "1"):
+                  raise SystemExit(f"unexpected minimal relative relocation: {row}")
+          count = int(deps["dynamic_symbol_records"])
+          if count > 8:
+              raise SystemExit("minimal entry unexpectedly expanded its dynamic ABI")
+          for i in range(count):
+              if deps.get(f"symbol[{i}].undefined") == "1" and deps.get(
+                      f"symbol[{i}].name_hex", ""):
+                  raise SystemExit("minimal entry contains an undefined named import")
+          if stop.get("stage") != "pre_entry" or stop.get("boundary") != "unsupported_relocations":
+              raise SystemExit(f"unexpected minimal entry boundary: {stop}")
+          if deps.get("resolution") != "not_attempted" or deps.get(
+                  "guest_instructions") != "0":
+              raise SystemExit("static manifest falsely claimed guest execution")
+          print("MINIMAL PS5-FORMAT SOURCE-BUILT TITLE PREFLIGHT PASS")
+          print("title_sha256=" + hashlib.sha256(data).hexdigest())
+          print("entry=" + hex(entry))
+          print("profile_relocations=" + profile.get("total_relocations", "unknown"))
+          print("first_typed_boundary=" + stop["boundary"])
+          print("GUEST INSTRUCTIONS=0; NO REAL TITLE ABI, CONSOLE, OR GAMEPLAY CLAIM")
+          PY
