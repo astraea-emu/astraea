@@ -58,7 +58,7 @@ def elf(data: bytes, *, client: bool) -> dict:
     dynamic = [p for p in ph if p[0] == 2]
     if len(dynamic) != 1 or dynamic[0][5] % 16:
         raise FixtureError("expected one ordinary PT_DYNAMIC")
-    if entry == 0 if client else entry != 0:
+    if entry == 0:
         raise FixtureError("unexpected linked entry-point policy")
     fixups = {24}
     for i, p in enumerate(ph):
