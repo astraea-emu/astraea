@@ -30,6 +30,7 @@ add_executable(astraea_core_tests
     loader/public_sce_relocation_demand_tests.cpp
     loader/dynamic_string_tests.cpp
     loader/sysv_hash_tests.cpp
+    loader/gnu_hash_tests.cpp
     loader/dynamic_symbols_tests.cpp
     loader/sce_symbol_identity_tests.cpp
     loader/sce_dynamic_symbol_tests.cpp
