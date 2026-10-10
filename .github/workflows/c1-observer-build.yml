@@ -133,9 +133,10 @@ jobs:
           cmake -S . -B "$RUNNER_TEMP/astraea-native-title-smoke" -G Ninja \
             -DCMAKE_BUILD_TYPE=Release \
             -DBUILD_TESTING=OFF \
-            -DASTRAEA_WARNINGS_AS_ERRORS=ON
+            -DASTRAEA_WARNINGS_AS_ERRORS=ON \
+            -DASTRAEA_BUILD_C1_RESEARCH=ON
           cmake --build "$RUNNER_TEMP/astraea-native-title-smoke" \
-            --target astraea --parallel 3
+            --target astraea astraea_c1_owned_entry_research --parallel 3
 
       - name: Probe public independent PS5-format title with Astraea
         run: |
@@ -844,3 +845,17 @@ jobs:
           print("first_typed_boundary=" + stop["boundary"])
           print("GUEST INSTRUCTIONS=0; NO REAL TITLE ABI, CONSOLE, OR GAMEPLAY CLAIM")
           PY
+
+      - name: Execute source-pinned minimal PS5-format first UD2 in the sealed research worker
+        run: |
+          "$RUNNER_TEMP/astraea-native-title-smoke/astraea_c1_owned_entry_research" \
+            "$RUNNER_TEMP/astraea-minimal-native-title/build/eboot.elf" \
+            | tee "$RUNNER_TEMP/astraea-c1-owned-first-instruction.txt"
+          grep -Fx "PINNED OWNED PS5-FORMAT FIRST INSTRUCTION PASS" \
+            "$RUNNER_TEMP/astraea-c1-owned-first-instruction.txt"
+          grep -Fx "supervised_repeated_guest_faults=2" \
+            "$RUNNER_TEMP/astraea-c1-owned-first-instruction.txt"
+          grep -Fx "tampered_source=refused_before_entry" \
+            "$RUNNER_TEMP/astraea-c1-owned-first-instruction.txt"
+          grep -Fx "commercial_title_execution=not_attempted" \
+            "$RUNNER_TEMP/astraea-c1-owned-first-instruction.txt"
