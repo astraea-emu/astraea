@@ -131,6 +131,9 @@ jobs:
                   raise SystemExit(f"raw {mode} returned empty success")
               if result.returncode != 0 and not result.stderr.strip():
                   raise SystemExit(f"raw {mode} refused without diagnostics")
+              if mode == "profile" and "dynamic_symbol_error=4" in result.stderr:
+                  raise SystemExit(
+                      "GNU hash symbol-count evidence did not retire the exact prior blocker")
               print(f"ASTRAEA_RAW_{mode.upper()}_RC={result.returncode}")
               print(f"ASTRAEA_RAW_{mode.upper()}_STDOUT_BEGIN")
               print(result.stdout[:12000].rstrip())
