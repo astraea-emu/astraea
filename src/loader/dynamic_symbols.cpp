@@ -2,6 +2,7 @@
 #include <astraea/loader/gnu_hash.hpp>
 
 #include <array>
+#include <algorithm>
 #include <cstddef>
 #include <cstdint>
 #include <limits>
@@ -409,6 +410,62 @@ DynamicSymbolDescriptorResult build_dynamic_symbol_table_descriptor(
                 std::nullopt,
                 0,
                 descriptor.range.base()));
+    }
+
+    // A hash-derived count is not sufficient evidence that every declared
+    // .dynsym byte exists. Verify the entire claimed table through the
+    // validated source-backed view, with bounded temporary storage.
+    // GNU-hash count evidence is capped at one million symbols upstream.
+    // No guest memory is mutated, and no guest instruction executes.
+    if (gnu_count.has_value()) {
+        constexpr std::size_t kChunkBytes = 4096U;
+        std::array<std::byte, kChunkBytes> bytes{};
+        for (std::uint64_t offset = 0U; offset < byte_size;) {
+            const auto remaining = byte_size - offset;
+            const auto chunk_size = static_cast<std::size_t>(
+                std::min<std::uint64_t>(remaining, kChunkBytes));
+            const auto address = astraea::memory::GuestAddress::checked_add(
+                descriptor.range.base(),
+                astraea::memory::GuestSize{offset});
+            if (!address.has_value()) {
+                return DynamicSymbolDescriptorResult::failure(
+                    symbol_error(
+                        DynamicSymbolErrorCode::symbol_table_range_overflow,
+                        kDtSymtab,
+                        symtab->source_entry_index,
+                        std::nullopt,
+                        offset,
+                        descriptor.range.base()));
+            }
+            const auto range = astraea::memory::GuestRange::create(
+                address.value(), astraea::memory::GuestSize{chunk_size});
+            if (!range.has_value()) {
+                return DynamicSymbolDescriptorResult::failure(
+                    symbol_error(
+                        DynamicSymbolErrorCode::symbol_table_range_overflow,
+                        kDtSymtab,
+                        symtab->source_entry_index,
+                        std::nullopt,
+                        offset,
+                        address.value()));
+            }
+            const auto copy = image_view.copy_bytes(
+                range.value(),
+                std::span<std::byte>{bytes.data(), chunk_size});
+            if (!copy.has_value()) {
+                return DynamicSymbolDescriptorResult::failure(
+                    symbol_error(
+                        DynamicSymbolErrorCode::symbol_entry_unreadable,
+                        kDtSymtab,
+                        symtab->source_entry_index,
+                        std::nullopt,
+                        offset / kElf64SymbolSize,
+                        copy.error().guest_address.value_or(address.value()),
+                        std::nullopt,
+                        copy.error()));
+            }
+            offset += chunk_size;
+        }
     }
 
     return DynamicSymbolDescriptorResult::success(descriptor);
