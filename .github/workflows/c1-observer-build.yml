@@ -95,6 +95,21 @@ jobs:
           print('HOST BUILD ONLY; no hardware execution or C1 ABI promotion')
           PY
 
+      - name: Verify source-authored CRT entry has compiled external init dependency
+        run: |
+          python3 tools/reference/ps5_process_entry_observer/verify_crt_external_relocation.py \
+            --object "$RUNNER_TEMP/ps5-native-app-boilerplate/build/obj/app_crt.o" \
+            --entry astraea_reference_crt_start \
+            --undefined _init_env
+          if python3 tools/reference/ps5_process_entry_observer/verify_crt_external_relocation.py \
+            --object "$RUNNER_TEMP/ps5-native-app-boilerplate/build/obj/app_crt.o" \
+            --entry astraea_reference_crt_start \
+            --undefined __astraea_deliberately_missing_dependency; then
+            echo "missing external symbol was incorrectly admitted" >&2
+            exit 1
+          fi
+          echo "COMPILED CRT RELOCATION INSPECTED; NO PROVIDER BINDING OR GUEST ENTRY."
+
       - name: Exercise real-ELF offline analysis with labelled synthetic logs
         run: |
           python3 tools/reference/ps5_process_entry_observer/offline_pipeline_smoke.py \
