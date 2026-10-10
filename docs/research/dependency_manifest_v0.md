@@ -1,6 +1,6 @@
 # Dependency manifest v0 — read-only, opaque identity evidence
 
-Status: **C1 software-first stage A (provisional until PR #358 merges)**
+**Historical contract (stage A):** PR #358 and subsequent symbol, relocation and module-graph stages have merged. The stage-B requirements below record the original design sequence, not an outstanding next action. For the current implementation frontier, see [Project Status](../STATUS.md).
 
 This companion to the structural `astraea profile` command prints exact
 dependency records from a locally supplied, lawfully available PS5/SCE ELF:
