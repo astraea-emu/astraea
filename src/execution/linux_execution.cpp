@@ -1048,7 +1048,7 @@ install_guest_executable_syscall_filter(
     // After registered guest ranges: architecture + x32 ABI guard (6 BPF
     // instructions), 14 selected syscall checks, then the host fallback.
     constexpr std::size_t kTrailingInstructions =
-        7U + 2U * kDeniedOutsideGuestIp.size();
+        8U + 2U * kDeniedOutsideGuestIp.size();
     constexpr auto kMaxProgramLength =
         static_cast<std::size_t>(
             std::numeric_limits<
