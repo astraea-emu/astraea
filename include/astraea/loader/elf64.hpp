@@ -13,6 +13,9 @@ namespace astraea::loader {
 enum class ElfParseProfile {
     generic,
     ps5_sce,
+    // Only structural analysis of publicly PS5-marked standard ET_DYN ELF.
+    // This is not a Sony SCE executable class or runtime admission.
+    ps5_marked_raw,
 };
 
 enum class ElfErrorCode {
