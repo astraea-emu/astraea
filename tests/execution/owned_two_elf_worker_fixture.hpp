@@ -168,7 +168,8 @@ make_owned_binary_pair(std::uint64_t code, std::uint64_t page) {
     // The assembler-produced entry is copied from a build-time checked ELF
     // object. Only its owned GOT displacement varies with guest placement.
     std::copy(kCompiledOwnedClient.begin(), kCompiledOwnedClient.end(),
-        client_bytes.begin() + static_cast<std::size_t>(page));
+        std::span<std::byte>{client_bytes}.subspan(
+            static_cast<std::size_t>(page), kCompiledOwnedClient.size()).begin());
     const auto next_rip = code + 16U;
     if (got < next_rip ||
         got - next_rip > static_cast<std::uint64_t>(
@@ -212,7 +213,8 @@ make_owned_binary_pair(std::uint64_t code, std::uint64_t page) {
         provider_address, page, page);
     const auto p = static_cast<std::size_t>(page);
     std::copy(kCompiledOwnedProvider.begin(), kCompiledOwnedProvider.end(),
-        provider_bytes.begin() + p);
+        std::span<std::byte>{provider_bytes}.subspan(
+            p, kCompiledOwnedProvider.size()).begin());
     detail::write_le<std::uint64_t>(provider_bytes, p + 2U, gate);
 
     return OwnedBinaryPair{
