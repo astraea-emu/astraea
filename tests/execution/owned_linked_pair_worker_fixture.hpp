@@ -202,7 +202,7 @@ run_owned_linked_pair_worker(
         definition->symbol.value != provider_entry ||
         symbol->name.identity.value() != definition->name.identity.value() ||
         relocation->target != memory::GuestAddress{got} ||
-        relocation->raw_type != 7U)
+        relocation->relocation_type != 7U)
         return std::nullopt;
 
     const std::array modules{
