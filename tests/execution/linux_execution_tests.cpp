@@ -76,6 +76,19 @@ using astraea::memory::MappingIntent;
     return -static_cast<std::int64_t>(errno);
 }
 
+// Linux kernels before 5.4 could route native syscall numbers 512..547
+// through the x32 table. A reserved number must be denied by this filter,
+// not merely return ENOSYS on a current host kernel.
+[[gnu::noinline]] std::int64_t outside_guest_ip_legacy_x32_probe() noexcept {
+    constexpr long kLegacyX32Alias = 521L;
+    errno = 0;
+    const long result = ::syscall(kLegacyX32Alias);
+    if (result >= 0) {
+        return 0;
+    }
+    return -static_cast<std::int64_t>(errno);
+}
+
 // The 32-bit syscall entry shares the CPU with native x86-64. It must not
 // become a host-side escape, though in-range guest INT 0x80 remains trapped.
 [[gnu::noinline]] std::int64_t outside_guest_ip_int80_probe() noexcept {
@@ -430,6 +443,11 @@ TEST_CASE(
         prove_refusal(static_cast<std::uint64_t>(
             reinterpret_cast<std::uintptr_t>(
                 &outside_guest_ip_x32_probe)));
+    }
+    SECTION("reserved legacy x32 syscall alias") {
+        prove_refusal(static_cast<std::uint64_t>(
+            reinterpret_cast<std::uintptr_t>(
+                &outside_guest_ip_legacy_x32_probe)));
     }
     SECTION("i386 legacy int80 host getpid") {
         prove_refusal(static_cast<std::uint64_t>(
