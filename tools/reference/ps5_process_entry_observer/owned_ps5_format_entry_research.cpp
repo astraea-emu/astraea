@@ -216,7 +216,19 @@ struct Terminal {
 
     stage = 7U;
     const auto applied = e::apply_owned_relative_batch(patches, memory);
-    if (!applied.has_value() || applied->size() != 8U) return std::nullopt;
+    if (!applied.has_value()) {
+        const auto& reason = applied.error();
+        // Precise numeric failure code and index for research CI only.
+        // Do not log guest bytes, pointer contents or a host pathname.
+        stage = 7000U +
+            100U * static_cast<std::uint64_t>(reason.code) +
+            static_cast<std::uint64_t>(reason.patch_index);
+        return std::nullopt;
+    }
+    if (applied->size() != 8U) {
+        stage = 7999U;
+        return std::nullopt;
+    }
     std::array<std::byte, 2U> first_opcode{};
     if (!memory.read(m::GuestAddress{image.elf.header.entry},
                      first_opcode).has_value() ||
