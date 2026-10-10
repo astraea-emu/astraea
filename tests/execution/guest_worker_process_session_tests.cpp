@@ -1,5 +1,6 @@
 #include "owned_two_elf_worker_fixture.hpp"
 #include "owned_linked_elf_worker_fixture.hpp"
+#include "owned_linked_pair_worker_fixture.hpp"
 #include "owned_pair_sha256.hpp"
 
 #include <astraea/execution/guest_worker_process_session.hpp>
@@ -204,6 +205,93 @@ TEST_CASE(
         "50a7fe41e4833f5ac5cfa87ced4a658efc584a5310805dff6fe08f4770335a31");
     REQUIRE(astraea::test::owned_pair_sha256_hex(source->provider) ==
         "da76c429e4d722f618a33396281add0b40bbb6e832b0fa78e21be4a77c4d9834");
+#endif
+}
+
+TEST_CASE(
+    "isolated Linux worker resolves two independently linked ELF modules",
+    "[execution][c1][linked-pair][process][linux]") {
+#if defined(__linux__) && defined(__x86_64__) && defined(MAP_FIXED_NOREPLACE)
+    // These source-authored inputs were linked independently: the client
+    // carries a real JUMP_SLOT relocation and the provider defines its exact
+    // long-form symbol identity. Both complete ELF files remain sealed.
+    auto frozen = astraea::test::make_owned_linked_pair_sealed_bundle();
+    REQUIRE(frozen.has_value());
+    REQUIRE(astraea::test::owned_linked_pair_bundle_matches_source(
+        frozen.value()));
+    const auto original = frozen.value();
+    const auto digest = astraea::test::owned_pair_sha256(original);
+    auto settings = config({"--owned-linked-pair-execution"}, 15000U);
+    settings.linux_artifact_bytes = original;
+    settings.resource_policy =
+        astraea::execution::GuestWorkerResourcePolicy{
+            .process_memory_limit_bytes = std::nullopt,
+            .process_cpu_time_seconds = 5U,
+            .linux_max_open_files = 64U,
+            .linux_disable_core_dumps = true,
+            .linux_disable_file_growth = true,
+        };
+    const auto first =
+        astraea::execution::run_guest_worker_process_session(settings);
+    const auto second =
+        astraea::execution::run_guest_worker_process_session(settings);
+    REQUIRE(first.has_value());
+    REQUIRE(second.has_value());
+    const auto verify = [](const auto& result) {
+        REQUIRE(result.child_exit_code == 0);
+        REQUIRE(result.syscall_request_count == 0U);
+        REQUIRE_FALSE(result.terminal_fault.has_value());
+        REQUIRE_FALSE(result.terminal_diagnostic.has_value());
+        REQUIRE(result.stop.reason ==
+            astraea::execution::GuestWorkerStopReason::
+                normal_guest_return);
+        REQUIRE(result.stop.guest_rip.value() != 0U);
+        REQUIRE(result.stop.worker_id == result.ready.worker_id);
+        REQUIRE(result.stop.thread_id.value == 1U);
+    };
+    verify(first.value());
+    verify(second.value());
+    REQUIRE(settings.linux_artifact_bytes == original);
+    REQUIRE(astraea::test::owned_pair_sha256(
+        settings.linux_artifact_bytes.value()) == digest);
+
+    // Tamper checks reuse the same supervisor/fd3 containment; they cannot
+    // be mistaken for a guest return or a successful import resolution.
+    const auto reject = [&](std::optional<std::vector<std::byte>> altered) {
+        auto invalid = settings;
+        invalid.linux_artifact_bytes = std::move(altered);
+        const auto result =
+            astraea::execution::run_guest_worker_process_session(invalid);
+        REQUIRE(result.has_value());
+        REQUIRE(result->child_exit_code == 0);
+        REQUIRE(result->terminal_diagnostic.has_value());
+        REQUIRE(result->terminal_diagnostic->kind ==
+            astraea::execution::GuestWorkerDiagnosticKind::loader_rejected);
+        REQUIRE(result->terminal_diagnostic->guest_rip.value() == 0U);
+        REQUIRE(result->stop.reason ==
+            astraea::execution::GuestWorkerStopReason::
+                diagnostic_boundary);
+        REQUIRE(result->stop.guest_rip.value() == 0U);
+        REQUIRE_FALSE(result->terminal_fault.has_value());
+    };
+    auto altered_magic = original;
+    altered_magic[0U] ^= std::byte{1};
+    reject(std::move(altered_magic));
+    auto altered_client_import = original;
+    altered_client_import[16U + 24U] ^= std::byte{1};
+    reject(std::move(altered_client_import));
+    auto altered_provider = original;
+    altered_provider.back() ^= std::byte{1};
+    reject(std::move(altered_provider));
+    auto altered_rebase = original;
+    altered_rebase[8U] ^= std::byte{1};
+    reject(std::move(altered_rebase));
+    auto truncated = original;
+    truncated.pop_back();
+    reject(std::move(truncated));
+    reject(std::nullopt);
+#else
+    SUCCEED();
 #endif
 }
 
