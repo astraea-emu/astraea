@@ -6,6 +6,7 @@ on:
     paths:
       - '.github/workflows/c1-public-demo-closure.yml'
       - 'src/app/**'
+      - 'tools/reference/public_breakout_import_audit.py'
       - 'src/loader/**'
       - 'include/astraea/loader/**'
       - 'src/execution/linux_retail_diagnostic.cpp'
@@ -194,4 +195,72 @@ jobs:
           print("PUBLIC GAME-LIKE ELF READ-ONLY FIRST-BOUNDARY RECORD COMPLETE")
           print("retail_first_instruction=not_attempted")
           print("gameplay=not_claimed")
+          PY
+
+      - name: Verify the exact author's NID-to-library import declaration against ELF
+        run: |
+          curl --fail --location --retry 3 --silent --show-error \
+            "https://raw.githubusercontent.com/sharpemu/sharpemu-demo/49e6b3b25678f14ec57a70b907ee215fddb608d8/build.py" \
+            --output "$RUNNER_TEMP/independent-breakout-build.py"
+          "$RUNNER_TEMP/astraea-public-demo-profile/astraea" \
+            dependencies --ps5-raw-elf \
+            "$RUNNER_TEMP/sharpemu-demo-eboot.elf" \
+            > "$RUNNER_TEMP/independent-breakout-manifest.txt"
+          python3 tools/reference/public_breakout_import_audit.py \
+            --author-source "$RUNNER_TEMP/independent-breakout-build.py" \
+            --manifest "$RUNNER_TEMP/independent-breakout-manifest.txt" \
+            | tee "$RUNNER_TEMP/independent-breakout-import-identity.txt"
+          grep -Fx "source_to_elf_nid_matches=19" \
+            "$RUNNER_TEMP/independent-breakout-import-identity.txt"
+          grep -Fx "sony_export_resolution=not_attempted" \
+            "$RUNNER_TEMP/independent-breakout-import-identity.txt"
+          python3 - <<'PY'
+          from pathlib import Path
+          import os
+          import re
+          import subprocess
+          import sys
+
+          root = Path(os.environ["RUNNER_TEMP"])
+          original_source = root / "independent-breakout-build.py"
+          original_manifest = root / "independent-breakout-manifest.txt"
+          tool = Path("tools/reference/public_breakout_import_audit.py")
+          manifest = original_manifest.read_text(encoding="utf-8")
+
+          # A bounded mutation corpus: every mismatch must be rejected.
+          changes = {
+              "unknown_nid": (r"(?m)^symbol\[1\]\.name_hex=[0-9a-f]*$",
+                              "symbol[1].name_hex=" + "61" * 11),
+              "wrong_library": (r"(?m)^generic_needed\[0\]\.name_hex=[0-9a-f]*$",
+                                "generic_needed[0].name_hex=" + "61" * 11),
+              "incorrect_relocation": (r"(?m)^relocation\[1\]\.type=6$",
+                                       "relocation[1].type=8"),
+              "duplicated_symbol": (r"(?m)^symbol\[1\]\.name_hex=[0-9a-f]*$",
+                                    "symbol[1].name_hex=" + "61" * 11 +
+                                    "\nsymbol[1].name_hex=" + "61" * 11),
+          }
+          for name, (pattern, replacement) in changes.items():
+              mutated, count = re.subn(pattern, replacement, manifest)
+              if count != 1:
+                  raise SystemExit(f"test fixture selection failed: {name}")
+              path = root / f"negative-breakout-{name}.txt"
+              path.write_text(mutated, encoding="utf-8")
+              run = subprocess.run(
+                  [sys.executable, str(tool), "--author-source",
+                   str(original_source), "--manifest", str(path)],
+                  capture_output=True, text=True, timeout=15, check=False)
+              if run.returncode != 2 or "AUDIT REFUSED" not in run.stderr:
+                  raise SystemExit(f"invalid import corpus accepted: {name}")
+
+          altered_source = root / "negative-breakout-source.py"
+          altered_source.write_bytes(
+              original_source.read_bytes() + b"\n# intentional source drift\n")
+          run = subprocess.run(
+              [sys.executable, str(tool), "--author-source",
+               str(altered_source), "--manifest", str(original_manifest)],
+              capture_output=True, text=True, timeout=15, check=False)
+          if run.returncode != 2 or "author_source_blob_identity_drift" not in run.stderr:
+              raise SystemExit("unverified upstream author source accepted")
+          print("BREAKOUT IMPORT NEGATIVE AUDIT PASS")
+          print("guest_execution=none")
           PY
