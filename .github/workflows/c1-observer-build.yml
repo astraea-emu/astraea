@@ -698,6 +698,14 @@ jobs:
           print("Host-only raw independently generated ELF; no PS5, no gameplay.")
           PY
 
+      - name: Reject pinned source-built _init_env placeholder semantics
+        run: |
+          python3 tools/reference/ps5_process_entry_observer/verify_public_runtime_stub.py --self-test
+          python3 tools/reference/ps5_process_entry_observer/verify_public_runtime_stub.py \
+            --prx "$RUNNER_TEMP/public-cleanroom-libc.raw.elf" \
+            --api-surface "$RUNNER_TEMP/ps5-native-app-boilerplate/tooling/native/runtime/api-surface.txt"
+          echo "PINNED NON-SONY EXPORT IS A SHARED RETURN STUB; NOT AN INITIALIZER PROVIDER."
+
       - name: Self-test read-only cross-artifact lexical comparison
         run: |
           python3 tools/reference/ps5_process_entry_observer/public_pair_lexical_demand.py \
