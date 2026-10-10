@@ -11,9 +11,9 @@ guess.
 
 > **Research status:** Astraea has not executed a commercial PS5 game's first
 > instruction or rendered a commercial-title frame. Linux x86-64 provides a
-> supervised, fail-closed diagnostic path. Independently authored generic ELFs
-> can execute in a separate research-only path; production PS5-format entry
-> remains disabled pending verified loader and process-start contracts.
+> supervised, fail-closed diagnostic path. Independently authored generic ELFs and an exact source-built PS5-format
+> diagnostic can execute in isolated research-only paths; production
+> commercial-title entry remains disabled pending verified startup contracts.
 
 Astraea is an independent project and is not affiliated with or endorsed by
 Sony Interactive Entertainment.
@@ -24,7 +24,8 @@ Sony Interactive Entertainment.
 | --- | --- |
 | Graphics V0-V3 | **Complete for bounded owned workloads** — AGC/RDNA2 input through typed guest GPU state to deterministic Vulkan execution/readback |
 | Retail C0 | **Complete on Linux x86-64** — supervised sealed-artifact diagnostic with typed first-boundary reporting |
-| Retail C1 | **Active** — two host-linked generic ELF modules execute through a real `JUMP_SLOT` in a supervised research-only worker; a newly source-built minimal PS5-format ELF stops at eight unsupported `RELATIVE` relocations before entry |
+| Retail C1 | **Active, commercial entry blocked** — supervised generic two-ELF `JUMP_SLOT` execution and an exact source-built PS5-format `UD2` first-instruction fault after eight checked `RELATIVE` relocations; synthetic entry only |
+| Public homebrew static closure | **Read-only only** — PS5-marked raw ET_DYN analysis (#406) and bounded GNU-hash symbol counts (#408) are merged; independent Breakout corpus has 5 libraries, 20 dynamic symbols and 20 relocations |
 | Verification S0 | **Established** — multi-platform CI, ASan/UBSan, fuzz smoke, traces, probes, typed unsupported behavior, ADR/provenance discipline |
 | Commercial game boot/playability | **Not claimed** |
 
@@ -57,8 +58,29 @@ Linux x86-64 has a production diagnostic path with:
 An input with no earlier dependency, relocation or TLS blockers reaches
 `unsupported_initial_process_abi`; the selected source-built minimal PS5-format
 ELF instead stops earlier at `unsupported_relocations` (eight `R_X86_64_RELATIVE`
-records). Both are intentional pre-entry boundaries, not successful guest
-execution. See [PR #400](https://github.com/astraea-emu/astraea/pull/400).
+records). These are intentional **production** pre-entry boundaries. An
+**opt-in Linux-only research runner** separately maps the exact source-built
+minimal image, applies all eight relocations and twice reaches its authored
+`UD2` fault under a synthetic entry profile ([PR #403](https://github.com/astraea-emu/astraea/pull/403)).
+That does not admit any commercial PS5 title.
+
+### Independent game-like corpus
+
+[PR #404](https://github.com/astraea-emu/astraea/pull/404) added a
+hash-pinned, independently authored PS5-marked Breakout ELF as a **read-only**
+CI compatibility oracle. Its original production `diagnose` result is
+`loader_rejected` before entry. [PR #406](https://github.com/astraea-emu/astraea/pull/406)
+merged a separately opted-in `profile --ps5-raw-elf` and
+`dependencies --ps5-raw-elf` structural parser without admitting execution.
+
+Merged [PR #408](https://github.com/astraea-emu/astraea/pull/408)
+validates bounded GNU-hash symbol counts and a frozen external report
+of five needed libraries, 20 dynamic symbols and 20 relocations
+(1 `RELATIVE`, 19 `GLOB_DAT`). Merged [PR #409](https://github.com/astraea-emu/astraea/pull/409)
+separately verifies 19/19 imported NIDs against the independent author's pinned
+source declarations. Neither finding is a successful library binding,
+PS5 runtime service, guest instruction or gameplay. Production
+`diagnose` remains deliberately strict. See [current status](docs/STATUS.md).
 
 ### Graphics
 
@@ -112,10 +134,13 @@ has no runtime imports and eight standard `R_X86_64_RELATIVE` relocations;
 production `diagnose` stops at `unsupported_relocations` before entry.
 Separately, [PR #399](https://github.com/astraea-emu/astraea/pull/399)
 demonstrates actual supervised host-linked two-ELF `JUMP_SLOT` execution in a
-**generic, research-only** profile. The next integration proof is to validate
-and apply the selected PS5-format image's relative relocations in the
-research-only supervised path, then reach a controlled first-instruction
-terminal fault. Do not infer a commercial-title ABI from this test.
+**generic, research-only** profile. An opt-in Linux-only, source-pinned research path now applies those eight
+real relocations and reproduces the authored PS5-format `UD2` fault in two
+sealed worker launches, with tampered-source refusal. This is **not** evidence
+of Sony startup ABI correctness or any commercial game instruction. The next integration work is one verified test-only external-service boundary
+for that pinned ELF, only after reviewing and strengthening the native worker's
+control-flow and syscall-containment guarantees. No full Sony process-entry
+contract or retail game execution has been established.
 
 For the exact PC-first gating sequence and the deliberately delayed firmware-13.00 hardware experiment, read the [C1 execution and hardware readiness plan](docs/research/c1_pc_first_execution_hardware_readiness_2026-10-09.md).
 
