@@ -66,6 +66,9 @@ enum class ProbeMode {
     hang_after_run,
     bad_frame_after_hello,
     syscall_roundtrip,
+    syscall_zero_request_id,
+    syscall_zero_thread_id,
+    syscall_zero_rip,
     native_syscall_roundtrip,
     native_seccomp_syscall_roundtrip,
     native_access_fault,
@@ -234,6 +237,15 @@ using ReadResult =
         if (argument ==
             "--syscall-roundtrip") {
             return ProbeMode::syscall_roundtrip;
+        }
+        if (argument == "--syscall-zero-request-id") {
+            return ProbeMode::syscall_zero_request_id;
+        }
+        if (argument == "--syscall-zero-thread-id") {
+            return ProbeMode::syscall_zero_thread_id;
+        }
+        if (argument == "--syscall-zero-rip") {
+            return ProbeMode::syscall_zero_rip;
         }
         if (argument ==
             "--native-syscall-roundtrip") {
@@ -1945,12 +1957,26 @@ int main(int argc, char** argv) {
         GuestWorkerStopReason::normal_guest_return;
     astraea::memory::GuestAddress stop_rip{0U};
 
-    if (mode == ProbeMode::syscall_roundtrip) {
+    if (mode == ProbeMode::syscall_roundtrip ||
+        mode == ProbeMode::syscall_zero_request_id ||
+        mode == ProbeMode::syscall_zero_thread_id ||
+        mode == ProbeMode::syscall_zero_rip) {
         const GuestWorkerSyscallRequest syscall_request{
             .request_id =
-                GuestRequestId{.value = 41U},
+                GuestRequestId{
+                    .value =
+                        mode == ProbeMode::syscall_zero_request_id
+                            ? 0U
+                            : 41U,
+                },
             .worker_id = kWorkerId,
-            .thread_id = kThreadId,
+            .thread_id =
+                GuestThreadId{
+                    .value =
+                        mode == ProbeMode::syscall_zero_thread_id
+                            ? 0U
+                            : kThreadId.value,
+                },
             .guest_syscall_number =
                 0x5152535455565758ULL,
             .arguments = {
@@ -1963,7 +1989,9 @@ int main(int argc, char** argv) {
             },
             .guest_rip =
                 astraea::memory::GuestAddress{
-                    0x400100U},
+                    mode == ProbeMode::syscall_zero_rip
+                        ? 0U
+                        : 0x400100U},
         };
 
         if (!write_message(
