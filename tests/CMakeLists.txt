@@ -255,6 +255,56 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND
         DEPENDS "${ASTRAEA_OWNED_LINKED_HEADER}")
     add_dependencies(astraea_guest_worker_probe astraea_owned_linked_elf)
     add_dependencies(astraea_core_tests astraea_owned_linked_elf)
+
+    # Two complete independently linked ELF64 DYN inputs with a real
+    # linker-produced JUMP_SLOT import and defined long-form export.
+    # Rebase only checker-enumerated metadata under the owned test worker.
+    set(ASTRAEA_LINKED_PAIR_CLIENT_OBJ
+        "${ASTRAEA_OWNED_ELF_GENERATED_DIR}/owned_linked_client.o")
+    set(ASTRAEA_LINKED_PAIR_PROVIDER_OBJ
+        "${ASTRAEA_OWNED_ELF_GENERATED_DIR}/owned_linked_provider.o")
+    set(ASTRAEA_LINKED_PAIR_CLIENT_ELF
+        "${ASTRAEA_OWNED_ELF_GENERATED_DIR}/owned_linked_client.so")
+    set(ASTRAEA_LINKED_PAIR_PROVIDER_ELF
+        "${ASTRAEA_OWNED_ELF_GENERATED_DIR}/owned_linked_provider.so")
+    set(ASTRAEA_LINKED_PAIR_HEADER
+        "${ASTRAEA_OWNED_ELF_GENERATED_DIR}/owned_linked_pair_bytes.hpp")
+    add_custom_command(
+        OUTPUT "${ASTRAEA_LINKED_PAIR_HEADER}"
+        BYPRODUCTS
+            "${ASTRAEA_LINKED_PAIR_CLIENT_OBJ}"
+            "${ASTRAEA_LINKED_PAIR_PROVIDER_OBJ}"
+            "${ASTRAEA_LINKED_PAIR_CLIENT_ELF}"
+            "${ASTRAEA_LINKED_PAIR_PROVIDER_ELF}"
+        COMMAND "${CMAKE_C_COMPILER}" -c -x assembler
+            "${CMAKE_CURRENT_SOURCE_DIR}/execution/owned_linked_client.S"
+            -o "${ASTRAEA_LINKED_PAIR_CLIENT_OBJ}"
+        COMMAND "${CMAKE_C_COMPILER}" -c -x assembler
+            "${CMAKE_CURRENT_SOURCE_DIR}/execution/owned_linked_provider.S"
+            -o "${ASTRAEA_LINKED_PAIR_PROVIDER_OBJ}"
+        COMMAND "${CMAKE_LINKER}" -shared --hash-style=sysv --build-id=none
+            -z norelro -e astraea_linked_client_entry
+            -o "${ASTRAEA_LINKED_PAIR_CLIENT_ELF}"
+            "${ASTRAEA_LINKED_PAIR_CLIENT_OBJ}"
+        COMMAND "${CMAKE_LINKER}" -shared --hash-style=sysv --build-id=none
+            -z norelro -e astraea_linked_provider_entry
+            -o "${ASTRAEA_LINKED_PAIR_PROVIDER_ELF}"
+            "${ASTRAEA_LINKED_PAIR_PROVIDER_OBJ}"
+        COMMAND "${Python3_EXECUTABLE}"
+            "${CMAKE_CURRENT_SOURCE_DIR}/execution/embed_owned_linked_pair.py"
+            --client "${ASTRAEA_LINKED_PAIR_CLIENT_ELF}"
+            --provider "${ASTRAEA_LINKED_PAIR_PROVIDER_ELF}"
+            --output "${ASTRAEA_LINKED_PAIR_HEADER}"
+        DEPENDS
+            execution/owned_linked_client.S
+            execution/owned_linked_provider.S
+            execution/embed_owned_linked_pair.py
+        VERBATIM
+    )
+    add_custom_target(astraea_owned_linked_pair
+        DEPENDS "${ASTRAEA_LINKED_PAIR_HEADER}")
+    add_dependencies(astraea_guest_worker_probe astraea_owned_linked_pair)
+    add_dependencies(astraea_core_tests astraea_owned_linked_pair)
 endif()
 
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux" OR
