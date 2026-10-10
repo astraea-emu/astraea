@@ -17,9 +17,13 @@ void print_usage() {
         << "Usage:\n"
         << "  astraea diagnose <ps5-elf-or-eboot>\n"
         << "  astraea profile <ps5-elf-or-eboot>\n"
+        << "  astraea profile --ps5-raw-elf <marked-et-dyn>\n"
         << "  astraea dependencies <ps5-elf-or-eboot>\n"
+        << "  astraea dependencies --ps5-raw-elf <marked-et-dyn>\n"
         << "  astraea dependencies --public-sce-pack-v1 <ps5-elf-or-eboot>\n"
         << "\n"
+        << "The opt-in raw-ELF profile accepts only ET_DYN with PS5 OSABI 9/2; "
+           "it never enables production guest entry. "
         << "The profile command is read-only structural analysis. "
            "The retail diagnostic is currently Linux x86-64 only. "
            "It reports the first verified unsupported boundary; "
@@ -42,6 +46,21 @@ int main(int argc, char** argv) {
         return astraea::app::
             run_linux_retail_diagnostic(
                 argv[2]);
+    }
+
+    if (argc == 4 &&
+        std::string_view{argv[1]} == "profile" &&
+        std::string_view{argv[2]} == "--ps5-raw-elf") {
+        return astraea::app::run_retail_closure_profile(
+            argv[3], astraea::loader::ElfParseProfile::ps5_marked_raw);
+    }
+
+    if (argc == 4 &&
+        std::string_view{argv[1]} == "dependencies" &&
+        std::string_view{argv[2]} == "--ps5-raw-elf") {
+        return astraea::app::run_retail_dependency_manifest(
+            argv[3], false,
+            astraea::loader::ElfParseProfile::ps5_marked_raw);
     }
 
     if (argc == 3 &&

@@ -445,3 +445,52 @@ TEST_CASE(
         astraea::loader::ElfErrorCode::
             unsupported_file_type);
 }
+
+
+TEST_CASE(
+    "PS5-marked raw ET_DYN is opt-in analysis, never the SCE executable class",
+    "[loader][elf64][ps5-raw][refusal]") {
+    using astraea::loader::ElfParseProfile;
+    using astraea::loader::ElfErrorCode;
+
+    auto image = make_elf();
+    write_u16(image, 16U, 3U);  // standard ET_DYN
+    image[7] = std::byte{9U};    // PS5-marked OSABI, public demo convention
+    image[8] = std::byte{2U};
+
+    REQUIRE(astraea::loader::parse_elf64(
+                image, ElfParseProfile::generic).has_value());
+    REQUIRE(astraea::loader::parse_elf64(
+                image, ElfParseProfile::ps5_marked_raw).has_value());
+
+    auto strict_sce = astraea::loader::parse_elf64(
+        image, ElfParseProfile::ps5_sce);
+    REQUIRE_FALSE(strict_sce.has_value());
+    REQUIRE(strict_sce.error().code == ElfErrorCode::unsupported_file_type);
+
+    image[7] = std::byte{0U};
+    auto non_ps5_osabi = astraea::loader::parse_elf64(
+        image, ElfParseProfile::ps5_marked_raw);
+    REQUIRE_FALSE(non_ps5_osabi.has_value());
+    REQUIRE(non_ps5_osabi.error().code ==
+            ElfErrorCode::unsupported_file_type);
+
+    image[7] = std::byte{9U};
+    image[8] = std::byte{1U};
+    auto incorrect_abi = astraea::loader::parse_elf64(
+        image, ElfParseProfile::ps5_marked_raw);
+    REQUIRE_FALSE(incorrect_abi.has_value());
+    REQUIRE(incorrect_abi.error().code ==
+            ElfErrorCode::unsupported_file_type);
+
+    image[8] = std::byte{2U};
+    for (const auto type : std::array<std::uint16_t, 3U>{
+             2U, 0xfe10U, 0xfe18U}) {
+        write_u16(image, 16U, type);
+        const auto rejected = astraea::loader::parse_elf64(
+            image, ElfParseProfile::ps5_marked_raw);
+        REQUIRE_FALSE(rejected.has_value());
+        REQUIRE(rejected.error().code ==
+                ElfErrorCode::unsupported_file_type);
+    }
+}

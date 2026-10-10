@@ -121,6 +121,23 @@ jobs:
                       raise SystemExit("unexpected post-entry or untyped diagnostic")
                   if "boundary=" not in stdout:
                       raise SystemExit("missing diagnostic boundary")
+          for mode in ("profile", "dependencies"):
+              result = subprocess.run(
+                  [str(executable), mode, "--ps5-raw-elf", str(guest)],
+                  capture_output=True, text=True, timeout=30, check=False)
+              if result.returncode < 0 or result.returncode > 10:
+                  raise SystemExit(f"raw {mode} unexpectedly failed: {result.returncode}")
+              if result.returncode == 0 and not result.stdout.strip():
+                  raise SystemExit(f"raw {mode} returned empty success")
+              if result.returncode != 0 and not result.stderr.strip():
+                  raise SystemExit(f"raw {mode} refused without diagnostics")
+              print(f"ASTRAEA_RAW_{mode.upper()}_RC={result.returncode}")
+              print(f"ASTRAEA_RAW_{mode.upper()}_STDOUT_BEGIN")
+              print(result.stdout[:12000].rstrip())
+              print(f"ASTRAEA_RAW_{mode.upper()}_STDOUT_END")
+              print(f"ASTRAEA_RAW_{mode.upper()}_STDERR_BEGIN")
+              print(result.stderr[:4000].rstrip())
+              print(f"ASTRAEA_RAW_{mode.upper()}_STDERR_END")
           print("PUBLIC GAME-LIKE ELF READ-ONLY FIRST-BOUNDARY RECORD COMPLETE")
           print("retail_first_instruction=not_attempted")
           print("gameplay=not_claimed")
