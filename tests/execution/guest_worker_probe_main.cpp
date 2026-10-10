@@ -1,5 +1,6 @@
 #include "owned_two_elf_worker_fixture.hpp"
 #include "owned_linked_elf_worker_fixture.hpp"
+#include "owned_linked_pair_worker_fixture.hpp"
 
 #include <astraea/execution/guest_worker_protocol.hpp>
 #include <astraea/execution/guest_worker_artifact.hpp>
@@ -71,6 +72,7 @@ enum class ProbeMode {
     native_illegal_instruction_fault,
     owned_two_elf_execution,
     owned_linked_elf_execution,
+    owned_linked_pair_execution,
     fault_then_syscall,
     burn_cpu,
     artifact_probe,
@@ -248,6 +250,9 @@ using ReadResult =
         }
         if (argument == "--owned-linked-elf-execution") {
             return ProbeMode::owned_linked_elf_execution;
+        }
+        if (argument == "--owned-linked-pair-execution") {
+            return ProbeMode::owned_linked_pair_execution;
         }
         if (argument ==
             "--native-access-fault") {
@@ -1666,7 +1671,8 @@ int main(int argc, char** argv) {
     }
 
     if (mode == ProbeMode::owned_two_elf_execution ||
-        mode == ProbeMode::owned_linked_elf_execution) {
+        mode == ProbeMode::owned_linked_elf_execution ||
+        mode == ProbeMode::owned_linked_pair_execution) {
 #if defined(__linux__) && defined(__x86_64__) && defined(MAP_FIXED_NOREPLACE)
         // Rejections are typed controller-visible diagnostic boundaries.
         // Never mask a failed preflight/backend with normal_guest_return.
@@ -1712,20 +1718,27 @@ int main(int argc, char** argv) {
         // that descriptor before any native guest execution.
         const auto artifact =
             read_linux_sealed_worker_artifact(1024U * 1024U);
-        if (!artifact.has_value() || !artifact_fd_is_closed() ||
-            !(mode == ProbeMode::owned_two_elf_execution
+        const bool valid_source = artifact.has_value() && artifact_fd_is_closed() &&
+            (mode == ProbeMode::owned_two_elf_execution
                 ? astraea::test::owned_two_elf_bundle_matches_source(
                     artifact.value())
-                : astraea::test::owned_linked_elf_bundle_matches_source(
-                    artifact.value()))) {
+                : mode == ProbeMode::owned_linked_elf_execution
+                    ? astraea::test::owned_linked_elf_bundle_matches_source(
+                        artifact.value())
+                    : astraea::test::owned_linked_pair_bundle_matches_source(
+                        artifact.value()));
+        if (!valid_source) {
             return refuse(GuestWorkerDiagnosticKind::loader_rejected);
         }
         const auto stopped =
             mode == ProbeMode::owned_two_elf_execution
                 ? astraea::test::run_owned_two_elf_worker(
                     kWorkerId, kThreadId, artifact.value())
-                : astraea::test::run_owned_linked_elf_worker(
-                    kWorkerId, kThreadId, artifact.value());
+                : mode == ProbeMode::owned_linked_elf_execution
+                    ? astraea::test::run_owned_linked_elf_worker(
+                        kWorkerId, kThreadId, artifact.value())
+                    : astraea::test::run_owned_linked_pair_worker(
+                        kWorkerId, kThreadId, artifact.value());
         if (!stopped.has_value()) {
             return refuse(
                 GuestWorkerDiagnosticKind::native_backend_error);
