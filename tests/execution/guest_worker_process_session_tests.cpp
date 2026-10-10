@@ -864,6 +864,53 @@ TEST_CASE(
 }
 
 TEST_CASE(
+    "controller refuses incomplete worker syscall identity before service",
+    "[execution][c0][process][syscall][negative][identity]") {
+    const auto verify_refused =
+        [](const std::string& mode) {
+            bool service_called = false;
+            auto session = config({mode});
+            session.max_syscall_requests = 1U;
+            session.syscall_service =
+                [&service_called](
+                    const astraea::execution::
+                        GuestWorkerSyscallRequest& request)
+                -> std::optional<astraea::execution::
+                    GuestWorkerSyscallResult> {
+                    service_called = true;
+                    return astraea::execution::
+                        GuestWorkerSyscallResult{
+                            .request_id = request.request_id,
+                            .worker_id = request.worker_id,
+                            .thread_id = request.thread_id,
+                            .return_value = 0,
+                            .guest_errno = 0,
+                        };
+                };
+
+            const auto result =
+                astraea::execution::
+                    run_guest_worker_process_session(session);
+            REQUIRE_FALSE(result.has_value());
+            REQUIRE(result.error().code ==
+                    astraea::execution::
+                        GuestWorkerProcessSessionErrorCode::
+                            protocol_failure);
+            REQUIRE_FALSE(service_called);
+        };
+
+    SECTION("zero request id") {
+        verify_refused("--syscall-zero-request-id");
+    }
+    SECTION("zero thread id") {
+        verify_refused("--syscall-zero-thread-id");
+    }
+    SECTION("zero guest rip") {
+        verify_refused("--syscall-zero-rip");
+    }
+}
+
+TEST_CASE(
     "supervised worker round-trips one registered native syscall and resumes",
     "[execution][c0][process][syscall][native]") {
     std::optional<
