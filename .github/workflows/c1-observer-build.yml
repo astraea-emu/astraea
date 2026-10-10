@@ -797,12 +797,34 @@ jobs:
           relocation_count = int(deps["relocation_records"])
           if relocation_count != 8:
               raise SystemExit(f"minimal source relocation count drifted: {relocation_count}")
+          relative_targets = []
           for index in range(relocation_count):
               row = f"relocation[{index}]"
               if (deps.get(row + ".type") != "8" or
                   deps.get(row + ".symbol_index") != "0" or
                   deps.get(row + ".has_addend") != "1"):
                   raise SystemExit(f"unexpected minimal relative relocation: {row}")
+              relative_targets.append(int(deps[row + ".target"], 16))
+          if len(set(relative_targets)) != len(relative_targets):
+              raise SystemExit("minimal RELATIVE relocation targets are duplicated")
+          if any(right < left + 8 for left, right in
+                 zip(sorted(relative_targets), sorted(relative_targets)[1:])):
+              raise SystemExit("minimal RELATIVE relocation targets overlap")
+          load_segments = []
+          for index in range(phnum):
+              kind, flags, _off, vaddr, _paddr, _fsize, msize, _align = (
+                  struct.unpack_from("<IIQQQQQQ", data, phoff + 56 * index))
+              if kind == 1:
+                  load_segments.append((vaddr, vaddr + msize, flags))
+          writable_count = 0
+          for target in relative_targets:
+              containing = [flags for lo, hi, flags in load_segments
+                            if lo <= target and target + 8 <= hi]
+              if len(containing) != 1:
+                  raise SystemExit(f"RELATIVE target not uniquely mapped: {target:#x}")
+              writable_count += bool(containing[0] & 2)
+          print(f"RELATIVE target extents verified: {len(relative_targets)}; "
+                f"writable after final PT_LOAD protections: {writable_count}")
           count = int(deps["dynamic_symbol_records"])
           if count > 8:
               raise SystemExit("minimal entry unexpectedly expanded its dynamic ABI")
