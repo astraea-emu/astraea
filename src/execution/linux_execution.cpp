@@ -1045,10 +1045,11 @@ install_guest_executable_syscall_filter(
         SYS_ptrace,
     };
     constexpr std::size_t kInstructionsPerRange = 11U;
-    // After registered guest ranges: architecture + x32 ABI guard (6 BPF
-    // instructions), 14 selected syscall checks, then the host fallback.
+    // After registered guest ranges: six ABI-guard operations, three
+    // legacy-x32 range operations, the syscall-number load and host
+    // fallback, plus two instructions per explicitly denied syscall.
     constexpr std::size_t kTrailingInstructions =
-        8U + 2U * kDeniedOutsideGuestIp.size();
+        11U + 2U * kDeniedOutsideGuestIp.size();
     constexpr auto kMaxProgramLength =
         static_cast<std::size_t>(
             std::numeric_limits<
@@ -1226,6 +1227,18 @@ install_guest_executable_syscall_filter(
                     offsetof(seccomp_data, nr))));
         program.push_back(
             bpf_jump(kJumpGreaterEqual, kX32SyscallBit, 0U, 1U));
+        program.push_back(
+            bpf_statement(kReturnConstant, kRefuseHostSyscall));
+
+        // Linux kernels before 5.4 incorrectly admitted native syscall
+        // numbers 512..547 as alternate x32 entries. Reject the reserved
+        // interval explicitly rather than allowing an older-kernel bypass.
+        // If nr < 512, skip two instructions to the native denylist.
+        // If nr >= 548, skip the refusal and continue to that denylist.
+        program.push_back(
+            bpf_jump(kJumpGreaterEqual, 512U, 0U, 2U));
+        program.push_back(
+            bpf_jump(kJumpGreaterEqual, 548U, 1U, 0U));
         program.push_back(
             bpf_statement(kReturnConstant, kRefuseHostSyscall));
 
