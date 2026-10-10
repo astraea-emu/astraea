@@ -217,6 +217,44 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND
         "${ASTRAEA_OWNED_ELF_GENERATED_DIR}")
     target_include_directories(astraea_core_tests PRIVATE
         "${ASTRAEA_OWNED_ELF_GENERATED_DIR}")
+
+    # Link the full freestanding ET_EXEC ELF, rather than assembling an ELF
+    # header in the test. The verifier preserves linked metadata and embeds
+    # the immutable source bytes only for test-only, exact-source rebasing.
+    set(ASTRAEA_OWNED_LINKED_OBJ
+        "${ASTRAEA_OWNED_ELF_GENERATED_DIR}/owned_linked_entry.o")
+    set(ASTRAEA_OWNED_LINKED_ELF
+        "${ASTRAEA_OWNED_ELF_GENERATED_DIR}/owned_linked_entry.elf")
+    set(ASTRAEA_OWNED_LINKED_HEADER
+        "${ASTRAEA_OWNED_ELF_GENERATED_DIR}/owned_linked_elf_bytes.hpp")
+    add_custom_command(
+        OUTPUT "${ASTRAEA_OWNED_LINKED_HEADER}"
+        BYPRODUCTS
+            "${ASTRAEA_OWNED_LINKED_OBJ}"
+            "${ASTRAEA_OWNED_LINKED_ELF}"
+        COMMAND "${CMAKE_COMMAND}" -E make_directory
+            "${ASTRAEA_OWNED_ELF_GENERATED_DIR}"
+        COMMAND "${CMAKE_C_COMPILER}" -c -x assembler
+            "${CMAKE_CURRENT_SOURCE_DIR}/execution/owned_linked_entry.S"
+            -o "${ASTRAEA_OWNED_LINKED_OBJ}"
+        COMMAND "${CMAKE_LINKER}" -nostdlib --build-id=none
+            -T "${CMAKE_CURRENT_SOURCE_DIR}/execution/owned_linked_entry.ld"
+            -o "${ASTRAEA_OWNED_LINKED_ELF}"
+            "${ASTRAEA_OWNED_LINKED_OBJ}"
+        COMMAND "${Python3_EXECUTABLE}"
+            "${CMAKE_CURRENT_SOURCE_DIR}/execution/embed_owned_linked_elf.py"
+            --linked "${ASTRAEA_OWNED_LINKED_ELF}"
+            --output "${ASTRAEA_OWNED_LINKED_HEADER}"
+        DEPENDS
+            execution/owned_linked_entry.S
+            execution/owned_linked_entry.ld
+            execution/embed_owned_linked_elf.py
+        VERBATIM
+    )
+    add_custom_target(astraea_owned_linked_elf
+        DEPENDS "${ASTRAEA_OWNED_LINKED_HEADER}")
+    add_dependencies(astraea_guest_worker_probe astraea_owned_linked_elf)
+    add_dependencies(astraea_core_tests astraea_owned_linked_elf)
 endif()
 
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux" OR

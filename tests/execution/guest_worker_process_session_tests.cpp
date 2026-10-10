@@ -1,4 +1,5 @@
 #include "owned_two_elf_worker_fixture.hpp"
+#include "owned_linked_elf_worker_fixture.hpp"
 #include "owned_pair_sha256.hpp"
 
 #include <astraea/execution/guest_worker_process_session.hpp>
@@ -203,6 +204,95 @@ TEST_CASE(
         "50a7fe41e4833f5ac5cfa87ced4a658efc584a5310805dff6fe08f4770335a31");
     REQUIRE(astraea::test::owned_pair_sha256_hex(source->provider) ==
         "da76c429e4d722f618a33396281add0b40bbb6e832b0fa78e21be4a77c4d9834");
+#endif
+}
+
+TEST_CASE(
+    "isolated Linux worker executes a complete host-linked ELF twice",
+    "[execution][c1][linked-elf][process][linux]") {
+#if defined(__linux__) && defined(__x86_64__) && defined(MAP_FIXED_NOREPLACE)
+    // This is a complete freestanding linker output whose immutable section
+    // table, program header and symbol table were checked during the build.
+    // Only its test-owned linked base and synthetic exit gate are rebased.
+    auto bundle = astraea::test::make_owned_linked_elf_sealed_bundle();
+    REQUIRE(bundle.has_value());
+    REQUIRE(astraea::test::owned_linked_elf_bundle_matches_source(
+        bundle.value()));
+    const auto frozen = bundle.value();
+    REQUIRE(frozen.size() > 4096U + 16U);
+    const auto original_hash = astraea::test::owned_pair_sha256(frozen);
+
+    auto settings = config({"--owned-linked-elf-execution"}, 15000U);
+    settings.linux_artifact_bytes = frozen;
+    settings.resource_policy =
+        astraea::execution::GuestWorkerResourcePolicy{
+            .process_memory_limit_bytes = std::nullopt,
+            .process_cpu_time_seconds = 5U,
+            .linux_max_open_files = 64U,
+            .linux_disable_core_dumps = true,
+            .linux_disable_file_growth = true,
+        };
+    const auto one =
+        astraea::execution::run_guest_worker_process_session(settings);
+    const auto two =
+        astraea::execution::run_guest_worker_process_session(settings);
+    REQUIRE(one.has_value());
+    REQUIRE(two.has_value());
+    const auto check = [](const auto& result) {
+        REQUIRE(result.child_exit_code == 0);
+        REQUIRE(result.syscall_request_count == 0U);
+        REQUIRE_FALSE(result.terminal_fault.has_value());
+        REQUIRE_FALSE(result.terminal_diagnostic.has_value());
+        REQUIRE(result.stop.reason ==
+            astraea::execution::GuestWorkerStopReason::
+                normal_guest_return);
+        REQUIRE(result.stop.guest_rip.value() != 0U);
+        REQUIRE(result.stop.worker_id == result.ready.worker_id);
+        REQUIRE(result.stop.thread_id.value == 1U);
+    };
+    check(one.value());
+    check(two.value());
+    REQUIRE(settings.linux_artifact_bytes == frozen);
+    REQUIRE(astraea::test::owned_pair_sha256(
+        settings.linux_artifact_bytes.value()) == original_hash);
+
+    const auto reject = [&](std::optional<std::vector<std::byte>> data) {
+        auto damaged = settings;
+        damaged.linux_artifact_bytes = std::move(data);
+        const auto result =
+            astraea::execution::run_guest_worker_process_session(damaged);
+        REQUIRE(result.has_value());
+        REQUIRE(result->child_exit_code == 0);
+        REQUIRE(result->terminal_diagnostic.has_value());
+        REQUIRE(result->terminal_diagnostic->kind ==
+            astraea::execution::GuestWorkerDiagnosticKind::loader_rejected);
+        REQUIRE(result->terminal_diagnostic->guest_rip.value() == 0U);
+        REQUIRE(result->stop.reason ==
+            astraea::execution::GuestWorkerStopReason::diagnostic_boundary);
+        REQUIRE(result->stop.guest_rip.value() == 0U);
+        REQUIRE_FALSE(result->terminal_fault.has_value());
+    };
+
+    // Each refusal happens before mmap/guest entry and uses the existing
+    // sealed fd, controller/worker framing and resource ceilings.
+    auto changed_magic = frozen;
+    changed_magic[0] ^= std::byte{1};
+    reject(std::move(changed_magic));
+    auto changed_entry = frozen;
+    changed_entry[16U + 24U] ^= std::byte{1};
+    reject(std::move(changed_entry));
+    auto changed_load_address = frozen;
+    changed_load_address[16U + 64U + 16U] ^= std::byte{1};
+    reject(std::move(changed_load_address));
+    auto changed_gate = frozen;
+    changed_gate[16U + 0x1000U + 12U] ^= std::byte{1};
+    reject(std::move(changed_gate));
+    auto truncated = frozen;
+    truncated.pop_back();
+    reject(std::move(truncated));
+    reject(std::nullopt);
+#else
+    SUCCEED();
 #endif
 }
 
