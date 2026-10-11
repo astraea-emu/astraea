@@ -881,6 +881,16 @@ jobs:
             "$RUNNER_TEMP/astraea-c1-isolated-real-image.txt"
           grep -Fx "real_guestimage_host_ip_write_denied_runs=2" \
             "$RUNNER_TEMP/astraea-c1-isolated-real-image.txt"
+          grep -Fx "restricted_clone_process=denied" \
+            "$RUNNER_TEMP/astraea-c1-isolated-real-image.txt"
+          grep -Fx "restricted_clone3=fallback_enosys" \
+            "$RUNNER_TEMP/astraea-c1-isolated-real-image.txt"
+          grep -Fx "restricted_mmap_wx=denied" \
+            "$RUNNER_TEMP/astraea-c1-isolated-real-image.txt"
+          grep -Fx "restricted_mprotect_wx=denied" \
+            "$RUNNER_TEMP/astraea-c1-isolated-real-image.txt"
+          grep -Fx "restricted_staging_rw_to_rx=accepted" \
+            "$RUNNER_TEMP/astraea-c1-isolated-real-image.txt"
           grep -Fx "malformed_report_fields=8_refused" \
             "$RUNNER_TEMP/astraea-c1-isolated-real-image.txt"
           grep -Fx "tampered_sealed_input=refused_by_leaf" \
