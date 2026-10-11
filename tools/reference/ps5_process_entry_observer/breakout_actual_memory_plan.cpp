@@ -5,6 +5,7 @@
 #include "owned_pair_sha256.hpp"
 #include "breakout_offline_entry_interpreter.hpp"
 #include "source_x86_64_decoder.hpp"
+#include "breakout_owned_callee_execution.hpp"
 
 #include <Zydis/Mnemonic.h>
 
@@ -861,6 +862,91 @@ prepare_temporary_breakout_guest_memory(
             astraea::research::SourceDecodeError::target_not_executable)
         return 31;
 
+    // The first 11 real callee prologue instructions are now modeled
+    // non-natively from Zydis operand semantics, using only an owned
+    // simulated guest stack. The 12th is a verified unresolved import
+    // stop BEFORE the indirect CALL retires or a GOT pointer is followed.
+    const auto callee = astraea::research::run_owned_breakout_callee(
+        image.value(), interpreted.value());
+    if (!callee.has_value()) {
+        std::cerr << "owned_breakout_callee_refused="
+                  << static_cast<unsigned>(callee.error()) << '\n';
+        return 32;
+    }
+    if (callee->retired_instructions != 11U ||
+        callee->guest_stack_writes != 9U ||
+        callee->stopped_call_rip != 0x23cU ||
+        callee->context.rip != callee->stopped_call_rip ||
+        callee->unresolved_got_slot != 0x68c8U ||
+        callee->unresolved_symbol_index != 13U ||
+        callee->unresolved_bare_nid != "Vo5V8KAwCmk" ||
+        callee->context.rbp != callee->initial_callee_rsp - 8U ||
+        callee->context.rsp != callee->initial_callee_rsp - 280U)
+        return 33;
+    // Ensure the entry CALL's return address is still present in the
+    // owned stack buffer following all eleven real callee prologue steps.
+    const auto return_index = callee->initial_callee_rsp -
+        callee->guest_stack_base;
+    if (return_index > callee->guest_stack_bytes.size() - 8U)
+        return 34;
+    for (std::size_t i = 0U; i < 8U; ++i) {
+        if (callee->guest_stack_bytes[
+                static_cast<std::size_t>(return_index) + i] !=
+            interpreted->guest_stack_return_word[i])
+            return 35;
+    }
+    // A failed stack write must not escape into host native addresses.
+    auto bad_stack = interpreted.value();
+    bad_stack.context.rsp =
+        image->initial_stack.storage.base().value() + 8U;
+    bad_stack.guest_stack_write_address = bad_stack.context.rsp;
+    const auto stack_refused =
+        astraea::research::run_owned_breakout_callee(
+            image.value(), bad_stack);
+    if (stack_refused.has_value() ||
+        stack_refused.error() != astraea::research::
+            OwnedCalleeError::stack_out_of_bounds)
+        return 36;
+    {
+        // A valid instruction decoder must not silently interpret a
+        // different prologue opcode, even with the expected call nearby.
+        auto changed = image.value();
+        const auto callee_map = std::find_if(
+            changed.mappings.begin(), changed.mappings.end(),
+            [&](const m::MappingIntent& mapping) {
+                return mapping.range.contains(
+                    m::GuestAddress{interpreted->branch_target}) &&
+                    mapping.backing.kind == m::MappingBackingKind::file;
+            });
+        if (callee_map == changed.mappings.end()) return 37;
+        const auto source_offset = callee_map->backing.file_offset +
+            interpreted->branch_target -
+            callee_map->range.base().value();
+        if (source_offset > changed.image_bytes.size() ||
+            changed.image_bytes.size() - source_offset < 2U)
+            return 38;
+        changed.image_bytes[static_cast<std::size_t>(source_offset)] =
+            std::byte{0x0f};
+        changed.image_bytes[static_cast<std::size_t>(source_offset + 1U)] =
+            std::byte{0x0b};
+        const auto mutation = astraea::research::run_owned_breakout_callee(
+            changed, interpreted.value());
+        if (mutation.has_value() ||
+            mutation.error() != astraea::research::
+                OwnedCalleeError::unsupported_instruction)
+            return 39;
+    }
+    {
+        auto changed = image.value();
+        changed.dynamic_symbols.reset();
+        const auto missing = astraea::research::run_owned_breakout_callee(
+            changed, interpreted.value());
+        if (missing.has_value() ||
+            missing.error() != astraea::research::
+                OwnedCalleeError::missing_import_metadata)
+            return 40;
+    }
+
     // Adversarial decoder and memory negatives operate on owned copies of
     // the exact pinned image. They must refuse BEFORE any modeled state
     // commits; the baseline image and its source hash remain unchanged.
@@ -1050,7 +1136,24 @@ prepare_temporary_breakout_guest_memory(
               << "source_x86_callee_decode_next_rip=0x" << std::hex
               << callee_decode->next_rip << std::dec << '\n'
               << "source_x86_decoder_invalid_requests=3_refused\n"
-              << "source_x86_callee_executed_instructions=0\n";
+              << "source_x86_callee_decoded_instructions=12\n"
+              << "breakout_owned_callee_retired_instructions="
+              << callee->retired_instructions << '\n'
+              << "breakout_owned_callee_guest_stack_writes="
+              << callee->guest_stack_writes << '\n'
+              << "breakout_owned_callee_stop=unresolved_bare_nid_before_call\n"
+              << "breakout_owned_callee_stop_rip=0x" << std::hex
+              << callee->stopped_call_rip << std::dec << '\n'
+              << "breakout_owned_callee_got_slot=0x" << std::hex
+              << callee->unresolved_got_slot << std::dec << '\n'
+              << "breakout_owned_callee_symbol_index="
+              << callee->unresolved_symbol_index << '\n'
+              << "breakout_owned_callee_bare_nid="
+              << callee->unresolved_bare_nid << '\n'
+              << "breakout_owned_callee_stack_retaddr=preserved\n"
+              << "breakout_owned_callee_negative_cases=3_refused\n"
+              << "breakout_owned_callee_native_guest_execution=0\n"
+              << "breakout_owned_callee_sony_provider_calls=0\n";
     constexpr char hex_digits[] = "0123456789abcdef";
     for (std::size_t i = 0U; i < callee_decode->count; ++i) {
         const auto& insn = callee_decode->instructions[i];
