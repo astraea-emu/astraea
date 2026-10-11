@@ -633,8 +633,11 @@ struct SourceFd {
     }
     if (!WIFEXITED(status)) return std::nullopt;
     LeafStopRecord observed{};
-    // The child has exited, so even a compromised guest can no longer
-    // change this record. No controller-side effects occur while it runs.
+    // The directly supervised child has exited. This source-reviewed UD2
+    // fixture starts no descendants; arbitrary hostile native guest code
+    // might leave shared-memory-capable descendants, so this snapshot is
+    // untrusted and cannot authenticate an event. No controller callbacks
+    // or host service side effects follow from any record contents.
     const auto bytes_read = ::pread(
         report.fd, observed.data(), kLeafStopBytes, 0);
     if (bytes_read != static_cast<ssize_t>(kLeafStopBytes))
