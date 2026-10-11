@@ -168,10 +168,10 @@ constexpr e::GuestThreadId kThreadId{1U};
                           std::uint8_t yes, std::uint8_t no) {
         rules[i++] = sock_filter{.code = code, .jt = yes, .jf = no, .k = value};
     };
-    statement(kLoad, offsetof(seccomp_data, arch));
+    statement(kLoad, static_cast<std::uint32_t>(offsetof(seccomp_data, arch)));
     jump(kEq, AUDIT_ARCH_X86_64, 1U, 0U);
     statement(kReturn, SECCOMP_RET_KILL_PROCESS);
-    statement(kLoad, offsetof(seccomp_data, nr));
+    statement(kLoad, static_cast<std::uint32_t>(offsetof(seccomp_data, nr)));
     jump(kGe, 0x40000000U, 0U, 1U); // Reject x32 and high-number aliases.
     statement(kReturn, kDenied);
     for (const int number : kHostRuntimeSyscalls) {
