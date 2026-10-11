@@ -1,5 +1,5 @@
 // C1 Linux x86-64 security research: independent tracer-owned instruction
-// observations. Executes ONLY the three fixed Astraea-authored instruction
+// observations. Executes ONLY six fixed Astraea-authored instruction
 // sequences below, never an external ELF or an arbitrary guest instruction.
 // This is not a hostile-code sandbox or a PS5 ABI implementation.
 #include "owned_pair_sha256.hpp"
@@ -41,15 +41,32 @@ namespace {
 constexpr std::uint64_t kGuestBase = 0x0000000100000000ULL;
 constexpr std::uint64_t kHostSentinelBase = 0x0000000100010000ULL;
 constexpr std::uint64_t kCanaryBase = 0x0000000100020000ULL;
+constexpr std::uint64_t kNoAccessBase = 0x0000000100030000ULL;
 constexpr std::size_t kPage = 4096U;
 constexpr std::size_t kMaxSteps = 8U;
 
-enum class Mode { fault, syscall, escape };
+enum class Mode { fault, syscall, escape, write_rx, write_none, write_rw };
+
+[[nodiscard]] bool is_write_mode(Mode mode) noexcept {
+    return mode == Mode::write_rx || mode == Mode::write_none ||
+        mode == Mode::write_rw;
+}
+[[nodiscard]] std::uint64_t write_target_for(Mode mode) noexcept {
+    switch (mode) {
+    case Mode::write_rx: return kHostSentinelBase;
+    case Mode::write_none: return kNoAccessBase;
+    case Mode::write_rw: return kCanaryBase;
+    default: return 0U;
+    }
+}
 
 [[nodiscard]] std::optional<Mode> parse_mode(std::string_view name) {
     if (name == "fault") return Mode::fault;
     if (name == "syscall") return Mode::syscall;
     if (name == "escape") return Mode::escape;
+    if (name == "write-rx") return Mode::write_rx;
+    if (name == "write-none") return Mode::write_none;
+    if (name == "write-rw") return Mode::write_rw;
     return std::nullopt;
 }
 [[nodiscard]] const char* mode_name(Mode mode) {
@@ -57,6 +74,9 @@ enum class Mode { fault, syscall, escape };
     case Mode::fault: return "fault";
     case Mode::syscall: return "syscall";
     case Mode::escape: return "escape";
+    case Mode::write_rx: return "write-rx";
+    case Mode::write_none: return "write-none";
+    case Mode::write_rw: return "write-rw";
     }
     return "invalid";
 }
@@ -65,10 +85,12 @@ enum class Mode { fault, syscall, escape };
 // fault: mov eax,42; ud2
 // syscall: mov eax,60; xor edi,edi; syscall; ud2
 // escape: movabs rax,kHostSentinelBase; jmp rax; ud2
+// writes: movabs rax,exact address; mov byte ptr [rax],0x7f; ud2
 struct Probe {
     std::array<unsigned char, 16U> bytes{};
     std::size_t length = 0U;
     std::uint64_t terminal_rip = 0U;
+    std::uint64_t write_target = 0U;
 };
 [[nodiscard]] Probe probe_for(Mode mode) {
     Probe p{};
@@ -80,10 +102,24 @@ struct Probe {
         p.bytes = {0xb8, 0x3c, 0, 0, 0, 0x31, 0xff, 0x0f, 0x05, 0x0f, 0x0b};
         p.length = 11U;
         p.terminal_rip = kGuestBase + 7U;
-    } else {
+    } else if (mode == Mode::escape) {
         p.bytes = {0x48, 0xb8, 0, 0, 1, 0, 1, 0, 0, 0, 0xff, 0xe0, 0x0f, 0x0b};
         p.length = 14U;
         p.terminal_rip = kHostSentinelBase;
+    } else if (is_write_mode(mode)) {
+        p.write_target = write_target_for(mode);
+        p.bytes[0] = 0x48U; // movabs rax,imm64
+        p.bytes[1] = 0xb8U;
+        for (std::size_t i = 0U; i < 8U; ++i)
+            p.bytes[i + 2U] = static_cast<unsigned char>(
+                (p.write_target >> (8U * i)) & 0xffU);
+        p.bytes[10] = 0xc6U; // mov byte ptr [rax],0x7f
+        p.bytes[11] = 0x00U;
+        p.bytes[12] = 0x7fU;
+        p.bytes[13] = 0x0fU; // UD2, never reached in negative cases
+        p.bytes[14] = 0x0bU;
+        p.length = 15U;
+        p.terminal_rip = kGuestBase + 10U;
     }
     return p;
 }
@@ -149,7 +185,8 @@ constexpr std::array<unsigned char, 15U> kHostSentinel{
                    {probe.bytes.data(), probe.length}) ||
         !map_exact(kHostSentinelBase, PROT_READ | PROT_EXEC,
                    kHostSentinel) ||
-        !map_exact(kCanaryBase, PROT_READ | PROT_WRITE, {}))
+        !map_exact(kCanaryBase, PROT_READ | PROT_WRITE, {}) ||
+        !map_exact(kNoAccessBase, PROT_NONE, {}))
         return 96;
     if (::ptrace(PTRACE_TRACEME, 0, nullptr, nullptr) != 0) return 97;
     if (::raise(SIGSTOP) != 0) return 98;
@@ -218,6 +255,8 @@ struct Evidence {
     bool host_escape_denied = false;
     bool host_canary_unchanged = false;
     bool only_tracer_observations = false;
+    bool memory_protection_fault = false;
+    bool writable_non_guest_memory_modified = false;
 };
 
 [[nodiscard]] std::optional<Evidence> run_once(Mode mode) {
@@ -317,6 +356,47 @@ struct Evidence {
                 ? std::optional{evidence} : std::nullopt;
         }
 
+        // The test-only memory probes explicitly distinguish faults from
+        // already-committed writes. A tracer cannot undo the effects of an
+        // instruction that was permitted to write native host memory.
+        if (is_write_mode(mode) && before->rip == probe.terminal_rip &&
+            evidence.executed == 1U &&
+            before->rax == probe.write_target &&
+            after->rax == probe.write_target) {
+            if (mode == Mode::write_rw) {
+                constexpr std::array<unsigned char, sizeof(long)> changed{
+                    0x7fU,
+                };
+                if (signal != SIGTRAP ||
+                    after->rip != kGuestBase + 13U ||
+                    !inspect_bytes(child, kCanaryBase, changed) ||
+                    !inspect_bytes(child, kHostSentinelBase, kHostSentinel))
+                    return std::nullopt;
+                ++evidence.executed;
+                evidence.writable_non_guest_memory_modified = true;
+                evidence.host_canary_unchanged = false;
+            } else {
+                siginfo_t info{};
+                if (signal != SIGSEGV ||
+                    after->rip != before->rip ||
+                    ::ptrace(PTRACE_GETSIGINFO, child, nullptr, &info) != 0 ||
+                    info.si_signo != SIGSEGV ||
+                    info.si_code != SEGV_ACCERR ||
+                    reinterpret_cast<std::uintptr_t>(info.si_addr) !=
+                        probe.write_target ||
+                    !canary_untouched(child) ||
+                    !inspect_bytes(child, kHostSentinelBase, kHostSentinel))
+                    return std::nullopt;
+                evidence.memory_protection_fault = true;
+                evidence.host_canary_unchanged = true;
+            }
+            evidence.terminal_rip = before->rip;
+            evidence.stopped = true;
+            evidence.only_tracer_observations = true;
+            ::alarm(0U);
+            return evidence;
+        }
+
         // All other steps must be ordinary instruction single-step traps
         // with an expected next RIP; no signal handler or worker message
         // is trusted to describe the transition.
@@ -334,7 +414,7 @@ struct Evidence {
                 after->rip != kGuestBase + 7U)
                 return std::nullopt;
             if (evidence.executed > 2U) return std::nullopt;
-        } else {
+        } else if (mode == Mode::escape) {
             if (evidence.executed == 1U &&
                 after->rip != kGuestBase + 10U)
                 return std::nullopt;
@@ -342,6 +422,11 @@ struct Evidence {
                 after->rip != kHostSentinelBase)
                 return std::nullopt;
             if (evidence.executed > 2U) return std::nullopt;
+        } else {
+            if (evidence.executed != 1U ||
+                after->rip != kGuestBase + 10U ||
+                after->rax != probe.write_target)
+                return std::nullopt;
         }
     }
     return std::nullopt;
@@ -353,7 +438,10 @@ struct Evidence {
         a.syscall_prevented == b.syscall_prevented &&
         a.host_escape_denied == b.host_escape_denied &&
         a.host_canary_unchanged == b.host_canary_unchanged &&
-        a.only_tracer_observations == b.only_tracer_observations;
+        a.only_tracer_observations == b.only_tracer_observations &&
+        a.memory_protection_fault == b.memory_protection_fault &&
+        a.writable_non_guest_memory_modified ==
+            b.writable_non_guest_memory_modified;
 }
 
 // The actual pinned minimal PS5-format SCE ELF from the separate native
@@ -585,8 +673,9 @@ int main(int argc, char** argv) {
     }
     if (argc != 1) return 2;
 
-    constexpr std::array<Mode, 3U> cases{
+    constexpr std::array<Mode, 6U> cases{
         Mode::fault, Mode::syscall, Mode::escape,
+        Mode::write_rx, Mode::write_none, Mode::write_rw,
     };
     for (const Mode mode : cases) {
         const auto first = run_once(mode);
@@ -594,7 +683,7 @@ int main(int argc, char** argv) {
         if (!first.has_value() || !second.has_value() ||
             !equal_evidence(first.value(), second.value()) ||
             !first->stopped || !first->only_tracer_observations ||
-            !first->host_canary_unchanged) {
+            (mode != Mode::write_rw && !first->host_canary_unchanged)) {
             std::fprintf(stderr, "ptrace_step_refused=%s\n", mode_name(mode));
             return 3;
         }
@@ -604,7 +693,15 @@ int main(int argc, char** argv) {
             (mode == Mode::syscall &&
              (first->executed != 2U || !first->syscall_prevented)) ||
             (mode == Mode::escape &&
-             (first->executed != 2U || !first->host_escape_denied))) {
+             (first->executed != 2U || !first->host_escape_denied)) ||
+            ((mode == Mode::write_rx || mode == Mode::write_none) &&
+             (first->executed != 1U || !first->memory_protection_fault ||
+              first->terminal_rip != kGuestBase + 10U)) ||
+            (mode == Mode::write_rw &&
+             (first->executed != 2U ||
+              !first->writable_non_guest_memory_modified ||
+              first->host_canary_unchanged ||
+              first->terminal_rip != kGuestBase + 10U))) {
             std::fprintf(stderr, "ptrace_evidence_mismatch=%s\n", mode_name(mode));
             return 4;
         }
@@ -613,10 +710,15 @@ int main(int argc, char** argv) {
     std::puts("owned_fault_repeated=2");
     std::puts("owned_syscall_exit_prevented_repeated=2");
     std::puts("owned_host_ip_escape_denied_repeated=2");
-    std::puts("host_sentinel_canary=unchanged");
+    std::puts("host_sentinel_canary=unchanged_in_denied_cases");
+    std::puts("owned_write_rx_sigsegv_repeated=2");
+    std::puts("owned_write_none_sigsegv_repeated=2");
+    std::puts("owned_write_rw_non_guest_side_effect_repeated=2");
+    std::puts("writable_host_canary_modified_in_positive_control=1");
     std::puts("observations=tracer_ptrace_registers_only");
     std::puts("tracee_external_files_and_controller_ipc=none");
     std::puts("external_elf_guest_instructions=0");
+    std::puts("guest_memory_write_isolation=not_established");
     std::puts("hostile_guest_sandbox=not_established");
     return 0;
 }
