@@ -252,6 +252,10 @@ if(ASTRAEA_BUILD_C1_RESEARCH)
     add_executable(astraea_c1_ptrace_step_research
         tools/reference/ps5_process_entry_observer/owned_ptrace_step_research.cpp
     )
+    target_link_libraries(astraea_c1_ptrace_step_research PRIVATE Astraea::core)
+    target_include_directories(astraea_c1_ptrace_step_research PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/tests/execution"
+    )
     astraea_set_project_warnings(astraea_c1_ptrace_step_research)
     # Deliberately unsanitized tracee; a source-owned native SIGILL and
     # ptrace register stops must not involve sanitizer-generated callbacks.
