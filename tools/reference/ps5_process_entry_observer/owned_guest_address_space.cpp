@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
+#include <cstring>
 #include <limits>
 
 namespace astraea::research {
@@ -80,8 +81,8 @@ OwnedGuestAddressSpace::Result OwnedGuestAddressSpace::copy_out(
                 return fail(Error::permission_denied, address);
             const auto offset = static_cast<std::size_t>(
                 address - region.base);
-            std::copy_n(region.backing.data() + offset,
-                        output.size(), output.data());
+            std::memmove(output.data(), region.backing.data() + offset,
+                         output.size());
             return Result::success(output.size());
         }
     }
@@ -115,8 +116,8 @@ OwnedGuestAddressSpace::Result OwnedGuestAddressSpace::write(
                 return fail(Error::permission_denied, address);
             const auto offset = static_cast<std::size_t>(
                 address - region.base);
-            std::copy_n(source.data(), source.size(),
-                        region.backing.data() + offset);
+            std::memmove(region.backing.data() + offset, source.data(),
+                         source.size());
             return Result::success(source.size());
         }
     }
