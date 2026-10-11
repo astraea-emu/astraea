@@ -446,6 +446,75 @@ jobs:
             "$RUNNER_TEMP/actual-breakout-plan.txt"
           grep -Fx "breakout_entry_call_rel32=interpreted" \
             "$RUNNER_TEMP/actual-breakout-plan.txt"
+          grep -Fx "source_x86_decoder=zydis_4_1_1_pinned" \
+            "$RUNNER_TEMP/actual-breakout-plan.txt"
+          grep -Fx "source_x86_decoder_dependency=zycore_1_5_2_pinned" \
+            "$RUNNER_TEMP/actual-breakout-plan.txt"
+          grep -Fx "source_x86_entry_decode=AND_4_CALL_5_verified" \
+            "$RUNNER_TEMP/actual-breakout-plan.txt"
+          grep -Fx "source_x86_callee_first_rip=0x210" \
+            "$RUNNER_TEMP/actual-breakout-plan.txt"
+          grep -Fx "source_x86_callee_decode_count=12" \
+            "$RUNNER_TEMP/actual-breakout-plan.txt"
+          grep -Fx "source_x86_decoder_invalid_requests=3_refused" \
+            "$RUNNER_TEMP/actual-breakout-plan.txt"
+          grep -Fx "source_x86_callee_executed_instructions=0" \
+            "$RUNNER_TEMP/actual-breakout-plan.txt"
+          python3 - <<'PY'
+          import hashlib
+          import os
+          from pathlib import Path
+          import re
+          import struct
+
+          root = Path(os.environ["RUNNER_TEMP"])
+          lines = (root / "actual-breakout-plan.txt").read_text().splitlines()
+          fields = {}
+          for line in lines[1:]:
+              if "=" not in line:
+                  continue
+              k, v = line.split("=", 1)
+              if k in fields:
+                  raise SystemExit("duplicate report key: " + k)
+              fields[k] = v
+          source = (root / "sharpemu-demo-eboot.elf").read_bytes()
+          assert hashlib.sha256(source).hexdigest() == (
+              "05c414993d1cd9e7182bbf5647be1ffad72c6ed6b6f5399d01af27281fef48b8")
+          phoff = struct.unpack_from("<Q", source, 32)[0]
+          phentsize, phnum = struct.unpack_from("<HH", source, 54)
+          if phentsize != 56 or phnum > 64 or phoff + 56 * phnum > len(source):
+              raise SystemExit("unexpected pinned program header table")
+          loads = []
+          for i in range(phnum):
+              kind, flags, off, va, _, filesz, _, _ = struct.unpack_from(
+                  "<IIQQQQQQ", source, phoff + 56 * i)
+              if kind == 1 and flags & 1:
+                  loads.append((va, va + filesz, off))
+
+          current = int(fields["source_x86_callee_first_rip"], 16)
+          for i in range(12):
+              key = f"source_x86_callee[{i}]"
+              rip = int(fields[key + ".rip"], 16)
+              length = int(fields[key + ".length"])
+              bhex = fields[key + ".bytes_hex"]
+              mnemonic = fields[key + ".mnemonic"]
+              if (rip != current or not 1 <= length <= 15 or
+                      not re.fullmatch(r"[0-9a-f]+", bhex) or
+                      len(bytes.fromhex(bhex)) != length or
+                      not re.fullmatch(r"[A-Za-z0-9_]+", mnemonic)):
+                  raise SystemExit(f"invalid decoded instruction {i}")
+              origins = [(off + rip - lo) for lo, hi, off in loads
+                         if lo <= rip and rip + length <= hi]
+              if len(origins) != 1 or (
+                  source[origins[0]:origins[0]+length] != bytes.fromhex(bhex)):
+                  raise SystemExit(f"decoded bytes differ from source ELF at {rip:#x}")
+              print(f"PINNED_BREAKOUT_CALLEE_{i}={rip:#x}:{mnemonic}:{bhex}")
+              current += length
+          if current != int(fields["source_x86_callee_decode_next_rip"], 16):
+              raise SystemExit("decoder's next RIP does not match boundaries")
+          print("EXACT CALLEE SOURCE BYTES AND DECODE BOUNDARIES VERIFIED")
+          print("DISASSEMBLY ONLY; NO CALLEE EXECUTION OR SONY SERVICE")
+          PY
           grep -Fx "breakout_guest_stack_return_word=owned_eight_bytes" \
             "$RUNNER_TEMP/actual-breakout-plan.txt"
           grep -Fx "breakout_call_target_source=executable_guest_mapping" \
