@@ -644,6 +644,16 @@ TEST_CASE(
 TEST_CASE(
     "forked research leaf denies escaped host write without guest trap regression",
     "[execution][linux-transition][c1][seccomp][leaf][security]") {
+#if defined(__SANITIZE_ADDRESS__)
+    // AddressSanitizer's own thread-creation and diagnostics runtime invokes
+    // sched_getaffinity, openat(/proc/self/maps) and write after fork.
+    // Independent syscall tracing proved it exits(1) when those calls are
+    // denied, before guest entry (not a guest containment failure).
+    // Never permit openat/write merely to satisfy an instrumented runtime.
+    // Linux x64 *without* ASan executes both real seccomp regression cases.
+    SKIP("ASan runtime needs host openat/write; test leaf is deliberately "
+         "not ASan-instrumented in the target confinement architecture");
+#else
     const auto exercise = [](bool escaped_host_write) {
         const auto page = page_size();
         const auto base =
@@ -819,6 +829,7 @@ TEST_CASE(
     SECTION("literal guest syscall retains typed trap") {
         exercise(false);
     }
+#endif
 }
 
 TEST_CASE(
