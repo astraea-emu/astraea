@@ -481,7 +481,8 @@ prepare_temporary_breakout_guest_memory(const l::GuestImage& original) {
         transient.image_bytes.size() - file_offset < relative->bytes.size())
         return fail("relative_target_backing_not_unique");
     std::copy(relative->bytes.begin(), relative->bytes.end(),
-              transient.image_bytes.begin() + file_offset);
+              transient.image_bytes.begin() +
+                  static_cast<std::ptrdiff_t>(file_offset));
 
     // This is never used to simulate the original PS5 process entry state.
     // Runtime-only VA rebasing preserves source bytes and file offsets.
