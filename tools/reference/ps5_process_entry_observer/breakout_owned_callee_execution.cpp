@@ -1,4 +1,5 @@
 #include "breakout_owned_callee_execution.hpp"
+#include "owned_guest_address_space.hpp"
 #include "source_x86_64_decoder.hpp"
 
 #include <array>
@@ -72,12 +73,23 @@ constexpr std::uint64_t kArithmeticFlags = kCF | kPF | kAF | kZF | kSF | kOF;
 [[nodiscard]] bool guest_stack_write(
     OwnedCalleeEvidence& state,
     std::uint64_t guest_va, std::uint64_t word) noexcept {
-    if (guest_va < state.guest_stack_base) return false;
-    const auto offset = guest_va - state.guest_stack_base;
-    if (offset > state.guest_stack_bytes.size() - 8U) return false;
-    for (std::size_t b = 0U; b < 8U; ++b)
-        state.guest_stack_bytes[static_cast<std::size_t>(offset) + b] =
-            static_cast<std::byte>((word >> (b * 8U)) & 0xffU);
+    // All synthetic guest writes share the same reusable checked virtual
+    // mapping logic. It operates on owned bytes, never guest-supplied host
+    // pointers; there is no native mmap, mprotect, or code entry.
+    const auto perms = m::GuestPermissions::checked_from_bits(
+        static_cast<std::uint8_t>(m::GuestPermission::read) |
+        static_cast<std::uint8_t>(m::GuestPermission::write));
+    if (!perms.has_value()) return false;
+    OwnedGuestAddressSpace memory;
+    if (!memory.map(state.guest_stack_base,
+                    state.guest_stack_bytes, perms.value()).has_value())
+        return false;
+    std::array<std::byte, 8U> encoded{};
+    for (std::size_t b = 0U; b < encoded.size(); ++b)
+        encoded[b] = static_cast<std::byte>(
+            (word >> (b * 8U)) & 0xffU);
+    if (!memory.write(guest_va, encoded).has_value())
+        return false;
     ++state.guest_stack_writes;
     return true;
 }

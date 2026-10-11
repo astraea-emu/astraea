@@ -293,6 +293,7 @@ if(ASTRAEA_BUILD_C1_RESEARCH)
         tools/reference/ps5_process_entry_observer/breakout_offline_entry_interpreter.cpp
         tools/reference/ps5_process_entry_observer/source_x86_64_decoder.cpp
         tools/reference/ps5_process_entry_observer/breakout_owned_callee_execution.cpp
+        tools/reference/ps5_process_entry_observer/owned_guest_address_space.cpp
     )
     target_link_libraries(astraea_c1_breakout_memory_plan_research
         PRIVATE Astraea::core Zydis)
@@ -301,6 +302,18 @@ if(ASTRAEA_BUILD_C1_RESEARCH)
     )
     astraea_set_project_warnings(astraea_c1_breakout_memory_plan_research)
     astraea_enable_sanitizers(astraea_c1_breakout_memory_plan_research)
+
+    # Portable virtual memory boundary with source-owned negative fixtures.
+    # Research-only, independent of the Zydis decoder and host native pages.
+    add_executable(astraea_c1_owned_guest_memory_research
+        tools/reference/ps5_process_entry_observer/owned_guest_address_space.cpp
+        tools/reference/ps5_process_entry_observer/owned_guest_address_space_selftest.cpp
+    )
+    target_include_directories(astraea_c1_owned_guest_memory_research PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/include"
+    )
+    astraea_set_project_warnings(astraea_c1_owned_guest_memory_research)
+    astraea_enable_sanitizers(astraea_c1_owned_guest_memory_research)
 endif()
 
 astraea_verify_explicit_cpp_sources(
