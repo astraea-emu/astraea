@@ -247,6 +247,15 @@ if(ASTRAEA_BUILD_C1_RESEARCH)
     astraea_set_project_warnings(astraea_c1_owned_entry_research)
     astraea_enable_sanitizers(astraea_c1_owned_entry_research)
 
+    # Linux-only source-owned ptrace tracer proof. No external ELF is
+    # accepted, and no production runtime execution path is modified.
+    add_executable(astraea_c1_ptrace_step_research
+        tools/reference/ps5_process_entry_observer/owned_ptrace_step_research.cpp
+    )
+    astraea_set_project_warnings(astraea_c1_ptrace_step_research)
+    # Deliberately unsanitized tracee; a source-owned native SIGILL and
+    # ptrace register stops must not involve sanitizer-generated callbacks.
+
     # Opt-in, read-only memory-plan evidence for the exact pinned public
     # Breakout ELF. No native memory preparation or guest entry.
     add_executable(astraea_c1_breakout_memory_plan_research
