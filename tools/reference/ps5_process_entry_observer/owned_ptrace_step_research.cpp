@@ -2,7 +2,19 @@
 // observations. Executes ONLY the three fixed Astraea-authored instruction
 // sequences below, never an external ELF or an arbitrary guest instruction.
 // This is not a hostile-code sandbox or a PS5 ABI implementation.
+#include "owned_pair_sha256.hpp"
+
+#include <astraea/execution/owned_relative_patch.hpp>
+#include <astraea/loader/dynamic_relocations.hpp>
+#include <astraea/loader/guest_image.hpp>
+#include <astraea/memory/guest_address.hpp>
+
 #include <algorithm>
+#include <cstddef>
+#include <fstream>
+#include <string>
+#include <vector>
+#include <linux/memfd.h>
 #include <array>
 #include <span>
 #include <cerrno>
@@ -343,9 +355,230 @@ struct Evidence {
         a.host_canary_unchanged == b.host_canary_unchanged &&
         a.only_tracer_observations == b.only_tracer_observations;
 }
+
+// The actual pinned minimal PS5-format SCE ELF from the separate native
+// observer workflow. Hash authority is checked by BOTH parent and leaf;
+// only the existing owned research tool builds/relocates its GuestImage.
+constexpr std::string_view kPinnedOwnedSha =
+    "45920de847b2d33896c186654bbf22a728f1910fad84accb15204aa2da50c678";
+constexpr std::uint64_t kPinnedEntry = kGuestBase + 0x10U;
+constexpr std::uint64_t kPinnedStackOffset = 24ULL * 1024ULL * 1024ULL;
+constexpr std::size_t kMaxPinnedSize = 16U * 1024U * 1024U;
+
+struct SourceFd {
+    int fd = -1;
+    ~SourceFd() { if (fd >= 0) (void)::close(fd); }
+    SourceFd() = default;
+    explicit SourceFd(int value) : fd(value) {}
+    SourceFd(const SourceFd&) = delete;
+    SourceFd& operator=(const SourceFd&) = delete;
+};
+
+[[nodiscard]] std::optional<std::vector<std::byte>>
+read_exact_owned_source(std::string_view name) {
+    std::ifstream file(std::string{name}, std::ios::binary | std::ios::ate);
+    if (!file) return std::nullopt;
+    const auto end = file.tellg();
+    if (end <= 0 || end > static_cast<std::streamoff>(kMaxPinnedSize))
+        return std::nullopt;
+    std::vector<std::byte> source(static_cast<std::size_t>(end));
+    file.seekg(0, std::ios::beg);
+    file.read(reinterpret_cast<char*>(source.data()),
+              static_cast<std::streamsize>(source.size()));
+    if (file.gcount() != static_cast<std::streamsize>(source.size()) ||
+        astraea::test::owned_pair_sha256_hex(source) != kPinnedOwnedSha)
+        return std::nullopt;
+    return source;
+}
+
+[[nodiscard]] bool seal_owned_source(
+    std::span<const std::byte> bytes, SourceFd& artifact) {
+    artifact.fd = static_cast<int>(::syscall(SYS_memfd_create,
+        "astraea-c1-verified-owned-trace",
+        MFD_ALLOW_SEALING | MFD_CLOEXEC));
+    if (artifact.fd < 0) return false;
+    std::size_t at = 0U;
+    while (at < bytes.size()) {
+        const ssize_t written = ::write(
+            artifact.fd, bytes.data() + at, bytes.size() - at);
+        if (written < 0 && errno == EINTR) continue;
+        if (written <= 0) return false;
+        at += static_cast<std::size_t>(written);
+    }
+    constexpr int seals = F_SEAL_WRITE | F_SEAL_GROW |
+        F_SEAL_SHRINK | F_SEAL_SEAL;
+    return ::fcntl(artifact.fd, F_ADD_SEALS, seals) == 0 &&
+        ::fcntl(artifact.fd, F_GET_SEALS) == seals;
+}
+
+// This check is independently performed by the tracer using the original
+// immutable source, production loader and relocation planner, and real
+// PTRACE_PEEKDATA into the stopped child (NOT its reported result).
+[[nodiscard]] bool inspect_pinned_guestimage(
+    pid_t pid, std::span<const std::byte> source) {
+    namespace e = astraea::execution;
+    namespace l = astraea::loader;
+    namespace m = astraea::memory;
+    const auto stack = m::GuestRange::create(
+        m::GuestAddress{kGuestBase + kPinnedStackOffset},
+        m::GuestSize{kPage});
+    if (!stack.has_value()) return false;
+    auto original = l::build_guest_image(l::GuestImageRequest{
+        .image_bytes = std::vector<std::byte>(source.begin(), source.end()),
+        .initial_stack = l::InitialStackRequest{
+            .storage = stack.value(),
+            .arguments = {"astraea-source-owned-ps5-format"},
+            .environment = {},
+            .auxiliary_vector = {},
+        },
+        .elf_profile = l::ElfParseProfile::ps5_sce,
+    });
+    if (!original.has_value() || original->elf.header.type != 0xfe10U ||
+        original->elf.header.entry != 0x10U ||
+        !original->general_relocations.rela.has_value() ||
+        original->general_relocations.rela->count != 8U ||
+        !original->dynamic_symbols.has_value())
+        return false;
+    const auto view = original->initialized_image_view();
+    if (!view.has_value()) return false;
+    const std::array<unsigned char, 2U> ud2{0x0fU, 0x0bU};
+    if (!inspect_bytes(pid, kPinnedEntry, ud2)) return false;
+    std::array<bool, 8U> verified{};
+    std::array<std::uint64_t, 8U> targets{};
+    for (std::uint64_t i = 0U; i < verified.size(); ++i) {
+        const auto relocation = l::parse_dynamic_relocation(
+            *original->general_relocations.rela, i,
+            *original->dynamic_symbols, view.value());
+        if (!relocation.has_value() ||
+            relocation->relocation_type != e::kOwnedX86_64RelativeType ||
+            relocation->symbol_index != 0U ||
+            relocation->target.value() >= kMaxPinnedSize)
+            return false;
+        auto expected = e::build_owned_x86_64_relative_patch(
+            relocation.value(), m::GuestAddress{kGuestBase});
+        if (!expected.has_value()) return false;
+        const auto guest_target = kGuestBase + expected->target.value();
+        if (guest_target >= kGuestBase + kMaxPinnedSize ||
+            guest_target + 8U > kGuestBase + kMaxPinnedSize ||
+            !inspect_bytes(pid, guest_target, {
+                reinterpret_cast<const unsigned char*>(
+                    expected->bytes.data()), expected->bytes.size()}))
+            return false;
+        targets[i] = guest_target;
+        verified[i] = true;
+    }
+    for (std::size_t i = 0; i < verified.size(); ++i) {
+        if (!verified[i]) return false;
+        for (std::size_t j = i + 1U; j < verified.size(); ++j)
+            if (targets[i] < targets[j] + 8U &&
+                targets[j] < targets[i] + 8U)
+                return false;
+    }
+    return true;
+}
+
+[[nodiscard]] bool pinned_source_leaf_launch(
+    std::string_view executable, const SourceFd& source) {
+    char pid_text[32]{};
+    if (std::snprintf(pid_text, sizeof(pid_text), "%ld",
+                      static_cast<long>(::getppid())) <= 0 ||
+        ::setenv("ASTRAEA_CONTROLLER_PID", pid_text, 1) != 0)
+        return false;
+    // A sealed source is the only non-stdio FD inherited through exec.
+    if (source.fd != 3 && ::dup2(source.fd, 3) < 0)
+        return false;
+    if (::fcntl(3, F_SETFD, 0) < 0) return false;
+    const int nullfd = ::open("/dev/null", O_RDWR | O_CLOEXEC);
+    if (nullfd < 0 ||
+        ::dup2(nullfd, STDIN_FILENO) < 0 ||
+        ::dup2(nullfd, STDOUT_FILENO) < 0 ||
+        ::dup2(nullfd, STDERR_FILENO) < 0 ||
+        ::syscall(SYS_close_range, 4U, ~0U, 0U) != 0)
+        return false;
+    const std::string binary{executable};
+    ::execl(binary.c_str(), binary.c_str(),
+            "--ptrace-owned-leaf", static_cast<char*>(nullptr));
+    return false;
+}
+
+[[nodiscard]] bool run_pinned_once(
+    std::string_view executable, std::span<const std::byte> original,
+    bool corrupt_artifact) {
+    ::alarm(12U);
+    std::vector<std::byte> bytes(original.begin(), original.end());
+    if (corrupt_artifact) bytes[0] ^= std::byte{1U};
+    SourceFd artifact;
+    if (!seal_owned_source(bytes, artifact)) return false;
+    const pid_t child = ::fork();
+    if (child < 0) return false;
+    if (child == 0)
+        ::_exit(pinned_source_leaf_launch(executable, artifact) ? 90 : 91);
+    ChildGuard guard{child};
+    int status = 0;
+    pid_t waited = -1;
+    do {
+        waited = ::waitpid(child, &status, 0);
+    } while (waited < 0 && errno == EINTR);
+    if (waited != child) return false;
+    if (corrupt_artifact) {
+        // No SIGSTOP can occur: the child SHA check must reject prior to
+        // relocation, native mapping, ptrace registration or guest entry.
+        const bool denied = WIFEXITED(status) && WEXITSTATUS(status) == 72;
+        ::alarm(0);
+        return denied;
+    }
+    if (!WIFSTOPPED(status) || WSTOPSIG(status) != SIGSTOP ||
+        ::ptrace(PTRACE_SETOPTIONS, child, nullptr,
+                 PTRACE_O_TRACESYSGOOD | PTRACE_O_EXITKILL |
+                 PTRACE_O_TRACEFORK | PTRACE_O_TRACEVFORK |
+                 PTRACE_O_TRACECLONE | PTRACE_O_TRACEEXEC) != 0 ||
+        !inspect_pinned_guestimage(child, original))
+        return false;
+    auto before = registers(child);
+    if (!before.has_value()) return false;
+    before->rip = kPinnedEntry;
+    if (::ptrace(PTRACE_SETREGS, child, nullptr, &before.value()) != 0)
+        return false;
+    if (::ptrace(PTRACE_SYSEMU_SINGLESTEP, child, nullptr, nullptr) != 0)
+        return false;
+    int signal = 0;
+    if (!wait_stop(child, signal) || signal != SIGILL)
+        return false;
+    const auto after = registers(child);
+    if (!after.has_value() || after->rip != kPinnedEntry ||
+        !inspect_pinned_guestimage(child, original))
+        return false;
+    ::alarm(0);
+    return true;
+}
+
+[[nodiscard]] int pinned_elf_controller(
+    std::string_view title_path, std::string_view leaf_executable) {
+    const auto source = read_exact_owned_source(title_path);
+    if (!source.has_value()) return 2;
+    if (!run_pinned_once(leaf_executable, source.value(), false) ||
+        !run_pinned_once(leaf_executable, source.value(), false) ||
+        !run_pinned_once(leaf_executable, source.value(), true)) {
+        std::fputs("pinned_ptrace_guestimage_refused\n", stderr);
+        return 3;
+    }
+    std::puts("C1 PINNED OWNED GUESTIMAGE PTRACE PASS");
+    std::puts("source_sha256=45920de847b2d33896c186654bbf22a728f1910fad84accb15204aa2da50c678");
+    std::puts("owned_guestimage_real_relocations_verified_per_run=8");
+    std::puts("owned_guestimage_entry_ud2_fault_runs=2");
+    std::puts("owned_guestimage_tampered_source=refused_before_trace");
+    std::puts("observations=independent_parent_ptrace_only");
+    std::puts("guest_execution=owned_UD2_instruction_attempt_only");
+    std::puts("external_guest_instructions=0");
+    std::puts("sony_entry_abi=not_established");
+    std::puts("hostile_guest_sandbox=not_established");
+    return 0;
+}
 } // namespace
 
 int main(int argc, char** argv) {
+    if (argc == 4 && std::string_view(argv[1]) == "--pinned-owned")
+        return pinned_elf_controller(argv[2], argv[3]);
     if (argc == 3 && std::string_view(argv[1]) == "--leaf") {
         const auto mode = parse_mode(argv[2]);
         return mode.has_value() ? leaf(mode.value()) : 100;

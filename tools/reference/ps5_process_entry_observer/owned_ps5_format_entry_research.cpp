@@ -51,6 +51,7 @@
 #include <sched.h>
 #include <spawn.h>
 #include <sys/mman.h>
+#include <sys/ptrace.h>
 #include <sys/prctl.h>
 #include <sys/resource.h>
 #include <sys/stat.h>
@@ -432,12 +433,17 @@ struct Terminal {
 [[nodiscard]] std::optional<Terminal> execute_pinned_owned_title(
     std::span<const std::byte> source,
     std::uint64_t& stage,
-    bool restricted_leaf = false) {
+    bool restricted_leaf = false,
+    bool ptrace_source_owned_leaf = false) {
     stage = 1U;
     if (!exact_pinned_title(source) ||
         !e::linux_guest_syscall_seccomp_available()) return std::nullopt;
     stage = 2U;
-    auto base = choose_free_base();
+    // Only the externally supervised fixed-UD2 experiment uses an exact
+    // deterministic page-aligned VA; MAP_FIXED_NOREPLACE still fails closed.
+    auto base = ptrace_source_owned_leaf
+        ? std::optional<std::uint64_t>{0x0000000100000000ULL}
+        : choose_free_base();
     if (!base.has_value()) return std::nullopt;
     const auto stack_range = m::GuestRange::create(
         m::GuestAddress{base.value() + kStackOffset}, m::GuestSize{4096U});
@@ -551,6 +557,16 @@ struct Terminal {
     // bytes were checked before mapping; a native SIGILL at that RIP is the
     // end-to-end instruction-fetch observation (no synthetic fault event).
 
+    if (ptrace_source_owned_leaf) {
+        // The real GuestImage and 8 checked RELATIVE writes now exist in
+        // this process. The independently exec-created parent tracer owns
+        // the actual RIP/stop observation. Do not call the legacy guest
+        // transition, send a leaf report, or resume host C++ after SIGSTOP.
+        if (::ptrace(PTRACE_TRACEME, 0, nullptr, nullptr) != 0 ||
+            ::raise(SIGSTOP) != 0) return std::nullopt;
+        return std::nullopt; // unexpected host continuation is failure
+    }
+
     // Explicitly synthetic entry context: UD2 consumes no PS5 process
     // parameters. This NEVER promotes an initial-process ABI contract.
     stage = 8U;
@@ -602,6 +618,27 @@ struct Terminal {
         },
         .load_base = base.value(),
     };
+}
+
+// Ptrace child: consumes the SAME immutable fd3 source used by the isolated
+// native research leaf, and the SAME production GuestImage/memory/RELATIVE
+// path. No shared observation record or effectful controller channel exists.
+[[nodiscard]] int ptrace_owned_leaf_main() {
+    if (!bind_controller()) return 70;
+    const rlimit no_core{0U, 0U};
+    const rlimit limit_as{4ULL * 1024ULL * 1024ULL * 1024ULL,
+                          4ULL * 1024ULL * 1024ULL * 1024ULL};
+    if (::setrlimit(RLIMIT_CORE, &no_core) != 0 ||
+        ::setrlimit(RLIMIT_FSIZE, &no_core) != 0 ||
+        ::setrlimit(RLIMIT_AS, &limit_as) != 0) return 71;
+    auto source = e::read_linux_sealed_worker_artifact(kMaxTitleBytes);
+    if (!source.has_value() || !exact_pinned_title(source.value())) return 72;
+    if (::syscall(SYS_close_range, 3U, ~0U, 0U) != 0) return 73;
+    std::uint64_t stage = 0U;
+    (void)execute_pinned_owned_title(source.value(), stage, false, true);
+    // A legitimate trace remains stopped in the parent until terminated.
+    // Any return (including a failed prepare) is an unsuccessful leaf.
+    return 74;
 }
 
 [[nodiscard]] int worker_main() {
@@ -1028,6 +1065,8 @@ int main(int argc, char** argv) {
             return worker_main();
         if (std::string_view{argv[1]} == "--isolated-leaf")
             return pinned_leaf_main();
+        if (argc == 2 && std::string_view{argv[1]} == "--ptrace-owned-leaf")
+            return ptrace_owned_leaf_main();
         if (argc == 3 && std::string_view{argv[1]} == "--isolated")
             return isolated_controller_main(argv[2]);
         if (argc != 2) return 1;
