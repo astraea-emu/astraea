@@ -534,7 +534,7 @@ prepare_temporary_breakout_guest_memory(
                 symbol->name.identity.has_value())
                 return fail("stop_missing_raw_nid_authority");
 
-            const auto import_target = relocation->import_target.value();
+            const auto import_target = relocation->target.value();
             if (import_target < kScratchGuestPage ||
                 import_target > kScratchGuestLimit - 8U ||
                 (import_target <= 0x6907U && import_target + 7U >= 0x6900U))
