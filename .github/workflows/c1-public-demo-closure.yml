@@ -314,21 +314,21 @@ jobs:
           original = original_elf.read_bytes()
           phoff = struct.unpack_from("<Q", original, 32)[0]
           entsize, phnum = struct.unpack_from("<HH", original, 54)
-          readonly = []
+          executable_loads = []
           for i in range(phnum):
               typ, flags, _off, va, _pa, _fsize, memsz, _align = (
                   struct.unpack_from("<IIQQQQQQ", original, phoff + i * entsize))
               if typ == 1 and (flags & 1) and memsz >= 8:
-                  readonly.append(va)
-          if len(readonly) != 1:
+                  executable_loads.append(va)
+          if len(executable_loads) != 1:
               raise SystemExit("pinned executable load count drift")
-          readonly_manifest, count = re.subn(
+          modified_manifest, count = re.subn(
               r"(?m)^relocation\[1\]\.target=0x[0-9a-f]+$",
-              "relocation[1].target=" + hex(readonly[0]), manifest)
+              "relocation[1].target=" + hex(executable_loads[0]), manifest)
           if count != 1:
-              raise SystemExit("cannot mutate relocation to RX target")
-          negative_path = root / "negative-breakout-nonwritable.txt"
-          negative_path.write_text(readonly_manifest, encoding="utf-8")
+              raise SystemExit("cannot mutate relocation to executable target")
+          negative_path = root / "negative-breakout-executable-target.txt"
+          negative_path.write_text(modified_manifest, encoding="utf-8")
           run = subprocess.run(
               [sys.executable, str(tool), "--author-source",
                str(original_source), "--manifest", str(negative_path),
