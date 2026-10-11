@@ -74,7 +74,9 @@ constexpr std::uint64_t kPageSize = 4096U;
             .environment = {},
             .auxiliary_vector = {},
         },
-        .elf_profile = l::ElfParseProfile::ps5_sce,
+        // The pinned external demo is a PS5-marked ET_DYN, NOT a Sony
+        // ET_SCE_DYNEXEC. Reuse the existing structural-only raw profile.
+        .elf_profile = l::ElfParseProfile::ps5_marked_raw,
     });
     if (!image.has_value()) {
         std::cerr << "actual_guestimage_build_failure="
