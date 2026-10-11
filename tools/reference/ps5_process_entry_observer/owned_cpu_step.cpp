@@ -6,6 +6,7 @@
 #include <cstdint>
 #include <limits>
 #include <optional>
+#include <span>
 
 namespace astraea::research {
 namespace {
@@ -240,4 +241,94 @@ OwnedCpuStepResult step_owned_x86_64(
         .guest_writes = guest_writes,
     });
 }
+
+OwnedCpuRunReport run_owned_x86_64(
+    e::GuestCpuContext& cpu, OwnedGuestAddressSpace& memory,
+    std::size_t instruction_budget) {
+    OwnedCpuRunReport report{};
+    report.stop_rip = cpu.rip;
+    if (instruction_budget == 0U)
+        return report;
+
+    ZydisDecoder decoder{};
+    if (ZYAN_FAILED(ZydisDecoderInit(
+            &decoder, ZYDIS_MACHINE_MODE_LONG_64,
+            ZYDIS_STACK_WIDTH_64))) {
+        report.stop = OwnedCpuRunStopCode::invalid_encoding;
+        return report;
+    }
+
+    for (std::size_t step_index = 0U;
+         step_index < instruction_budget; ++step_index) {
+        report.stop_rip = cpu.rip;
+        std::array<std::byte, kX86MaximumInstructionBytes> bytes{};
+        std::size_t available = 0U;
+        std::optional<OwnedGuestMemoryFault> fetch_fault;
+
+        // Fetch from the *current* guest virtual image. Never trust an
+        // earlier decoded record if code has been changed or remapped.
+        // Fetching one byte at a time permits an instruction to end just
+        // before an inaccessible page (and permits adjacent mapped spans).
+        // A speculative fetch failure after a valid instruction's last
+        // byte does not itself fault the shorter valid instruction.
+        for (std::size_t n = 0U; n < bytes.size(); ++n) {
+            if (cpu.rip > std::numeric_limits<std::uint64_t>::max() - n) {
+                fetch_fault = OwnedGuestMemoryFault{
+                    OwnedGuestMemoryError::address_overflow, cpu.rip};
+                break;
+            }
+            const auto addr = cpu.rip + n;
+            auto fetched = memory.fetch(
+                addr, std::span<std::byte>{bytes.data() + n, 1U});
+            if (!fetched.has_value()) {
+                fetch_fault = fetched.error();
+                break;
+            }
+            ++available;
+        }
+
+        if (available == 0U) {
+            report.stop = OwnedCpuRunStopCode::fetch_refused;
+            report.memory_fault = fetch_fault;
+            return report;
+        }
+
+        ZydisDecodedInstruction instruction{};
+        std::array<ZydisDecodedOperand, ZYDIS_MAX_OPERAND_COUNT> operands{};
+        if (ZYAN_FAILED(ZydisDecoderDecodeFull(
+                &decoder, bytes.data(), available,
+                &instruction, operands.data())) ||
+            instruction.length == 0U ||
+            instruction.length > available ||
+            instruction.length > bytes.size()) {
+            report.stop = fetch_fault.has_value() ?
+                OwnedCpuRunStopCode::fetch_refused :
+                OwnedCpuRunStopCode::invalid_encoding;
+            report.memory_fault = fetch_fault;
+            return report;
+        }
+
+        DecodedSourceInstruction record{};
+        record.rip = cpu.rip;
+        record.length = instruction.length;
+        record.mnemonic = static_cast<std::uint32_t>(
+            instruction.mnemonic);
+        for (std::size_t n = 0U; n < instruction.length; ++n)
+            record.bytes[n] = bytes[n];
+
+        auto committed = step_owned_x86_64(record, cpu, memory);
+        if (!committed.has_value()) {
+            report.stop = OwnedCpuRunStopCode::step_refused;
+            report.step_stop = committed.error();
+            return report;
+        }
+        ++report.retired_instructions;
+        report.guest_writes += committed->guest_writes;
+    }
+
+    report.stop = OwnedCpuRunStopCode::budget_exhausted;
+    report.stop_rip = cpu.rip;
+    return report;
+}
+
 } // namespace astraea::research
