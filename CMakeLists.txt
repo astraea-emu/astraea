@@ -246,6 +246,19 @@ if(ASTRAEA_BUILD_C1_RESEARCH)
     )
     astraea_set_project_warnings(astraea_c1_owned_entry_research)
     astraea_enable_sanitizers(astraea_c1_owned_entry_research)
+
+    # Opt-in, read-only memory-plan evidence for the exact pinned public
+    # Breakout ELF. No native memory preparation or guest entry.
+    add_executable(astraea_c1_breakout_memory_plan_research
+        tools/reference/ps5_process_entry_observer/breakout_actual_memory_plan.cpp
+    )
+    target_link_libraries(astraea_c1_breakout_memory_plan_research
+        PRIVATE Astraea::core)
+    target_include_directories(astraea_c1_breakout_memory_plan_research PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/tests/execution"
+    )
+    astraea_set_project_warnings(astraea_c1_breakout_memory_plan_research)
+    astraea_enable_sanitizers(astraea_c1_breakout_memory_plan_research)
 endif()
 
 astraea_verify_explicit_cpp_sources(
