@@ -35,9 +35,10 @@ jobs:
           cmake -S . -B "$RUNNER_TEMP/astraea-public-demo-profile" -G Ninja \
             -DCMAKE_BUILD_TYPE=Release \
             -DBUILD_TESTING=OFF \
-            -DASTRAEA_WARNINGS_AS_ERRORS=ON
+            -DASTRAEA_WARNINGS_AS_ERRORS=ON \
+            -DASTRAEA_BUILD_C1_RESEARCH=ON
           cmake --build "$RUNNER_TEMP/astraea-public-demo-profile" \
-            --target astraea --parallel 3
+            --target astraea astraea_c1_breakout_memory_plan_research --parallel 3
 
       - name: Fetch and verify pinned independent Breakout demo
         env:
@@ -338,4 +339,48 @@ jobs:
               raise SystemExit("executable guest relocation target admitted")
           print("BREAKOUT IMPORT NEGATIVE AUDIT PASS")
           print("guest_execution=none")
+          PY
+
+      - name: Assess exact Breakout GuestImage memory plan without guest entry
+        run: |
+          set -euo pipefail
+          preflight="$RUNNER_TEMP/astraea-public-demo-profile/astraea_c1_breakout_memory_plan_research"
+          elf="$RUNNER_TEMP/sharpemu-demo-eboot.elf"
+          "$preflight" "$elf" | tee "$RUNNER_TEMP/actual-breakout-plan.txt"
+          grep -Fx "PINNED BREAKOUT ACTUAL MEMORY PLAN PREFLIGHT PASS" \
+            "$RUNNER_TEMP/actual-breakout-plan.txt"
+          grep -Fx "source_plan=mixed_write_execute_page" \
+            "$RUNNER_TEMP/actual-breakout-plan.txt"
+          grep -Fx "source_rwx_executable_mappings=1" \
+            "$RUNNER_TEMP/actual-breakout-plan.txt"
+          grep -Fx "research_narrowed_mapping_count=1" \
+            "$RUNNER_TEMP/actual-breakout-plan.txt"
+          grep -Fx "original_guest_permissions=unchanged" \
+            "$RUNNER_TEMP/actual-breakout-plan.txt"
+          grep -Fx "native_memory_mapped=0" \
+            "$RUNNER_TEMP/actual-breakout-plan.txt"
+          grep -Fx "imports_resolved=0" \
+            "$RUNNER_TEMP/actual-breakout-plan.txt"
+          grep -Fx "guest_instructions=0" \
+            "$RUNNER_TEMP/actual-breakout-plan.txt"
+          grep -Fx "guest_write_semantics_preserved=not_proven" \
+            "$RUNNER_TEMP/actual-breakout-plan.txt"
+          grep -Fx "security_admission=not_granted" \
+            "$RUNNER_TEMP/actual-breakout-plan.txt"
+          python3 - <<'PY'
+          import os
+          from pathlib import Path
+          import subprocess
+          root = Path(os.environ["RUNNER_TEMP"])
+          exe = root / "astraea-public-demo-profile/astraea_c1_breakout_memory_plan_research"
+          original = root / "sharpemu-demo-eboot.elf"
+          tampered = root / "breakout-plan-tampered.elf"
+          b = bytearray(original.read_bytes())
+          b[0] ^= 1
+          tampered.write_bytes(b)
+          result = subprocess.run([str(exe), str(tampered)],
+                                  capture_output=True, text=True, timeout=10)
+          if result.returncode != 2 or result.stdout:
+              raise SystemExit("drifted Breakout code admitted by actual planner")
+          print("ACTUAL GUESTIMAGE PLAN SOURCE-DRIFT NEGATIVE PASS")
           PY
