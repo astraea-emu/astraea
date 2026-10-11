@@ -264,6 +264,7 @@ if(ASTRAEA_BUILD_C1_RESEARCH)
     # Breakout ELF. No native memory preparation or guest entry.
     add_executable(astraea_c1_breakout_memory_plan_research
         tools/reference/ps5_process_entry_observer/breakout_actual_memory_plan.cpp
+        tools/reference/ps5_process_entry_observer/breakout_offline_entry_interpreter.cpp
     )
     target_link_libraries(astraea_c1_breakout_memory_plan_research
         PRIVATE Astraea::core)
