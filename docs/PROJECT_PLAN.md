@@ -36,63 +36,6 @@ GitHub is authoritative.
 A merged implementation outranks a stale document. When a discrepancy is
 found, fix the document rather than preserving obsolete status language.
 
-### Current C1 operating priority (2026-10-10 strategic review)
-
-**One active integration goal:** the unmodified, hash-pinned independently authored
-Breakout PS5-marked ELF reaches its **first *observed* imported-service call**,
-reporting a repeatable typed unsupported stop, exact guest RIP and verified NID.
-This is a **research-only milestone**, not a commercial C1 completion, boot or
-frame. The existing CPU-only Breakout canvas fingerprint is a later oracle,
-not proof of emulator rendering. [Live status](STATUS.md) is authoritative
-for which PRs are merged and what is still only a proposal.
-
-The critical path is deliberately **dependency-gated, not date-gated**:
-
-1. **Hostile-guest boundary [#410](https://github.com/astraea-emu/astraea/issues/410):**
-   the demonstrated out-of-guest-IP host syscall escape is incompatible with
-   arbitrary guest admission. A separately confined execution leaf must
-   minimize host syscalls and inherited capabilities **independently of RIP**;
-   the controller must not trust well-formed worker IPC as provenance. Prove
-   denied host effects, forged-message refusal, typed guest syscall/fault
-   preservation, deterministic termination and clean repeatability. Instrument
-   the trusted controller without granting sanitizer runtime syscalls to the
-   untrusted leaf. The current #414/#415 tests are **research**, not a
-   production sandbox or authorization to launch the external ELF.
-2. **Exact Breakout closure [#378](https://github.com/astraea-emu/astraea/issues/378):**
-   reuse the existing loader, checked `RELATIVE`/`GLOB_DAT`, module graph
-   and gate primitives. Freeze independent source and ELF identities; reject
-   ambiguous **bare NID -> provider/module** associations rather than
-   silently assigning Sony libraries or success returns. Prove each
-   required patch target/address is owned, mapped, permitted and read back.
-   Execute only under the accepted research confinement, twice from identical
-   bytes, to one actual typed first service boundary, with tamper and
-   unsupported-identity negatives. The first source-level service named in
-   `src/main.c` is a **hypothesis**, not an observed call.
-3. **Commercial-title preflight in parallel:** identify a lawful small/offline,
-   low-closure first title and backups from independently documented behavior;
-   perform **C0 read-only diagnostics** on locally authorized bytes as soon as
-   available. Neither security completion nor PS5 hardware is required for
-   read-only preflight. Never commit proprietary game bytes, keys or firmware.
-4. **Reference hardware [#334](https://github.com/astraea-emu/astraea/issues/334):**
-   only collect two exact same-binary *normal-title* pre-CRT/procparam runs
-   when their launch/logging route is demonstrated for the chosen firmware,
-   provenance/backup/abort rules are met, and the observation resolves the
-   first irreducible selected-path ABI uncertainty. General payload-loader
-   support does not demonstrate normal home-screen title startup. Preserve
-   firmware 13.00 without unsolicited networking or updates.
-5. **Commercial C1/C2.0:** promote **only measured** required process-entry
-   fields via #348 and reproduce genuine title instruction / first typed
-   post-entry divergence (#350). C3 boot, C4 title frame, C5 menu and C6
-   playable route follow as distinct, workload-measured achievements.
-
-**Scope control:** one selected executable path, first measured blocker
-first; no second generic ELF gate prototype, broad unmeasured HLE/shader
-catalog, user-interface release work, speculative firmware/VSH boot, or
-arbitrary native retail admission. Preserve previous negative results and
-classify progress explicitly as static, owned-synthetic, independent homebrew,
-or genuine commercial-title evidence. Review licenses/provenance before any
-cross-project code use. Protect the five cross-platform CI checks.
-
 ## 3. Core principles
 
 1. **Evidence before PS5-specific behavior.**
@@ -365,6 +308,63 @@ C1 is the current critical path (#300). **The execution order is software-first:
 retire independently testable closure dependencies before scheduling the
 reference-console observation (#334).** No completed PC-only task substitutes
 for actual PS5 hardware entry evidence.
+
+#### Current C1 operating priority (2026-10-10 strategic review)
+
+**One active integration goal:** the unmodified, hash-pinned independently authored
+Breakout PS5-marked ELF reaches its **first *observed* imported-service call**,
+reporting a repeatable typed unsupported stop, exact guest RIP and verified NID.
+This is a **research-only milestone**, not a commercial C1 completion, boot or
+frame. The existing CPU-only Breakout canvas fingerprint is a later oracle,
+not proof of emulator rendering. [Live status](STATUS.md) is authoritative
+for which PRs are merged and what is still only a proposal.
+
+The critical path is deliberately **dependency-gated, not date-gated**:
+
+1. **Hostile-guest boundary [#410](https://github.com/astraea-emu/astraea/issues/410):**
+   the demonstrated out-of-guest-IP host syscall escape is incompatible with
+   arbitrary guest admission. A separately confined execution leaf must
+   minimize host syscalls and inherited capabilities **independently of RIP**;
+   the controller must not trust well-formed worker IPC as provenance. Prove
+   denied host effects, forged-message refusal, typed guest syscall/fault
+   preservation, deterministic termination and clean repeatability. Instrument
+   the trusted controller without granting sanitizer runtime syscalls to the
+   untrusted leaf. The current #414/#415 tests are **research**, not a
+   production sandbox or authorization to launch the external ELF.
+2. **Exact Breakout closure [#378](https://github.com/astraea-emu/astraea/issues/378):**
+   reuse the existing loader, checked `RELATIVE`/`GLOB_DAT`, module graph
+   and gate primitives. Freeze independent source and ELF identities; reject
+   ambiguous **bare NID -> provider/module** associations rather than
+   silently assigning Sony libraries or success returns. Prove each
+   required patch target/address is owned, mapped, permitted and read back.
+   Execute only under the accepted research confinement, twice from identical
+   bytes, to one actual typed first service boundary, with tamper and
+   unsupported-identity negatives. The first source-level service named in
+   `src/main.c` is a **hypothesis**, not an observed call.
+3. **Commercial-title preflight in parallel:** identify a lawful small/offline,
+   low-closure first title and backups from independently documented behavior;
+   perform **C0 read-only diagnostics** on locally authorized bytes as soon as
+   available. Neither security completion nor PS5 hardware is required for
+   read-only preflight. Never commit proprietary game bytes, keys or firmware.
+4. **Reference hardware [#334](https://github.com/astraea-emu/astraea/issues/334):**
+   only collect two exact same-binary *normal-title* pre-CRT/procparam runs
+   when their launch/logging route is demonstrated for the chosen firmware,
+   provenance/backup/abort rules are met, and the observation resolves the
+   first irreducible selected-path ABI uncertainty. General payload-loader
+   support does not demonstrate normal home-screen title startup. Preserve
+   firmware 13.00 without unsolicited networking or updates.
+5. **Commercial C1/C2.0:** promote **only measured** required process-entry
+   fields via #348 and reproduce genuine title instruction / first typed
+   post-entry divergence (#350). C3 boot, C4 title frame, C5 menu and C6
+   playable route follow as distinct, workload-measured achievements.
+
+**Scope control:** one selected executable path, first measured blocker
+first; no second generic ELF gate prototype, broad unmeasured HLE/shader
+catalog, user-interface release work, speculative firmware/VSH boot, or
+arbitrary native retail admission. Preserve previous negative results and
+classify progress explicitly as static, owned-synthetic, independent homebrew,
+or genuine commercial-title evidence. Review licenses/provenance before any
+cross-project code use. Protect the five cross-platform CI checks.
 
 ### C1 software-first execution sequence — 2026-10-08
 
