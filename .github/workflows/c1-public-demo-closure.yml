@@ -39,7 +39,28 @@ jobs:
             -DASTRAEA_WARNINGS_AS_ERRORS=ON \
             -DASTRAEA_BUILD_C1_RESEARCH=ON
           cmake --build "$RUNNER_TEMP/astraea-public-demo-profile" \
-            --target astraea astraea_c1_breakout_memory_plan_research --parallel 3
+            --target astraea astraea_c1_breakout_memory_plan_research astraea_c1_owned_guest_memory_research --parallel 3
+
+      - name: Exercise owned virtual guest memory permissions and failures
+        run: |
+          set -euo pipefail
+          probe="$RUNNER_TEMP/astraea-public-demo-profile/astraea_c1_owned_guest_memory_research"
+          "$probe" | tee "$RUNNER_TEMP/astraea-owned-guest-memory.txt"
+          for expected in \
+            "C1 OWNED VIRTUAL GUEST MEMORY PASS" \
+            "checked_regions=4" \
+            "checked_guest_rw_stack=pass" \
+            "write_readonly=refused" \
+            "execute_nonexec=refused" \
+            "read_no_read_permission=refused" \
+            "cross_region_write=refused_without_partial_mutation" \
+            "overflow_unmapped_empty=refused" \
+            "overlap_host_alias=refused" \
+            "guest_virtual_wx=represented_without_host_executable_mapping" \
+            "native_hostile_code_containment=not_established"; do
+            grep -Fx "$expected" "$RUNNER_TEMP/astraea-owned-guest-memory.txt"
+          done
+          echo "SOURCE-OWNED VIRTUAL MEMORY CONFORMANCE; NO GUEST NATIVE ENTRY"
 
       - name: Fetch and verify pinned independent Breakout demo
         env:
