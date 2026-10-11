@@ -54,6 +54,7 @@ jobs:
             "execute_nonexec=refused" \
             "read_no_read_permission=refused" \
             "cross_region_write=refused_without_partial_mutation" \
+            "overlapping_caller_spans=memmove_safe" \
             "overflow_unmapped_empty=refused" \
             "overlap_host_alias=refused" \
             "guest_virtual_wx=represented_without_host_executable_mapping" \
