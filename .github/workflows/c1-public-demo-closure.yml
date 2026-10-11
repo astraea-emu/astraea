@@ -7,6 +7,7 @@ on:
       - '.github/workflows/c1-public-demo-closure.yml'
       - 'src/app/**'
       - 'tools/reference/public_breakout_import_audit.py'
+      - 'tools/reference/ps5_process_entry_observer/owned_ptrace_step_research.cpp'
       - 'src/loader/**'
       - 'include/astraea/loader/**'
       - 'src/execution/linux_retail_diagnostic.cpp'
