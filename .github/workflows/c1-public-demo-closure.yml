@@ -314,8 +314,10 @@ jobs:
                   struct.unpack_from("<IIQQQQQQ", original, phoff + i * entsize))
               if typ == 1 and (flags & 1) and not (flags & 2) and memsz >= 8:
                   readonly.append(va)
-          if len(readonly) != 1:
-              raise SystemExit("unexpected pinned executable load census")
+          if not readonly:
+              raise SystemExit("pinned ELF has no non-writable executable load")
+          # Multiple RX load segments are legitimate; select the first
+          # bounded segment without inventing a unique-load guarantee.
           readonly_manifest, count = re.subn(
               r"(?m)^relocation\[1\]\.target=0x[0-9a-f]+$",
               "relocation[1].target=" + hex(readonly[0]), manifest)
