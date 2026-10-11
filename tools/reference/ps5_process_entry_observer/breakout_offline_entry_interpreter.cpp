@@ -1,5 +1,6 @@
 #include "breakout_offline_entry_interpreter.hpp"
 
+#include <algorithm>
 #include <array>
 #include <bit>
 #include <cstddef>
