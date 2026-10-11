@@ -122,7 +122,7 @@ using astraea::memory::MappingIntent;
 // execution thread. Every thread subsequently spawned inherits this policy.
 // Its narrow host allowlist is sufficient only for this fixed source-owned
 // experiment; it is not a general guest worker sandbox.
-[[nodiscard]] bool install_test_leaf_allowlist() noexcept {
+[[nodiscard, maybe_unused]] bool install_test_leaf_allowlist() noexcept {
     constexpr std::array<int, 21U> kHostSyscalls{
         SYS_brk,
         SYS_clone,
