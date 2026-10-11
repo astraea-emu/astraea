@@ -69,7 +69,7 @@ struct Probe {
         p.length = 11U;
         p.terminal_rip = kGuestBase + 7U;
     } else {
-        p.bytes = {0x48, 0xb8, 0, 0, 0, 0, 1, 0, 0, 0, 0xff, 0xe0, 0x0f, 0x0b};
+        p.bytes = {0x48, 0xb8, 0, 0, 1, 0, 1, 0, 0, 0, 0xff, 0xe0, 0x0f, 0x0b};
         p.length = 14U;
         p.terminal_rip = kHostSentinelBase;
     }
