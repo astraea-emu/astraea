@@ -48,6 +48,7 @@
 #include <linux/audit.h>
 #include <linux/filter.h>
 #include <linux/seccomp.h>
+#include <sched.h>
 #include <spawn.h>
 #include <sys/mman.h>
 #include <sys/prctl.h>
@@ -169,17 +170,17 @@ static_assert(kLeafStopBytes == 64U);
     return address;
 }
 
-// This is a narrow research-only process policy for the ONE pinned UD2
-// workload. The leaf is a new exec-created process, is never ASan-linked,
-// has no controller socket or effectful reporting descriptor, and cannot
-// perform write/open/socket/exec after the filter is installed. This still
-// permits thread creation and virtual memory operations for Astraea's
-// actual native backend; it is not hostile-code memory containment.
+// Restrict inherited syscalls regardless of guest vs host instruction IP.
+// The leaf's real native backend needs an in-process pthread, but it does
+// not need a child process. In particular CLONE_THREAD is mandatory for the
+// old clone(2) syscall; clone3's pointed-to flags cannot be safely inspected
+// by seccomp BPF, so respond ENOSYS for glibc's old-clone fallback. These are
+// bounded source-owned security regressions, not hostile-code containment.
+// mmap/mprotect may transition RW -> RX but never request simultaneous WX.
 [[nodiscard]] bool install_pinned_leaf_policy() noexcept {
-    constexpr std::array<int, 22U> kHostRuntimeSyscalls{
-        SYS_brk, SYS_clone, SYS_clone3, SYS_exit, SYS_exit_group,
-        SYS_futex, SYS_getpid, SYS_gettid, SYS_madvise,
-        SYS_mmap, SYS_mprotect, SYS_munmap, SYS_prctl,
+    constexpr std::array<int, 18U> kHostRuntimeSyscalls{
+        SYS_brk, SYS_exit, SYS_exit_group, SYS_futex, SYS_getpid,
+        SYS_gettid, SYS_madvise, SYS_munmap, SYS_prctl,
         SYS_rt_sigaction, SYS_rt_sigprocmask, SYS_rt_sigreturn,
         SYS_rseq, SYS_seccomp, SYS_set_robust_list, SYS_sigaltstack,
         SYS_clock_gettime, SYS_sched_getaffinity,
@@ -187,10 +188,22 @@ static_assert(kLeafStopBytes == 64U);
     constexpr auto kLoad = static_cast<std::uint16_t>(BPF_LD | BPF_W | BPF_ABS);
     constexpr auto kEq = static_cast<std::uint16_t>(BPF_JMP | BPF_JEQ | BPF_K);
     constexpr auto kGe = static_cast<std::uint16_t>(BPF_JMP | BPF_JGE | BPF_K);
+    constexpr auto kAnd = static_cast<std::uint16_t>(BPF_ALU | BPF_AND | BPF_K);
     constexpr auto kReturn = static_cast<std::uint16_t>(BPF_RET | BPF_K);
     constexpr auto kDenied = SECCOMP_RET_ERRNO |
         static_cast<std::uint32_t>(EPERM);
-    std::array<sock_filter, 7U + 2U * kHostRuntimeSyscalls.size()> rules{};
+    constexpr auto kOldCloneFallback = SECCOMP_RET_ERRNO |
+        static_cast<std::uint32_t>(ENOSYS);
+    constexpr auto kAllowed = SECCOMP_RET_ALLOW;
+    constexpr auto kWriteExec = PROT_WRITE | PROT_EXEC;
+    constexpr auto kArg0 = static_cast<std::uint32_t>(
+        offsetof(seccomp_data, args));
+    constexpr auto kArg2 = kArg0 + 2U * sizeof(std::uint64_t);
+
+    // Common checks (6), 18 allowlisted syscalls (36), clone3 fallback (2),
+    // clone/thread-only flag validation (9), mmap and mprotect (6 each),
+    // final deny (1). Keep the BPF program bounded and exact.
+    std::array<sock_filter, 60U> rules{};
     std::size_t i = 0U;
     const auto statement = [&](std::uint16_t code, std::uint32_t value) {
         rules[i++] = sock_filter{.code = code, .jt = 0U, .jf = 0U, .k = value};
@@ -207,8 +220,43 @@ static_assert(kLeafStopBytes == 64U);
     statement(kReturn, kDenied);
     for (const int number : kHostRuntimeSyscalls) {
         jump(kEq, static_cast<std::uint32_t>(number), 0U, 1U);
-        statement(kReturn, SECCOMP_RET_ALLOW);
+        statement(kReturn, kAllowed);
     }
+
+    // glibc uses clone3 where supported. Pretend this syscall is absent,
+    // so pthread_create can use clone. Never inspect clone3's guest pointer.
+    jump(kEq, SYS_clone3, 0U, 1U);
+    statement(kReturn, kOldCloneFallback);
+
+    // fork/vfork already denied; clone without CLONE_THREAD can also create
+    // a process. Reject high flag bits and require thread-group membership.
+    // A real pthread must remain in the leaf's process and seccomp filter.
+    jump(kEq, SYS_clone, 0U, 8U);
+    statement(kLoad, kArg0 + sizeof(std::uint32_t));
+    jump(kEq, 0U, 1U, 0U);
+    statement(kReturn, kDenied);
+    statement(kLoad, kArg0);
+    statement(kAnd, static_cast<std::uint32_t>(CLONE_THREAD));
+    jump(kEq, static_cast<std::uint32_t>(CLONE_THREAD), 1U, 0U);
+    statement(kReturn, kDenied);
+    statement(kReturn, kAllowed);
+
+    // Neither syscall may request writable and executable mappings.
+    // This check applies even when the syscall instruction is in host code.
+    jump(kEq, SYS_mmap, 0U, 5U);
+    statement(kLoad, kArg2);
+    statement(kAnd, static_cast<std::uint32_t>(kWriteExec));
+    jump(kEq, static_cast<std::uint32_t>(kWriteExec), 0U, 1U);
+    statement(kReturn, kDenied);
+    statement(kReturn, kAllowed);
+
+    jump(kEq, SYS_mprotect, 0U, 5U);
+    statement(kLoad, kArg2);
+    statement(kAnd, static_cast<std::uint32_t>(kWriteExec));
+    jump(kEq, static_cast<std::uint32_t>(kWriteExec), 0U, 1U);
+    statement(kReturn, kDenied);
+    statement(kReturn, kAllowed);
+
     statement(kReturn, kDenied);
     if (i != rules.size() ||
         ::prctl(PR_SET_NO_NEW_PRIVS, 1UL, 0UL, 0UL, 0UL) != 0)
@@ -218,6 +266,45 @@ static_assert(kLeafStopBytes == 64U);
         .filter = rules.data(),
     };
     return ::syscall(SYS_seccomp, SECCOMP_SET_MODE_FILTER, 0U, &program) == 0;
+}
+
+// All probes occur after policy install and before any guest entry.
+// The prospective child of an erroneously allowed fork-like clone exits
+// immediately; normal success is an EPERM return, with no descendant.
+[[nodiscard]] bool prove_pinned_leaf_capability_denials() noexcept {
+    errno = 0;
+    const auto process = ::syscall(SYS_clone, SIGCHLD, nullptr,
+                                   nullptr, nullptr, nullptr);
+    if (process == 0) ::_exit(87);
+    if (process != -1 || errno != EPERM) return false;
+
+    errno = 0;
+    if (::syscall(SYS_clone3, nullptr, 0U) != -1 ||
+        errno != ENOSYS) return false;
+
+    errno = 0;
+    const auto bad_mapping = ::syscall(
+        SYS_mmap, nullptr, 4096U, PROT_READ | PROT_WRITE | PROT_EXEC,
+        MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+    if (bad_mapping != -1 || errno != EPERM) {
+        if (bad_mapping >= 0) (void)::munmap(
+            reinterpret_cast<void*>(bad_mapping), 4096U);
+        return false;
+    }
+
+    void* scratch = ::mmap(nullptr, 4096U, PROT_READ | PROT_WRITE,
+                            MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+    if (scratch == MAP_FAILED) return false;
+    errno = 0;
+    const bool denied_wx =
+        ::syscall(SYS_mprotect, scratch, 4096U,
+                  PROT_READ | PROT_WRITE | PROT_EXEC) == -1 &&
+        errno == EPERM;
+    // A legal staging transition must be preserved.
+    const bool frozen_rx = denied_wx &&
+        ::mprotect(scratch, 4096U, PROT_READ | PROT_EXEC) == 0;
+    const bool unmapped = ::munmap(scratch, 4096U) == 0;
+    return denied_wx && frozen_rx && unmapped;
 }
 
 // Fixed, Astraea-authored adversarial GuestImage. Unlike the #417 toy RX
@@ -480,6 +567,8 @@ struct Terminal {
         errno = 0;
         if (::syscall(SYS_socket, 2, 1, 0) != -1 ||
             errno != EPERM) return std::nullopt;
+        if (!prove_pinned_leaf_capability_denials())
+            return std::nullopt;
     }
     auto run = e::enter_linux_guest_with_seccomp_syscall_trap(
         image, prepared.value(), e::make_synthetic_initial_context(image));
@@ -815,6 +904,11 @@ struct SourceFd {
               << "normalized_guest_rip=0x10\n"
               << "malformed_report_fields=8_refused\n"
               << "repeat_normalized_reports=identical\n"
+              << "restricted_clone_process=denied\n"
+              << "restricted_clone3=fallback_enosys\n"
+              << "restricted_mmap_wx=denied\n"
+              << "restricted_mprotect_wx=denied\n"
+              << "restricted_staging_rw_to_rx=accepted\n"
               << "real_guestimage_host_ip_write_denied_runs=2\n"
               << "tampered_sealed_input=refused_by_leaf\n"
               << "effectful_controller_ipc=not_inherited\n"
