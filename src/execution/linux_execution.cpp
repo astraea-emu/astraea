@@ -1024,15 +1024,17 @@ install_guest_executable_syscall_filter(
         std::endian::native ==
         std::endian::little);
 
-    // These host-resource syscalls must not succeed even when guest control
-    // flow reaches an instruction outside the registered guest IP ranges.
-    // This is defense in depth, NOT a sandbox: many host syscalls and any
-    // already-open file descriptors remain outside this scoped policy.
-    constexpr std::array<int, 14U> kDeniedOutsideGuestIp{
+    // Selected resource-acquisition and descriptor-output syscalls must
+    // not succeed when guest control flow reaches host instructions.
+    // This is guest-thread defense in depth, NOT a process sandbox:
+    // many syscalls, inherited descriptors and controller IPC remain.
+    constexpr std::array<int, 16U> kDeniedOutsideGuestIp{
         SYS_open,
         SYS_openat,
         SYS_openat2,
         SYS_creat,
+        SYS_write,
+        SYS_writev,
         SYS_socket,
         SYS_socketpair,
         SYS_connect,
