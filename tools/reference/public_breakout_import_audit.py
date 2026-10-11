@@ -263,9 +263,18 @@ def main() -> int:
         authored = parse_author_imports(source.decode("utf-8"))
         manifest_text = manifest.decode("utf-8")
         counts = verify_manifest(authored, manifest_text)
+        loads = checked_loads(elf)
         relative_count, glob_dat_count = verify_relocation_write_extents(
-            manifest_text, checked_loads(elf)
+            manifest_text, loads
         )
+        executable_loads = sum(1 for _lo, _hi, flags in loads if flags & 1)
+        rwx_loads = sum(1 for _lo, _hi, flags in loads
+                        if (flags & 1) and (flags & 2))
+        # This pinned ELF's RWX source envelope is an independently
+        # measured *native admission blocker*, not permission to waive
+        # Astraea's W^X execution-memory policy.
+        if executable_loads != 1 or rwx_loads != 1:
+            raise AuditFailure("pinned_executable_permission_census_drift")
     except (AuditFailure, UnicodeDecodeError, SyntaxError, OSError) as exc:
         parser.exit(2, f"BREAKOUT AUTHOR IMPORT AUDIT REFUSED: {exc}\n")
     print("BREAKOUT AUTHOR IMPORT AUDIT PASS")
@@ -280,6 +289,9 @@ def main() -> int:
     print(f"mapped_writable_glob_dat_targets={glob_dat_count}")
     print("relocation_target_overlap=none")
     print("relocation_executable_targets=none")
+    print(f"executable_load_segments={executable_loads}")
+    print(f"writable_executable_load_segments={rwx_loads}")
+    print("native_guest_entry=blocked_by_source_rwx_load")
     for module in sorted(counts):
         print(f"author_declared_{module}={counts[module]}")
     print("sony_export_resolution=not_attempted")
