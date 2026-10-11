@@ -101,6 +101,17 @@ using astraea::memory::MappingIntent;
     return static_cast<std::int32_t>(result);
 }
 
+// Explicit known limitation: a guest-controlled call into this test-owned
+// host function reaches the syscall instruction inside libc's syscall()
+// wrapper, outside Astraea's mapped guest IP ranges. The filter permits
+// host write(2). The only permitted destination is a local test-only pipe.
+[[gnu::noinline]] std::int64_t outside_guest_ip_write_probe(
+    int descriptor,
+    const void* bytes,
+    std::size_t count) noexcept {
+    return ::syscall(SYS_write, descriptor, bytes, count);
+}
+
 GuestRange range(std::uint64_t base, std::uint64_t size) {
     auto result =
         GuestRange::create(
@@ -454,6 +465,95 @@ TEST_CASE(
             reinterpret_cast<std::uintptr_t>(
                 &outside_guest_ip_int80_probe)));
     }
+}
+
+TEST_CASE(
+    "Linux guest-to-host control-flow escape can still write to owned pipe",
+    "[execution][linux-transition][c1][seccomp][host-ip][known-limitation]") {
+    const auto page = page_size();
+    const auto base =
+        find_free_block(static_cast<std::size_t>(page * 3U));
+    const auto stack_base = base + page;
+
+    // The pipe is created by the test and never connects to real worker
+    // IPC, a file, the network, or the production controller.
+    std::array<int, 2U> pipe_descriptors{-1, -1};
+    REQUIRE(::pipe2(
+        pipe_descriptors.data(), O_CLOEXEC | O_NONBLOCK) == 0);
+    struct ClosePipeOnExit {
+        std::array<int, 2U>& handles;
+        ~ClosePipeOnExit() noexcept {
+            for (const int handle : handles) {
+                if (handle >= 0) {
+                    static_cast<void>(::close(handle));
+                }
+            }
+        }
+    } cleanup{pipe_descriptors};
+
+    static constexpr std::array<char, 8U> kMarker{
+        'A', 'S', 'T', 'R', 'A', 'E', 'A', '1',
+    };
+    std::vector<std::byte> code{
+        std::byte{0x48}, std::byte{0x83},
+        std::byte{0xec}, std::byte{0x08}, // Align for SysV host call.
+    };
+    // Fixed, source-owned guest bytes; no untrusted executable admitted.
+    append_mov_imm64(
+        code, 7U,
+        static_cast<std::uint64_t>(pipe_descriptors[1]));
+    append_mov_imm64(
+        code, 6U,
+        static_cast<std::uint64_t>(
+            reinterpret_cast<std::uintptr_t>(kMarker.data())));
+    append_mov_imm64(
+        code, 2U, static_cast<std::uint64_t>(kMarker.size()));
+    append_mov_imm64(
+        code, 0U,
+        static_cast<std::uint64_t>(
+            reinterpret_cast<std::uintptr_t>(
+                &outside_guest_ip_write_probe)));
+    code.push_back(std::byte{0xff});
+    code.push_back(std::byte{0xd0}); // call rax (outside guest range)
+    code.push_back(std::byte{0x48});
+    code.push_back(std::byte{0x83});
+    code.push_back(std::byte{0xc4});
+    code.push_back(std::byte{0x08});
+    const auto fault_offset = code.size();
+    code.push_back(std::byte{0x0f});
+    code.push_back(std::byte{0x0b}); // deliberate bounded guest stop
+
+    auto image =
+        make_guest_image(base, stack_base, page, std::move(code));
+    auto prepared =
+        astraea::execution::prepare_linux_guest_memory(image);
+    REQUIRE(prepared.has_value());
+
+    const auto result =
+        astraea::execution::enter_linux_guest_with_seccomp_syscall_trap(
+            image, prepared.value(),
+            astraea::execution::make_synthetic_initial_context(image));
+    REQUIRE(result.has_value());
+    const auto* stopped =
+        std::get_if<astraea::execution::ExecutionStop>(
+            &result.value());
+    REQUIRE(stopped != nullptr);
+    REQUIRE(stopped->reason == ExecutionStopReason::guest_fault);
+    REQUIRE(stopped->has_fault);
+    REQUIRE(stopped->fault.kind == GuestFaultKind::illegal_instruction);
+    REQUIRE(stopped->context.rip ==
+            base + static_cast<std::uint64_t>(fault_offset));
+    REQUIRE(stopped->context.rax == kMarker.size());
+
+    std::array<char, kMarker.size()> received{};
+    const auto count =
+        ::read(pipe_descriptors[0], received.data(), received.size());
+    REQUIRE(count == static_cast<ssize_t>(received.size()));
+    REQUIRE(received == kMarker);
+
+    // A passing test establishes the current vulnerability, NOT that
+    // the research worker is safe for independently authored native ELF.
+    // Once true process-wide containment exists, invert/retire this test.
 }
 
 TEST_CASE(
