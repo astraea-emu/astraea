@@ -15,9 +15,13 @@
 
 #if defined(__linux__) && defined(__x86_64__)
 #include <linux/audit.h>
+#include <linux/filter.h>
+#include <linux/seccomp.h>
 #include <fcntl.h>
 #include <sys/mman.h>
+#include <sys/prctl.h>
 #include <sys/syscall.h>
+#include <sys/wait.h>
 #include <unistd.h>
 #endif
 
@@ -110,6 +114,85 @@ using astraea::memory::MappingIntent;
     const void* bytes,
     std::size_t count) noexcept {
     return ::syscall(SYS_write, descriptor, bytes, count);
+}
+
+// A research-only process-level filter, installed before creating the guest
+// execution thread. Every thread subsequently spawned inherits this policy.
+// Its narrow host allowlist is sufficient only for this fixed source-owned
+// experiment; it is not a general guest worker sandbox.
+[[nodiscard]] bool install_test_leaf_allowlist() noexcept {
+    constexpr std::array<int, 21U> kHostSyscalls{
+        SYS_brk,
+        SYS_clone,
+        SYS_clone3,
+        SYS_exit,
+        SYS_exit_group,
+        SYS_futex,
+        SYS_getpid,
+        SYS_gettid,
+        SYS_madvise,
+        SYS_mmap,
+        SYS_mprotect,
+        SYS_munmap,
+        SYS_prctl,
+        SYS_rt_sigaction,
+        SYS_rt_sigprocmask,
+        SYS_rt_sigreturn,
+        SYS_rseq,
+        SYS_seccomp,
+        SYS_set_robust_list,
+        SYS_sigaltstack,
+        SYS_clock_gettime,
+    };
+    constexpr auto kLoad =
+        static_cast<std::uint16_t>(BPF_LD | BPF_W | BPF_ABS);
+    constexpr auto kEq =
+        static_cast<std::uint16_t>(BPF_JMP | BPF_JEQ | BPF_K);
+    constexpr auto kGe =
+        static_cast<std::uint16_t>(BPF_JMP | BPF_JGE | BPF_K);
+    constexpr auto kReturn =
+        static_cast<std::uint16_t>(BPF_RET | BPF_K);
+    constexpr std::uint32_t kDenied =
+        SECCOMP_RET_ERRNO | static_cast<std::uint32_t>(EPERM);
+    std::array<sock_filter, 7U + 2U * kHostSyscalls.size()> rules{};
+    std::size_t index = 0U;
+    const auto statement = [&](std::uint16_t code, std::uint32_t value) {
+        rules[index++] = sock_filter{
+            .code = code, .jt = 0U, .jf = 0U, .k = value,
+        };
+    };
+    const auto jump = [&](std::uint16_t code, std::uint32_t value,
+                          std::uint8_t yes, std::uint8_t no) {
+        rules[index++] = sock_filter{
+            .code = code, .jt = yes, .jf = no, .k = value,
+        };
+    };
+
+    statement(kLoad, static_cast<std::uint32_t>(
+        offsetof(seccomp_data, arch)));
+    jump(kEq, static_cast<std::uint32_t>(AUDIT_ARCH_X86_64), 1U, 0U);
+    statement(kReturn, kDenied);
+    statement(kLoad, static_cast<std::uint32_t>(
+        offsetof(seccomp_data, nr)));
+    // Refuse x32-tagged syscalls independently of host kernel support.
+    jump(kGe, 0x40000000U, 0U, 1U);
+    statement(kReturn, kDenied);
+    for (const int syscall_number : kHostSyscalls) {
+        jump(kEq, static_cast<std::uint32_t>(syscall_number), 0U, 1U);
+        statement(kReturn, SECCOMP_RET_ALLOW);
+    }
+    statement(kReturn, kDenied);
+
+    if (index != rules.size() ||
+        ::prctl(PR_SET_NO_NEW_PRIVS, 1UL, 0UL, 0UL, 0UL) != 0) {
+        return false;
+    }
+    sock_fprog program{
+        .len = static_cast<unsigned short>(rules.size()),
+        .filter = rules.data(),
+    };
+    return ::syscall(SYS_seccomp, SECCOMP_SET_MODE_FILTER,
+                     0U, &program) == 0;
 }
 
 GuestRange range(std::uint64_t base, std::uint64_t size) {
@@ -554,6 +637,159 @@ TEST_CASE(
     // A passing test establishes the current vulnerability, NOT that
     // the research worker is safe for independently authored native ELF.
     // Once true process-wide containment exists, invert/retire this test.
+}
+
+TEST_CASE(
+    "forked research leaf denies escaped host write without guest trap regression",
+    "[execution][linux-transition][c1][seccomp][leaf][security]") {
+    const auto exercise = [](bool escaped_host_write) {
+        const auto page = page_size();
+        const auto base =
+            find_free_block(static_cast<std::size_t>(page * 3U));
+        const auto stack_base = base + page;
+
+        std::array<int, 2U> pipe_descriptors{-1, -1};
+        REQUIRE(::pipe2(
+            pipe_descriptors.data(), O_CLOEXEC | O_NONBLOCK) == 0);
+        struct ClosePipeOnExit {
+            std::array<int, 2U>& handles;
+            ~ClosePipeOnExit() noexcept {
+                for (int& handle : handles) {
+                    if (handle >= 0) {
+                        static_cast<void>(::close(handle));
+                        handle = -1;
+                    }
+                }
+            }
+        } cleanup{pipe_descriptors};
+
+        static constexpr std::array<char, 8U> kMarker{
+            'A', 'S', 'T', 'R', 'A', 'E', 'A', '1',
+        };
+        std::vector<std::byte> code;
+        std::size_t guest_syscall_offset = 0U;
+        if (escaped_host_write) {
+            code = {
+                std::byte{0x48}, std::byte{0x83},
+                std::byte{0xec}, std::byte{0x08},
+            };
+            append_mov_imm64(
+                code, 7U,
+                static_cast<std::uint64_t>(pipe_descriptors[1]));
+            append_mov_imm64(
+                code, 6U,
+                static_cast<std::uint64_t>(
+                    reinterpret_cast<std::uintptr_t>(kMarker.data())));
+            append_mov_imm64(
+                code, 2U, static_cast<std::uint64_t>(kMarker.size()));
+            append_mov_imm64(
+                code, 0U,
+                static_cast<std::uint64_t>(
+                    reinterpret_cast<std::uintptr_t>(
+                        &outside_guest_ip_write_probe)));
+            code.push_back(std::byte{0xff});
+            code.push_back(std::byte{0xd0});
+            code.push_back(std::byte{0x48});
+            code.push_back(std::byte{0x83});
+            code.push_back(std::byte{0xc4});
+            code.push_back(std::byte{0x08});
+        } else {
+            append_mov_imm64(
+                code, 0U, static_cast<std::uint64_t>(SYS_getpid));
+            guest_syscall_offset = code.size();
+            code.push_back(std::byte{0x0f});
+            code.push_back(std::byte{0x05});
+        }
+        const auto fault_offset = code.size();
+        code.push_back(std::byte{0x0f});
+        code.push_back(std::byte{0x0b});
+
+        // Construct immutable source-owned guest input in the parent.
+        // The child gets a private address space and no controller channel.
+        auto image = make_guest_image(
+            base, stack_base, page, std::move(code));
+        const pid_t child = ::fork();
+        REQUIRE(child >= 0);
+        if (child == 0) {
+            static_cast<void>(::close(pipe_descriptors[0]));
+            auto prepared =
+                astraea::execution::prepare_linux_guest_memory(image);
+            if (!prepared.has_value()) ::_exit(11);
+            if (!install_test_leaf_allowlist()) ::_exit(12);
+
+            // Astraea's guest-IP filter is stacked beneath the leaf's
+            // deny-by-default filter on a newly spawned execution thread.
+            auto result =
+                astraea::execution::
+                    enter_linux_guest_with_seccomp_syscall_trap(
+                        image, prepared.value(),
+                        astraea::execution::
+                            make_synthetic_initial_context(image));
+            if (!result.has_value()) ::_exit(13);
+            if (escaped_host_write) {
+                const auto* stop =
+                    std::get_if<astraea::execution::ExecutionStop>(
+                        &result.value());
+                if (stop == nullptr ||
+                    stop->reason != ExecutionStopReason::guest_fault ||
+                    !stop->has_fault ||
+                    stop->fault.kind !=
+                        GuestFaultKind::illegal_instruction ||
+                    stop->context.rip !=
+                        base + static_cast<std::uint64_t>(fault_offset) ||
+                    stop->context.rax !=
+                        std::numeric_limits<std::uint64_t>::max()) {
+                    ::_exit(14);
+                }
+            } else {
+                const auto* trapped =
+                    std::get_if<astraea::execution::LinuxSeccompSyscallTrap>(
+                        &result.value());
+                if (trapped == nullptr ||
+                    trapped->guest_rip.value() !=
+                        base + static_cast<std::uint64_t>(
+                            guest_syscall_offset) ||
+                    trapped->syscall_number != SYS_getpid ||
+                    trapped->audit_arch != AUDIT_ARCH_X86_64) {
+                    ::_exit(15);
+                }
+            }
+            ::_exit(0);
+        }
+
+        static_cast<void>(::close(pipe_descriptors[1]));
+        pipe_descriptors[1] = -1;
+        int status = 0;
+        pid_t waited = 0;
+        // Bounded child lifetime even if signal recovery or thread
+        // scheduling regresses. Never block on an untrusted child.
+        for (int attempt = 0; attempt < 1000; ++attempt) {
+            waited = ::waitpid(child, &status, WNOHANG);
+            if (waited == child) break;
+            if (waited < 0 && errno != EINTR) break;
+            static_cast<void>(::usleep(10000));
+        }
+        if (waited != child) {
+            static_cast<void>(::kill(child, SIGKILL));
+            static_cast<void>(::waitpid(child, &status, 0));
+            FAIL("research leaf failed to exit within the bounded window");
+        }
+        REQUIRE(WIFEXITED(status));
+        REQUIRE(WEXITSTATUS(status) == 0);
+        std::array<char, kMarker.size()> received{};
+        const ssize_t size =
+            ::read(pipe_descriptors[0], received.data(), received.size());
+        // Not one marker byte may leave the leaf, even though the leaf
+        // inherited the dummy pipe's write descriptor for the negative test.
+        REQUIRE(size == 0);
+    };
+
+    SECTION("guest branches to host write wrapper") {
+        exercise(true);
+    }
+    SECTION("literal guest syscall retains typed trap") {
+        exercise(false);
+    }
 }
 
 TEST_CASE(
