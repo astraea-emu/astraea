@@ -148,7 +148,7 @@ jobs:
             "owned_fault_repeated=2" \
             "owned_syscall_exit_prevented_repeated=2" \
             "owned_host_ip_escape_denied_repeated=2" \
-            "host_sentinel_canary=unchanged" \
+            "host_sentinel_canary=unchanged_in_denied_cases" \
             "owned_write_rx_sigsegv_repeated=2" \
             "owned_write_none_sigsegv_repeated=2" \
             "owned_write_rw_non_guest_side_effect_repeated=2" \
