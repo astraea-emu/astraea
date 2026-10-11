@@ -75,6 +75,26 @@ jobs:
               raise SystemExit("unexpected ELF machine or type")
           dest = root / "sharpemu-demo-eboot.elf"
           dest.write_bytes(executable)
+          if hashlib.sha256(executable).hexdigest() != (
+              "05c414993d1cd9e7182bbf5647be1ffad72c6ed6b6f5399d01af27281fef48b8"
+          ):
+              raise SystemExit("source-pinned Breakout identity changed")
+          entry, phoff = struct.unpack_from("<QQ", executable, 24)
+          phentsize, phcount = struct.unpack_from("<HH", executable, 54)
+          matches = []
+          for i in range(phcount):
+              kind, flags, offset, vaddr, _paddr, filesz, _memsz, _align = (
+                  struct.unpack_from("<IIQQQQQQ",
+                                     executable, phoff + i * phentsize))
+              if kind != 1 or not (flags & 1) or entry < vaddr:
+                  continue
+              delta = entry - vaddr
+              if delta + 16 <= filesz and offset + delta + 16 <= len(executable):
+                  matches.append(executable[offset + delta:offset + delta + 16])
+          if len(matches) != 1:
+              raise SystemExit("entry source bytes not uniquely executable")
+          print("source_pinned_entry_rip=0x%x" % entry)
+          print("source_pinned_entry_first_16_hex=" + matches[0].hex())
           print("PUBLIC DEMO PIN PASS")
           print("upstream_source=sharpemu/sharpemu-demo@49e6b3b25678f14ec57a70b907ee215fddb608d8")
           print("upstream_code_license=GPL-2.0-or-later (per source README)")
@@ -420,13 +440,31 @@ jobs:
             "$RUNNER_TEMP/actual-breakout-plan.txt"
           grep -Fx "import_call_observed=0" \
             "$RUNNER_TEMP/actual-breakout-plan.txt"
+          grep -Fx "breakout_entry_interpreter=source_backed_two_instruction_bound" \
+            "$RUNNER_TEMP/actual-breakout-plan.txt"
+          grep -Fx "breakout_entry_and_rsp64=interpreted" \
+            "$RUNNER_TEMP/actual-breakout-plan.txt"
+          grep -Fx "breakout_entry_call_rel32=interpreted" \
+            "$RUNNER_TEMP/actual-breakout-plan.txt"
+          grep -Fx "breakout_guest_stack_return_word=owned_eight_bytes" \
+            "$RUNNER_TEMP/actual-breakout-plan.txt"
+          grep -Fx "breakout_call_target_source=executable_guest_mapping" \
+            "$RUNNER_TEMP/actual-breakout-plan.txt"
+          grep -Fx "breakout_next_instruction=not_interpreted" \
+            "$RUNNER_TEMP/actual-breakout-plan.txt"
+          grep -Fx "breakout_interpreter_negative_cases=3_refused" \
+            "$RUNNER_TEMP/actual-breakout-plan.txt"
+          grep -Fx "breakout_interpreter_native_guest_entry=none" \
+            "$RUNNER_TEMP/actual-breakout-plan.txt"
           grep -Fx "scratch_postfreeze_write=denied_by_kernel" \
             "$RUNNER_TEMP/actual-breakout-plan.txt"
           grep -Fx "guest_relocations_applied=0" \
             "$RUNNER_TEMP/actual-breakout-plan.txt"
           grep -Fx "imports_resolved=0" \
             "$RUNNER_TEMP/actual-breakout-plan.txt"
-          grep -Fx "guest_instructions=0" \
+          grep -Fx "guest_instructions=2_interpreted_only" \
+            "$RUNNER_TEMP/actual-breakout-plan.txt"
+          grep -Fx "native_guest_instructions=0" \
             "$RUNNER_TEMP/actual-breakout-plan.txt"
           # The transient map must have split real image fragments to assign
           # RX on the shared page. Do not require one guessed exact count.
