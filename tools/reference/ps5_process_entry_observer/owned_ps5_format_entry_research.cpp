@@ -351,10 +351,11 @@ struct Terminal {
     // parameters. This NEVER promotes an initial-process ABI contract.
     stage = 8U;
     if (restricted_leaf) {
-        // No writable parent IPC exists in this process. The filter is
-        // installed before the backend starts its dedicated guest thread,
-        // so that newly created thread inherits this policy. The thread's
-        // existing IP-scoped seccomp trap remains an additional layer.
+        // No effectful controller service channel exists in this leaf.
+        // Its fixed untrusted observation mapping conveys data only after
+        // child exit. The filter is installed before the backend starts its
+        // guest thread, which inherits this policy; the existing IP-scoped
+        // guest syscall trap remains an additional layer.
         if (!install_pinned_leaf_policy()) return std::nullopt;
         errno = 0;
         if (::syscall(SYS_write, STDOUT_FILENO, "!", 1U) != -1 ||
