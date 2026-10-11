@@ -17,6 +17,16 @@ target_link_libraries(astraea_guest_worker_probe PRIVATE
 astraea_set_project_warnings(astraea_guest_worker_probe)
 astraea_enable_sanitizers(astraea_guest_worker_probe)
 
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND
+   CMAKE_SYSTEM_PROCESSOR MATCHES "^(x86_64|AMD64)$")
+    # Deliberately uninstrumented source-owned leaf; the ordinary test
+    # controller remains ASan/UBSan-instrumented under linux-asan.
+    add_executable(astraea_c1_isolated_leaf_probe
+        execution/c1_isolated_leaf_probe_main.cpp
+    )
+    astraea_set_project_warnings(astraea_c1_isolated_leaf_probe)
+endif()
+
 add_executable(astraea_core_tests
     app/retail_profile_tests.cpp
     core/version_tests.cpp
@@ -161,9 +171,28 @@ target_compile_definitions(astraea_core_tests PRIVATE
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND
    CMAKE_SYSTEM_PROCESSOR MATCHES "^(x86_64|AMD64)$")
     target_sources(astraea_core_tests PRIVATE
+        execution/c1_isolated_leaf_process_tests.cpp
+    )
+    target_compile_definitions(astraea_core_tests PRIVATE
+        ASTRAEA_C1_LEAF_PROBE_PATH="$<TARGET_FILE:astraea_c1_isolated_leaf_probe>"
+    )
+    add_dependencies(astraea_core_tests astraea_c1_isolated_leaf_probe)
+    target_sources(astraea_core_tests PRIVATE
         "${CMAKE_SOURCE_DIR}/tools/reference/ps5_process_entry_observer/entry.S"
         "${CMAKE_SOURCE_DIR}/tools/reference/ps5_process_entry_observer/emit_observation.cpp"
         probe/ps5_process_entry_observer_harness.S
+    )
+else()
+    # Keep the explicit source inventory complete on macOS/Windows without
+    # compiling Linux-only syscall/spawn implementations on those hosts.
+    target_sources(astraea_core_tests PRIVATE
+        execution/c1_isolated_leaf_probe_main.cpp
+        execution/c1_isolated_leaf_process_tests.cpp
+    )
+    set_source_files_properties(
+        execution/c1_isolated_leaf_probe_main.cpp
+        execution/c1_isolated_leaf_process_tests.cpp
+        PROPERTIES HEADER_FILE_ONLY TRUE
     )
 endif()
 add_dependencies(
@@ -322,11 +351,16 @@ endif()
 astraea_set_project_warnings(astraea_core_tests)
 astraea_enable_sanitizers(astraea_core_tests)
 
+set(ASTRAEA_TEST_SOURCE_TARGETS
+    astraea_core_tests
+    astraea_guest_worker_probe
+)
+if(TARGET astraea_c1_isolated_leaf_probe)
+    list(APPEND ASTRAEA_TEST_SOURCE_TARGETS astraea_c1_isolated_leaf_probe)
+endif()
 astraea_verify_explicit_cpp_sources(
     ROOT .
-    TARGETS
-        astraea_core_tests
-        astraea_guest_worker_probe
+    TARGETS ${ASTRAEA_TEST_SOURCE_TARGETS}
 )
 
 list(APPEND CMAKE_MODULE_PATH "${catch2_SOURCE_DIR}/extras")
