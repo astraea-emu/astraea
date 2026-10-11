@@ -1,9 +1,11 @@
 // C1 exact-source-pinned Breakout pre-entry research only.
-// One isolated scratch page (not a guest-VA mapping) stages one RELATIVE,
-// then changes RW -> RX. No guest entry, GLOB_DAT binding, or HLE.
+// A scratch W^X proof is extended to *actual temporary guest-VA mappings*
+// with one pre-staged RELATIVE. No guest entry, GLOB_DAT binding, or HLE.
+// Deliberate page permission narrowing is NOT faithful writable-code support.
 #include "owned_pair_sha256.hpp"
 
 #include <astraea/execution/memory_plan.hpp>
+#include <astraea/execution/linux_memory.hpp>
 #include <astraea/execution/owned_relative_patch.hpp>
 #include <astraea/execution/sce_import_resolution.hpp>
 #include <astraea/loader/sce_dynamic_symbol.hpp>
@@ -314,6 +316,245 @@ struct ScratchStagingResult {
     return evidence;
 }
 
+// This is the FIRST selected-ELF proof that uses the actual Linux guest
+// memory backend, not just the scratch allocator. It is strictly pre-entry.
+// The returned count is evidence that temporary guest VA mappings were
+// materialized and checked; all mapped regions are RAII-released on return.
+// The source image and initial stack, as well as native production policies,
+// are unchanged. The transient mixed page is *read-only* even where guest
+// source PH1 specified RW, so it cannot be promoted as general compatibility.
+struct TemporaryGuestMemoryEvidence {
+    std::size_t source_mapping_fragments = 0U;
+    std::size_t transient_mapping_fragments = 0U;
+    std::size_t restricted_collision_fragments = 0U;
+    std::size_t restricted_source_write_bytes = 0U;
+    std::size_t mapped_shared_page_compared_bytes = 0U;
+    std::size_t original_imports_unchanged = 0U;
+};
+
+[[nodiscard]] std::optional<TemporaryGuestMemoryEvidence>
+prepare_temporary_breakout_guest_memory(const l::GuestImage& original) {
+    auto fail = [](std::string_view code)
+        -> std::optional<TemporaryGuestMemoryEvidence> {
+        std::cerr << "transient_guest_memory_refused=" << code << '\n';
+        return std::nullopt;
+    };
+    const auto view = original.initialized_image_view();
+    if (!view.has_value() || !original.dynamic_symbols.has_value() ||
+        !original.general_relocations.rela.has_value() ||
+        original.general_relocations.rela->count != 20U ||
+        ::sysconf(_SC_PAGESIZE) != static_cast<long>(kPageSize) ||
+        !e::linux_native_memory_backend_available())
+        return fail("image_native_requirements");
+
+    constexpr std::uint64_t kReserveBytes = 32U * 1024U * 1024U;
+    constexpr std::uint64_t kMaxGuestOffset = 16U * 1024U * 1024U;
+    for (const auto& mapping : original.mappings) {
+        const auto first = mapping.range.base().value();
+        if (first >= kMaxGuestOffset ||
+            mapping.range.size().value() > kMaxGuestOffset - first)
+            return fail("unbounded_original_guest_mapping");
+    }
+
+    // Non-destructively discover a free, aligned 32-MiB window. The actual
+    // backend uses MAP_FIXED_NOREPLACE, so address races fail closed.
+    void* reserved = ::mmap(nullptr, kReserveBytes, PROT_NONE,
+                            MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+    if (reserved == MAP_FAILED) return fail("reserve_guest_window");
+    const auto base = static_cast<std::uint64_t>(
+        reinterpret_cast<std::uintptr_t>(reserved));
+    if (::munmap(reserved, kReserveBytes) != 0 ||
+        base == 0U || base % kPageSize != 0U ||
+        base > std::numeric_limits<std::uint64_t>::max() - kReserveBytes)
+        return fail("invalid_guest_window");
+
+    auto transient = original; // Own and alter a source-pinned *copy* only.
+    TemporaryGuestMemoryEvidence result{};
+    result.source_mapping_fragments = original.mappings.size();
+    transient.mappings.clear();
+    transient.mappings.reserve(original.mappings.size() * 3U);
+    const auto page_rights = m::GuestPermissions::checked_from_bits(
+        static_cast<std::uint8_t>(m::GuestPermission::read) |
+        static_cast<std::uint8_t>(m::GuestPermission::execute));
+    if (!page_rights.has_value()) return fail("unsupported_page_rights");
+
+    for (const auto& source : original.mappings) {
+        const auto start = source.range.base().value();
+        const auto end = start + source.range.size().value();
+        // Split at the actual 4-KiB collision-page boundaries, preserving
+        // exact source-index, file backing, and byte offsets for each slice.
+        std::array<std::uint64_t, 4U> boundaries{
+            start, end, kScratchGuestPage, kScratchGuestLimit,
+        };
+        std::sort(boundaries.begin(), boundaries.end());
+        for (std::size_t i = 0U; i + 1U < boundaries.size(); ++i) {
+            const auto lo = std::max(start, boundaries[i]);
+            const auto hi = std::min(end, boundaries[i + 1U]);
+            if (lo >= hi) continue;
+            const bool source_executable =
+                source.permissions.has(m::GuestPermission::execute);
+            const bool source_writable =
+                source.permissions.has(m::GuestPermission::write);
+            const bool collision = lo >= kScratchGuestPage &&
+                hi <= kScratchGuestLimit;
+            if (source_executable && !source_writable)
+                return fail("unexpected_original_executable_rights");
+            // The exact Breakout RWX PH0 becomes RX and the RW portion of
+            // PH1 within host page 0x6000 becomes RX too. Outside that one
+            // page the original nonexecutable RW mapping stays RW.
+            const bool narrowed = source_executable ||
+                (collision && source_writable);
+            auto mapped = source;
+            mapped.permissions = narrowed ? page_rights.value()
+                                         : source.permissions;
+            const auto shifted = m::GuestRange::create(
+                m::GuestAddress{base + lo}, m::GuestSize{hi - lo});
+            if (!shifted.has_value()) return fail("rebased_extent_invalid");
+            mapped.range = shifted.value();
+            mapped.backing.byte_count = m::GuestSize{hi - lo};
+            if (mapped.backing.kind == m::MappingBackingKind::file) {
+                if (mapped.backing.file_offset >
+                    std::numeric_limits<std::uint64_t>::max() - (lo - start))
+                    return fail("file_offset_overflow");
+                mapped.backing.file_offset += lo - start;
+            }
+            if (narrowed && source_writable) {
+                ++result.restricted_collision_fragments;
+                result.restricted_source_write_bytes +=
+                    static_cast<std::size_t>(hi - lo);
+            }
+            transient.mappings.push_back(std::move(mapped));
+        }
+    }
+    std::sort(transient.mappings.begin(), transient.mappings.end(),
+              m::mapping_intent_less);
+    result.transient_mapping_fragments = transient.mappings.size();
+    if (result.restricted_collision_fragments < 2U ||
+        result.restricted_source_write_bytes == 0U)
+        return fail("missing_source_permission_narrowing");
+
+    // The selected RELATIVE patch is built with Astraea's own checked
+    // relocation semantics and this explicit research load bias.
+    std::optional<e::OwnedRelativePatch> relative;
+    std::size_t imports = 0U;
+    for (std::uint64_t i = 0U; i < 20U; ++i) {
+        auto relocation = l::parse_dynamic_relocation(
+            original.general_relocations.rela.value(), i,
+            original.dynamic_symbols.value(), view.value());
+        if (!relocation.has_value()) return fail("bad_source_relocation");
+        if (relocation->relocation_type == 8U &&
+            relocation->symbol_index == 0U) {
+            if (relative.has_value() || relocation->target.value() != 0x6900U)
+                return fail("relative_census_mismatch");
+            auto patch = e::build_owned_x86_64_relative_patch(
+                relocation.value(), m::GuestAddress{base});
+            if (!patch.has_value()) return fail("relative_patch_rejected");
+            relative = patch.value();
+        } else if (relocation->relocation_type == 6U &&
+                   relocation->symbol_index != 0U) {
+            ++imports;
+        } else {
+            return fail("unexpected_relocation_kind");
+        }
+    }
+    if (!relative.has_value() || imports != 19U)
+        return fail("incomplete_relocation_census");
+    const std::uint64_t target = relative->target.value();
+    std::size_t source_owners = 0U;
+    std::size_t file_offset = 0U;
+    for (const auto& mapping : original.mappings) {
+        if (mapping.range.base().value() <= target &&
+            mapping.range.size().value() >=
+                target - mapping.range.base().value() + 8U &&
+            mapping.permissions.has(m::GuestPermission::write) &&
+            !mapping.permissions.has(m::GuestPermission::execute) &&
+            mapping.backing.kind == m::MappingBackingKind::file) {
+            ++source_owners;
+            file_offset = static_cast<std::size_t>(
+                mapping.backing.file_offset +
+                target - mapping.range.base().value());
+        }
+    }
+    if (source_owners != 1U ||
+        file_offset > transient.image_bytes.size() ||
+        transient.image_bytes.size() - file_offset < relative->bytes.size())
+        return fail("relative_target_backing_not_unique");
+    std::copy(relative->bytes.begin(), relative->bytes.end(),
+              transient.image_bytes.begin() + file_offset);
+
+    // This is never used to simulate the original PS5 process entry state.
+    // Runtime-only VA rebasing preserves source bytes and file offsets.
+    if (original.elf.header.entry >= kMaxGuestOffset)
+        return fail("unbounded_entry");
+    transient.elf.header.entry = base + original.elf.header.entry;
+
+    // The real production planner and mapper are now exercised against the
+    // transient actual GuestImage. No executable guest instruction is run.
+    const auto planned = e::build_execution_memory_plan(
+        e::ExecutionMemoryPlanRequest{
+            .mappings = transient.mappings,
+            .stack_storage = transient.initial_stack.storage,
+            .entry_point = m::GuestAddress{transient.elf.header.entry},
+            .stack_pointer = transient.initial_stack.rsp,
+            .host_page_size = kPageSize,
+        });
+    if (!planned.has_value()) return fail("transient_plan_refused");
+    for (const auto& region : planned->regions) {
+        if (region.permissions.has(m::GuestPermission::execute) &&
+            region.permissions.has(m::GuestPermission::write))
+            return fail("transient_plan_rwx");
+    }
+    const auto prepared = e::prepare_linux_guest_memory(transient);
+    if (!prepared.has_value()) {
+        std::cerr << "transient_backend_error="
+                  << static_cast<unsigned>(prepared.error().code) << '\n';
+        return fail("actual_native_guest_prepare");
+    }
+    const auto guest_shared_page = reinterpret_cast<const std::byte*>(
+        static_cast<std::uintptr_t>(base + kScratchGuestPage));
+    for (std::uint64_t offset = 0U; offset < kPageSize; ++offset) {
+        const std::uint64_t original_address = kScratchGuestPage + offset;
+        auto source = view->read_byte(m::GuestAddress{original_address});
+        std::byte expected = std::byte{0};
+        if (source.has_value()) {
+            expected = source.value();
+        } else if (source.error().code !=
+                   m::InitializedImageErrorCode::unmapped_guest_address) {
+            return fail("original_page_read_ambiguous");
+        }
+        if (original_address >= target &&
+            original_address < target + relative->bytes.size())
+            expected = relative->bytes[static_cast<std::size_t>(
+                original_address - target)];
+        if (guest_shared_page[offset] != expected)
+            return fail("prepared_guest_page_readback_mismatch");
+        ++result.mapped_shared_page_compared_bytes;
+    }
+    // Every imported GOT word is inspected via the real prepared memory
+    // and must equal the unchanged source word: no fake HLE/gate binding.
+    for (std::uint64_t i = 0U; i < 20U; ++i) {
+        auto relocation = l::parse_dynamic_relocation(
+            original.general_relocations.rela.value(), i,
+            original.dynamic_symbols.value(), view.value());
+        if (!relocation.has_value()) return fail("relocation_readback_parse");
+        if (relocation->relocation_type != 6U) continue;
+        for (std::size_t j = 0U; j < 8U; ++j) {
+            const auto address = relocation->target.value() + j;
+            auto source = view->read_byte(m::GuestAddress{address});
+            if (!source.has_value() ||
+                guest_shared_page[address - kScratchGuestPage] != source.value())
+                return fail("unresolved_got_modified");
+        }
+        ++result.original_imports_unchanged;
+    }
+    if (result.mapped_shared_page_compared_bytes != kPageSize ||
+        result.original_imports_unchanged != 19U)
+        return fail("incomplete_native_image_readback");
+    // RAII LinuxPreparedMemory destruction tears down guest VMAs here.
+    // No execution callback, synthetic HLE gate, IPC or provider lookup.
+    return result;
+}
+
 [[nodiscard]] int inspect(const char* path) {
     auto bytes = read_pinned_elf(path);
     if (!bytes.has_value()) return 2;
@@ -458,6 +699,9 @@ struct ScratchStagingResult {
         !staged->post_freeze_write_refused)
         return 19;
 
+    auto prepared = prepare_temporary_breakout_guest_memory(image.value());
+    if (!prepared.has_value()) return 20;
+
     std::cout << "PINNED BREAKOUT ACTUAL MEMORY PLAN PREFLIGHT PASS\n"
               << "source_sha256=" << kPinnedSha256 << '\n'
               << "guestimage_load_segments=" << loads << '\n'
@@ -489,7 +733,20 @@ struct ScratchStagingResult {
     std::cout
               << "original_guest_permissions=unchanged\n"
               << "elf_bytes=unchanged\n"
-              << "native_guest_memory_mapped=0\n"
+              << "temporary_guest_va_prepared_and_released=1\n"
+              << "temporary_guest_source_fragments="
+              << prepared->source_mapping_fragments << '\n'
+              << "temporary_guest_mapped_fragments="
+              << prepared->transient_mapping_fragments << '\n'
+              << "temporary_source_writable_bytes_frozen="
+              << prepared->restricted_source_write_bytes << '\n'
+              << "temporary_guest_page_compared_bytes="
+              << prepared->mapped_shared_page_compared_bytes << '\n'
+              << "temporary_guest_unresolved_got_words_unchanged="
+              << prepared->original_imports_unchanged << '\n'
+              << "temporary_guest_actual_native_relatives=1\n"
+              << "temporary_guest_writable_code_semantics=unsupported\n"
+              << "native_guest_memory_mapped_at_report=0\n"
               << "scratch_page_rw_to_rx=verified\n"
               << "scratch_relative_patches=" << staged->relative_patches << '\n'
               << "scratch_unresolved_imports=" << staged->unresolved_imports << '\n'
