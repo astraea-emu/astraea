@@ -351,10 +351,26 @@ jobs:
             "$RUNNER_TEMP/actual-breakout-plan.txt"
           grep -Fx "source_plan=mixed_write_execute_page" \
             "$RUNNER_TEMP/actual-breakout-plan.txt"
-          grep -Fx "source_rwx_executable_mappings=1" \
+          grep -Fx "guestimage_load_segments=3" \
             "$RUNNER_TEMP/actual-breakout-plan.txt"
-          grep -Fx "research_narrowed_mapping_count=1" \
+          grep -Fx "source_rwx_executable_loads=1" \
             "$RUNNER_TEMP/actual-breakout-plan.txt"
+          python3 - <<'PY'
+          import os
+          from pathlib import Path
+          lines = (Path(os.environ["RUNNER_TEMP"]) /
+                   "actual-breakout-plan.txt").read_text().splitlines()
+          fields = dict(line.split("=", 1) for line in lines if "=" in line)
+          fragments = int(fields["source_rwx_mapping_fragments"])
+          narrowed = int(fields["research_narrowed_mapping_count"])
+          if fragments < 1 or fragments != narrowed:
+              raise SystemExit("RWX mapping fragments were not all narrowed")
+          if fields["research_narrowed_plan"] not in {
+              "accepted_no_host_rwx", "blocked_mixed_write_execute_page"
+          }:
+              raise SystemExit("unclassified copied mapping plan")
+          print("ACTUAL BREAKOUT SOURCE-MAPPING POLICY ASSERTIONS PASS")
+          PY
           grep -Fx "original_guest_permissions=unchanged" \
             "$RUNNER_TEMP/actual-breakout-plan.txt"
           grep -Fx "native_memory_mapped=0" \
