@@ -237,6 +237,32 @@ if(ASTRAEA_BUILD_C1_RESEARCH)
        NOT CMAKE_SYSTEM_PROCESSOR MATCHES "^(x86_64|AMD64)$")
         message(FATAL_ERROR "C1 research-only native entry requires Linux x86-64")
     endif()
+
+    # Exact-source, decoder-only C1 research. Do not place these
+    # dependencies on astraea_core or the production executable.
+    # Both upstream licenses are MIT; no guest instruction is executed.
+    set(ZYAN_ZYCORE_PATH "" CACHE PATH "" FORCE)
+    set(ZYCORE_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
+    set(ZYCORE_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+    set(ZYDIS_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
+    set(ZYDIS_BUILD_TOOLS OFF CACHE BOOL "" FORCE)
+    set(ZYDIS_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+    set(ZYDIS_BUILD_DOXYGEN OFF CACHE BOOL "" FORCE)
+    set(ZYDIS_FEATURE_ENCODER OFF CACHE BOOL "" FORCE)
+    set(ZYDIS_FEATURE_FORMATTER OFF CACHE BOOL "" FORCE)
+    FetchContent_Declare(
+        astraea_zycore
+        GIT_REPOSITORY https://github.com/zyantific/zycore-c.git
+        GIT_TAG 0b2432ced0884fd152b471d97ecf0258ff4d859f
+    )
+    FetchContent_MakeAvailable(astraea_zycore)
+    set(ZYAN_ZYCORE_PATH "${astraea_zycore_SOURCE_DIR}" CACHE PATH "" FORCE)
+    FetchContent_Declare(
+        astraea_zydis
+        GIT_REPOSITORY https://github.com/zyantific/zydis.git
+        GIT_TAG a2278f1d254e492f6a6b39f6cb5d1f5d515659dc
+    )
+    FetchContent_MakeAvailable(astraea_zydis)
     add_executable(astraea_c1_owned_entry_research
         tools/reference/ps5_process_entry_observer/owned_ps5_format_entry_research.cpp
     )
@@ -265,9 +291,10 @@ if(ASTRAEA_BUILD_C1_RESEARCH)
     add_executable(astraea_c1_breakout_memory_plan_research
         tools/reference/ps5_process_entry_observer/breakout_actual_memory_plan.cpp
         tools/reference/ps5_process_entry_observer/breakout_offline_entry_interpreter.cpp
+        tools/reference/ps5_process_entry_observer/source_x86_64_decoder.cpp
     )
     target_link_libraries(astraea_c1_breakout_memory_plan_research
-        PRIVATE Astraea::core)
+        PRIVATE Astraea::core Zydis)
     target_include_directories(astraea_c1_breakout_memory_plan_research PRIVATE
         "${CMAKE_CURRENT_SOURCE_DIR}/tests/execution"
     )
