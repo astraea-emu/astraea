@@ -309,6 +309,63 @@ retire independently testable closure dependencies before scheduling the
 reference-console observation (#334).** No completed PC-only task substitutes
 for actual PS5 hardware entry evidence.
 
+#### Current C1 operating priority (2026-10-10 strategic review)
+
+**One active integration goal:** the unmodified, hash-pinned independently authored
+Breakout PS5-marked ELF reaches its **first *observed* imported-service call**,
+reporting a repeatable typed unsupported stop, exact guest RIP and verified NID.
+This is a **research-only milestone**, not a commercial C1 completion, boot or
+frame. The existing CPU-only Breakout canvas fingerprint is a later oracle,
+not proof of emulator rendering. [Live status](STATUS.md) is authoritative
+for which PRs are merged and what is still only a proposal.
+
+The critical path is deliberately **dependency-gated, not date-gated**:
+
+1. **Hostile-guest boundary [#410](https://github.com/astraea-emu/astraea/issues/410):**
+   the demonstrated out-of-guest-IP host syscall escape is incompatible with
+   arbitrary guest admission. A separately confined execution leaf must
+   minimize host syscalls and inherited capabilities **independently of RIP**;
+   the controller must not trust well-formed worker IPC as provenance. Prove
+   denied host effects, forged-message refusal, typed guest syscall/fault
+   preservation, deterministic termination and clean repeatability. Instrument
+   the trusted controller without granting sanitizer runtime syscalls to the
+   untrusted leaf. The current #414/#415 tests are **research**, not a
+   production sandbox or authorization to launch the external ELF.
+2. **Exact Breakout closure [#378](https://github.com/astraea-emu/astraea/issues/378):**
+   reuse the existing loader, checked `RELATIVE`/`GLOB_DAT`, module graph
+   and gate primitives. Freeze independent source and ELF identities; reject
+   ambiguous **bare NID -> provider/module** associations rather than
+   silently assigning Sony libraries or success returns. Prove each
+   required patch target/address is owned, mapped, permitted and read back.
+   Execute only under the accepted research confinement, twice from identical
+   bytes, to one actual typed first service boundary, with tamper and
+   unsupported-identity negatives. The first source-level service named in
+   `src/main.c` is a **hypothesis**, not an observed call.
+3. **Commercial-title preflight in parallel:** identify a lawful small/offline,
+   low-closure first title and backups from independently documented behavior;
+   perform **C0 read-only diagnostics** on locally authorized bytes as soon as
+   available. Neither security completion nor PS5 hardware is required for
+   read-only preflight. Never commit proprietary game bytes, keys or firmware.
+4. **Reference hardware [#334](https://github.com/astraea-emu/astraea/issues/334):**
+   only collect two exact same-binary *normal-title* pre-CRT/procparam runs
+   when their launch/logging route is demonstrated for the chosen firmware,
+   provenance/backup/abort rules are met, and the observation resolves the
+   first irreducible selected-path ABI uncertainty. General payload-loader
+   support does not demonstrate normal home-screen title startup. Preserve
+   firmware 13.00 without unsolicited networking or updates.
+5. **Commercial C1/C2.0:** promote **only measured** required process-entry
+   fields via #348 and reproduce genuine title instruction / first typed
+   post-entry divergence (#350). C3 boot, C4 title frame, C5 menu and C6
+   playable route follow as distinct, workload-measured achievements.
+
+**Scope control:** one selected executable path, first measured blocker
+first; no second generic ELF gate prototype, broad unmeasured HLE/shader
+catalog, user-interface release work, speculative firmware/VSH boot, or
+arbitrary native retail admission. Preserve previous negative results and
+classify progress explicitly as static, owned-synthetic, independent homebrew,
+or genuine commercial-title evidence. Review licenses/provenance before any
+cross-project code use. Protect the five cross-platform CI checks.
+
 ### C1 software-first execution sequence — 2026-10-08
 
 This is an execution order **within C1**, not a new architectural gate or
@@ -369,7 +426,7 @@ the critical path. Schedule step 6 only when it would resolve the earliest
 remaining selected-path uncertainty. Every accepted generic fix needs a
 reproducer, negative case, source provenance and exact-head CI.
 
-**2026-10-10 integration checkpoint (PRs #397–#400):** Generic owned proofs now include assembled guest code, an independently host-linked ELF under the Linux supervisor, and two independently linked generic ELFs transferring through a linker-generated `JUMP_SLOT`. The separately source-built minimal **PS5-format** ELF has no imports but eight `R_X86_64_RELATIVE` records and stops at `unsupported_relocations` without entering guest code. The next *research-only* end-to-end gate is checked mapping/rebasing and full-batch relative-patch preflight before any write, with explicit partial-commit failure reporting if a later write fails on that same selected PS5-format image, followed by an intentional `UD2` first-instruction fault in two sealed worker launches. Retain the production PS5 entry-ABI gate and the larger public-title negative corpus; this checkpoint does not satisfy commercial-title C1.
+**Historical 2026-10-10 integration checkpoint (PRs #397–#400; superseded by #403):** Generic owned proofs now include assembled guest code, an independently host-linked ELF under the Linux supervisor, and two independently linked generic ELFs transferring through a linker-generated `JUMP_SLOT`. The separately source-built minimal **PS5-format** ELF has no imports but eight `R_X86_64_RELATIVE` records and stops at `unsupported_relocations` without entering guest code. At that checkpoint the next research proof was a checked relative-patch batch followed by an intentional `UD2` fault; **#403 subsequently completed this owned synthetic proof**. Retain the production PS5 entry-ABI gate and the larger public-title negative corpus; this checkpoint does not satisfy commercial-title C1.
 
 **2026-10-10 source-owned PS5-format first-instruction checkpoint (PRs #402–#403):** The exact independent minimal SCE ELF, SHA-256 `45920de847b2d33896c186654bbf22a728f1910fad84accb15204aa2da50c678`, executed its authored first `UD2` instruction twice through the existing Linux sealed worker after eight checked `RELATIVE` relocations, with a typed illegal-instruction stop and altered-source refusal ([pinned CI](https://github.com/astraea-emu/astraea/actions/runs/38075447544)). This is **synthetic entry**, with a zero-sized TLS-template exception scoped only to the test runner; production `diagnose` and unknown-required retail-entry policy are unchanged. Future C1 work must move to lawfully sourced game-like/retail executable closure and genuine startup semantics, not count this as commercial first instruction.
 
