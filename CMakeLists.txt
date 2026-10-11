@@ -294,6 +294,7 @@ if(ASTRAEA_BUILD_C1_RESEARCH)
         tools/reference/ps5_process_entry_observer/source_x86_64_decoder.cpp
         tools/reference/ps5_process_entry_observer/breakout_owned_callee_execution.cpp
         tools/reference/ps5_process_entry_observer/owned_guest_address_space.cpp
+        tools/reference/ps5_process_entry_observer/owned_cpu_step.cpp
     )
     target_link_libraries(astraea_c1_breakout_memory_plan_research
         PRIVATE Astraea::core Zydis)
@@ -314,6 +315,17 @@ if(ASTRAEA_BUILD_C1_RESEARCH)
     )
     astraea_set_project_warnings(astraea_c1_owned_guest_memory_research)
     astraea_enable_sanitizers(astraea_c1_owned_guest_memory_research)
+
+    # Independent CPU-step fixtures, not Breakout-specific or production.
+    add_executable(astraea_c1_owned_cpu_step_research
+        tools/reference/ps5_process_entry_observer/owned_cpu_step.cpp
+        tools/reference/ps5_process_entry_observer/owned_guest_address_space.cpp
+        tools/reference/ps5_process_entry_observer/owned_cpu_step_selftest.cpp
+    )
+    target_link_libraries(astraea_c1_owned_cpu_step_research
+        PRIVATE Astraea::core Zydis)
+    astraea_set_project_warnings(astraea_c1_owned_cpu_step_research)
+    astraea_enable_sanitizers(astraea_c1_owned_cpu_step_research)
 endif()
 
 astraea_verify_explicit_cpp_sources(
