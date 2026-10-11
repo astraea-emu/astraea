@@ -103,7 +103,7 @@ constexpr std::uint64_t kArithmeticFlags = kCF | kPF | kAF | kZF | kSF | kOF;
     std::uint64_t& guest_address) noexcept {
     if (operand.type != ZYDIS_OPERAND_TYPE_MEMORY ||
         operand.mem.index != ZYDIS_REGISTER_NONE ||
-        operand.mem.scale != 0U && operand.mem.scale != 1U)
+        (operand.mem.scale != 0U && operand.mem.scale != 1U))
         return false;
     std::uint64_t base = 0U;
     if (operand.mem.base == ZYDIS_REGISTER_RIP) {
