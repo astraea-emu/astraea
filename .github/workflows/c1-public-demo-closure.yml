@@ -39,7 +39,7 @@ jobs:
             -DASTRAEA_WARNINGS_AS_ERRORS=ON \
             -DASTRAEA_BUILD_C1_RESEARCH=ON
           cmake --build "$RUNNER_TEMP/astraea-public-demo-profile" \
-            --target astraea astraea_c1_breakout_memory_plan_research astraea_c1_owned_guest_memory_research --parallel 3
+            --target astraea astraea_c1_breakout_memory_plan_research astraea_c1_owned_guest_memory_research astraea_c1_owned_cpu_step_research --parallel 3
 
       - name: Exercise owned virtual guest memory permissions and failures
         run: |
@@ -62,6 +62,24 @@ jobs:
             grep -Fx "$expected" "$RUNNER_TEMP/astraea-owned-guest-memory.txt"
           done
           echo "SOURCE-OWNED VIRTUAL MEMORY CONFORMANCE; NO GUEST NATIVE ENTRY"
+
+      - name: Test reusable CPU step and typed pre-retirement refusals
+        run: |
+          set -euo pipefail
+          probe="$RUNNER_TEMP/astraea-public-demo-profile/astraea_c1_owned_cpu_step_research"
+          "$probe" | tee "$RUNNER_TEMP/astraea-owned-cpu-step.txt"
+          for expected in \
+            "C1 OWNED CPU STEP PASS" \
+            "owned_push_mov_sub_store=retired" \
+            "owned_step_guest_writes=checked" \
+            "control_transfer_stop=before_retirement" \
+            "failed_guest_write=cpu_and_bytes_unchanged" \
+            "guest_register_flags=sub_zero_case_verified" \
+            "malformed_record_and_unknown_opcode=refused" \
+            "breakout_elf_execution=not_part_of_this_test" \
+            "native_hostile_code_containment=not_established"; do
+            grep -Fx "$expected" "$RUNNER_TEMP/astraea-owned-cpu-step.txt"
+          done
 
       - name: Fetch and verify pinned independent Breakout demo
         env:
