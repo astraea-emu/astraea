@@ -155,6 +155,33 @@ constexpr std::uint64_t kPageSize = 4096U;
                   << static_cast<unsigned>(candidate.error().code) << '\n';
         return 12;
     }
+    // Distinguish a still-RWX source load from a host-page conflict
+    // between *different* RX and RW mapping intents after narrowing.
+    // This check never prepares, maps or modifies actual native memory.
+    std::optional<std::uint64_t> candidate_mixed_host_page;
+    std::optional<std::size_t> rx_source_index;
+    std::optional<std::size_t> rw_source_index;
+    if (!candidate.has_value()) {
+        if (!candidate.error().guest_address.has_value()) return 16;
+        const auto mixed = candidate.error().guest_address->value();
+        if (mixed % kPageSize != 0U) return 17;
+        candidate_mixed_host_page = mixed;
+        for (const auto& mapping : research_candidate) {
+            if (mapping.range.empty()) continue;
+            const auto first = mapping.range.base().value() / kPageSize;
+            const auto last = (mapping.range.base().value() +
+                               mapping.range.size().value() - 1U) / kPageSize;
+            if (mixed / kPageSize < first || mixed / kPageSize > last)
+                continue;
+            if (mapping.permissions.has(m::GuestPermission::execute))
+                rx_source_index = mapping.source_index;
+            if (mapping.permissions.has(m::GuestPermission::write))
+                rw_source_index = mapping.source_index;
+        }
+        if (!rx_source_index.has_value() || !rw_source_index.has_value() ||
+            rx_source_index.value() == rw_source_index.value())
+            return 18;
+    }
     std::size_t executable_regions = 0U;
     if (candidate.has_value()) {
         for (const auto& region : candidate->regions) {
@@ -181,6 +208,23 @@ constexpr std::uint64_t kPageSize = 4096U;
               << (candidate.has_value() ? "accepted_no_host_rwx"
                                         : "blocked_mixed_write_execute_page")
               << '\n'
+              << "research_narrowed_host_page_conflict="
+              << (candidate_mixed_host_page.has_value()
+                      ? "rx_rw_distinct_loads"
+                      : "none")
+              << '\n'
+              << "research_narrowed_mixed_page=";
+    if (candidate_mixed_host_page.has_value()) {
+        std::cout << "0x" << std::hex << candidate_mixed_host_page.value()
+                  << std::dec << '\n'
+                  << "research_rx_source_ph_index=" << rx_source_index.value()
+                  << '\n'
+                  << "research_rw_source_ph_index=" << rw_source_index.value()
+                  << '\n';
+    } else {
+        std::cout << "none\n";
+    }
+    std::cout
               << "original_guest_permissions=unchanged\n"
               << "elf_bytes=unchanged\n"
               << "native_memory_mapped=0\n"
