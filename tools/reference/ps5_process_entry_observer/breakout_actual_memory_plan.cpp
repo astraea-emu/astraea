@@ -534,17 +534,17 @@ prepare_temporary_breakout_guest_memory(
                 symbol->name.identity.has_value())
                 return fail("stop_missing_raw_nid_authority");
 
-            const auto target = relocation->target.value();
-            if (target < kScratchGuestPage ||
-                target > kScratchGuestLimit - 8U ||
-                (target <= 0x6907U && target + 7U >= 0x6900U))
+            const auto import_target = relocation->import_target.value();
+            if (import_target < kScratchGuestPage ||
+                import_target > kScratchGuestLimit - 8U ||
+                (import_target <= 0x6907U && import_target + 7U >= 0x6900U))
                 return fail("stop_target_outside_writable_import_extent");
             std::size_t owners = 0U;
             std::size_t target_file_offset = 0U;
             for (const auto& mapping : original.mappings) {
-                if (mapping.range.base().value() > target ||
+                if (mapping.range.base().value() > import_target ||
                     mapping.range.size().value() <
-                        target - mapping.range.base().value() + 8U ||
+                        import_target - mapping.range.base().value() + 8U ||
                     !mapping.permissions.has(m::GuestPermission::write) ||
                     mapping.permissions.has(m::GuestPermission::execute) ||
                     mapping.backing.kind != m::MappingBackingKind::file)
@@ -552,7 +552,7 @@ prepare_temporary_breakout_guest_memory(
                 ++owners;
                 target_file_offset = static_cast<std::size_t>(
                     mapping.backing.file_offset +
-                    target - mapping.range.base().value());
+                    import_target - mapping.range.base().value());
             }
             if (owners != 1U ||
                 target_file_offset > stop_file_offset ||
@@ -570,7 +570,7 @@ prepare_temporary_breakout_guest_memory(
                 import_words[symbol_index].end(),
                 transient.image_bytes.begin() +
                     static_cast<std::ptrdiff_t>(target_file_offset));
-            import_targets[symbol_index] = target;
+            import_targets[symbol_index] = import_target;
             seen_imports[symbol_index] = true;
             ++import_count;
 
