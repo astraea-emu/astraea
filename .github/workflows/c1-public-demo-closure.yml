@@ -379,7 +379,17 @@ jobs:
           PY
           grep -Fx "original_guest_permissions=unchanged" \
             "$RUNNER_TEMP/actual-breakout-plan.txt"
-          grep -Fx "native_memory_mapped=0" \
+          grep -Fx "native_guest_memory_mapped=0" \
+            "$RUNNER_TEMP/actual-breakout-plan.txt"
+          grep -Fx "scratch_page_rw_to_rx=verified" \
+            "$RUNNER_TEMP/actual-breakout-plan.txt"
+          grep -Fx "scratch_relative_patches=1" \
+            "$RUNNER_TEMP/actual-breakout-plan.txt"
+          grep -Fx "scratch_unresolved_imports=19" \
+            "$RUNNER_TEMP/actual-breakout-plan.txt"
+          grep -Fx "scratch_postfreeze_write=denied_by_kernel" \
+            "$RUNNER_TEMP/actual-breakout-plan.txt"
+          grep -Fx "guest_relocations_applied=0" \
             "$RUNNER_TEMP/actual-breakout-plan.txt"
           grep -Fx "imports_resolved=0" \
             "$RUNNER_TEMP/actual-breakout-plan.txt"
