@@ -958,3 +958,48 @@ jobs:
           print("ISOLATED ACTUAL GUESTIMAGE ENTRY + NEGATIVE ADMISSION PASS")
           print("NO ARBITRARY GUEST EXECUTION, SONY ABI, OR RETAIL CLAIM")
           PY
+
+      - name: Inspect exact source-pinned GuestImage with independent tracer
+        run: |
+          set -euo pipefail
+          trace="$RUNNER_TEMP/astraea-native-title-smoke/astraea_c1_ptrace_step_research"
+          leaf="$RUNNER_TEMP/astraea-native-title-smoke/astraea_c1_owned_entry_research"
+          title="$RUNNER_TEMP/astraea-minimal-native-title/build/eboot.elf"
+          timeout 35s "$trace" --pinned-owned "$title" "$leaf" \
+            | tee "$RUNNER_TEMP/astraea-c1-pinned-guestimage-trace.txt"
+          for expected in \
+            "C1 PINNED OWNED GUESTIMAGE PTRACE PASS" \
+            "source_sha256=45920de847b2d33896c186654bbf22a728f1910fad84accb15204aa2da50c678" \
+            "owned_guestimage_real_relocations_verified_per_run=8" \
+            "owned_guestimage_entry_ud2_fault_runs=2" \
+            "owned_guestimage_tampered_source=refused_before_trace" \
+            "observations=independent_parent_ptrace_only" \
+            "guest_execution=owned_UD2_instruction_attempt_only" \
+            "external_guest_instructions=0" \
+            "sony_entry_abi=not_established" \
+            "hostile_guest_sandbox=not_established"; do
+            grep -Fx "$expected" "$RUNNER_TEMP/astraea-c1-pinned-guestimage-trace.txt"
+          done
+          python3 - <<'PY'
+          from pathlib import Path
+          import os
+          import subprocess
+          root = Path(os.environ["RUNNER_TEMP"])
+          trace = root / "astraea-native-title-smoke/astraea_c1_ptrace_step_research"
+          leaf = root / "astraea-native-title-smoke/astraea_c1_owned_entry_research"
+          title = root / "astraea-minimal-native-title/build/eboot.elf"
+          direct = subprocess.run([str(leaf), "--ptrace-owned-leaf"],
+              capture_output=True, timeout=5, check=False)
+          if direct.returncode == 0 or direct.stdout or direct.stderr:
+              raise SystemExit("unbound ptrace leaf was admitted")
+          altered = bytearray(title.read_bytes())
+          altered[0] ^= 1
+          changed = root / "astraea-ptrace-bad-owned-title.elf"
+          changed.write_bytes(altered)
+          refused = subprocess.run([str(trace), "--pinned-owned",
+              str(changed), str(leaf)], capture_output=True,
+              timeout=5, check=False)
+          if refused.returncode != 2 or refused.stdout:
+              raise SystemExit("tracer admitted altered original ELF")
+          print("PINNED GUESTIMAGE PTRACE SOURCE NEGATIVES PASS")
+          PY
