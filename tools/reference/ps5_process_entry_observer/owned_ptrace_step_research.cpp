@@ -2,7 +2,9 @@
 // observations. Executes ONLY the three fixed Astraea-authored instruction
 // sequences below, never an external ELF or an arbitrary guest instruction.
 // This is not a hostile-code sandbox or a PS5 ABI implementation.
+#include <algorithm>
 #include <array>
+#include <span>
 #include <cerrno>
 #include <csignal>
 #include <cstdint>
