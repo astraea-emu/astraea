@@ -409,6 +409,14 @@ jobs:
             "$RUNNER_TEMP/actual-breakout-plan.txt"
           grep -Fx "synthetic_import_gate_patches=0" \
             "$RUNNER_TEMP/actual-breakout-plan.txt"
+          grep -Fx "test_only_unsupported_nid_stops_staged=19" \
+            "$RUNNER_TEMP/actual-breakout-plan.txt"
+          grep -Fx "test_only_stop_page_readback_bytes=4096" \
+            "$RUNNER_TEMP/actual-breakout-plan.txt"
+          grep -Fx "test_only_stop_guest_code_executed=0" \
+            "$RUNNER_TEMP/actual-breakout-plan.txt"
+          grep -Fx "test_only_stop_provider_bindings=0" \
+            "$RUNNER_TEMP/actual-breakout-plan.txt"
           grep -Fx "import_call_observed=0" \
             "$RUNNER_TEMP/actual-breakout-plan.txt"
           grep -Fx "scratch_postfreeze_write=denied_by_kernel" \
