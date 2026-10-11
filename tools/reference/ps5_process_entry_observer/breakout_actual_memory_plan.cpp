@@ -83,10 +83,19 @@ constexpr std::uint64_t kPageSize = 4096U;
                   << static_cast<unsigned>(image.error().code) << '\n';
         return 4;
     }
-    // Both plans use the *actual* GuestImage mapping descriptors. No
-    // synthetic or independently reconstructed PT_LOAD permissions.
-    if (image->mappings.size() != 3U ||
-        image->elf.header.entry == 0U)
+    // One PT_LOAD may be split into initialized-file and zero-fill intents.
+    // Check three actual ELF load headers, not a guessed mapping count.
+    const auto loads = std::count_if(
+        image->elf.program_headers.begin(), image->elf.program_headers.end(),
+        [](const auto& header) { return header.type == 1U; });
+    const auto rwx_loads = std::count_if(
+        image->elf.program_headers.begin(), image->elf.program_headers.end(),
+        [](const auto& header) {
+            return header.type == 1U &&
+                (header.flags & 0x3U) == 0x3U;
+        });
+    if (loads != 3 || rwx_loads != 1 ||
+        image->mappings.size() < 3U || image->elf.header.entry == 0U)
         return 5;
 
     std::size_t executable_count = 0U;
@@ -101,11 +110,15 @@ constexpr std::uint64_t kPageSize = 4096U;
         source_rwx_count += write && execute ? 1U : 0U;
         if (mapping.range.contains(entry) && write && execute)
             entry_in_source_rwx = true;
-        if (write && execute)
-            source_rwx_first_page =
+        if (write && execute) {
+            const auto first_page =
                 mapping.range.base().value() & ~(kPageSize - 1U);
+            source_rwx_first_page = source_rwx_first_page.has_value()
+                ? std::min(first_page, source_rwx_first_page.value())
+                : first_page;
+        }
     }
-    if (executable_count != 1U || source_rwx_count != 1U ||
+    if (source_rwx_count == 0U || executable_count != source_rwx_count ||
         !entry_in_source_rwx) return 6;
 
     const auto source = plan(image.value(), image->mappings);
@@ -133,7 +146,7 @@ constexpr std::uint64_t kPageSize = 4096U;
         mapping.permissions = narrowed.value();
         ++narrowed_count;
     }
-    if (narrowed_count != 1U) return 11;
+    if (narrowed_count != source_rwx_count) return 11;
 
     const auto candidate = plan(image.value(), research_candidate);
     if (!candidate.has_value() &&
@@ -158,8 +171,10 @@ constexpr std::uint64_t kPageSize = 4096U;
 
     std::cout << "PINNED BREAKOUT ACTUAL MEMORY PLAN PREFLIGHT PASS\n"
               << "source_sha256=" << kPinnedSha256 << '\n'
-              << "guestimage_load_mappings=" << image->mappings.size() << '\n'
-              << "source_rwx_executable_mappings=" << source_rwx_count << '\n'
+              << "guestimage_load_segments=" << loads << '\n'
+              << "guestimage_mapping_fragments=" << image->mappings.size() << '\n'
+              << "source_rwx_executable_loads=" << rwx_loads << '\n'
+              << "source_rwx_mapping_fragments=" << source_rwx_count << '\n'
               << "source_plan=mixed_write_execute_page\n"
               << "research_narrowed_mapping_count=" << narrowed_count << '\n'
               << "research_narrowed_plan="
