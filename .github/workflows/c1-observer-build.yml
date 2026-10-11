@@ -871,6 +871,16 @@ jobs:
             "$RUNNER_TEMP/astraea-c1-isolated-real-image.txt"
           grep -Fx "isolated_actual_guestimage_ud2_runs=2" \
             "$RUNNER_TEMP/astraea-c1-isolated-real-image.txt"
+          grep -Fx "leaf_report=bounded_untrusted_typed_stop_v1" \
+            "$RUNNER_TEMP/astraea-c1-isolated-real-image.txt"
+          grep -Fx "observed_stop=guest_fault_illegal_instruction" \
+            "$RUNNER_TEMP/astraea-c1-isolated-real-image.txt"
+          grep -Fx "normalized_guest_rip=0x10" \
+            "$RUNNER_TEMP/astraea-c1-isolated-real-image.txt"
+          grep -Fx "repeat_normalized_reports=identical" \
+            "$RUNNER_TEMP/astraea-c1-isolated-real-image.txt"
+          grep -Fx "malformed_report_fields=8_refused" \
+            "$RUNNER_TEMP/astraea-c1-isolated-real-image.txt"
           grep -Fx "tampered_sealed_input=refused_by_leaf" \
             "$RUNNER_TEMP/astraea-c1-isolated-real-image.txt"
           grep -Fx "effectful_controller_ipc=not_inherited" \

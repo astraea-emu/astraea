@@ -27,6 +27,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstdlib>
+#include <cstring>
 #include <exception>
 #include <filesystem>
 #include <fstream>
@@ -50,6 +51,7 @@
 #include <sys/mman.h>
 #include <sys/prctl.h>
 #include <sys/resource.h>
+#include <sys/stat.h>
 #include <sys/syscall.h>
 #include <sys/types.h>
 #include <sys/wait.h>
@@ -68,6 +70,34 @@ constexpr std::string_view kTitleSha256 =
     "45920de847b2d33896c186654bbf22a728f1910fad84accb15204aa2da50c678";
 constexpr e::GuestWorkerId kWorkerId{1U};
 constexpr e::GuestThreadId kThreadId{1U};
+
+// A single bounded, versioned leaf-to-controller observation. The record is
+// data only: the controller performs no action based on a leaf-supplied RIP,
+// identity, or service request. All fields, including unused fields, are
+// checked against this source-owned fixture's exact expected stop.
+using LeafStopRecord = std::array<std::uint64_t, 8U>;
+constexpr std::size_t kLeafStopBytes = sizeof(LeafStopRecord);
+constexpr std::uint64_t kLeafStopMagic = 0x31434c4541465453ULL;
+constexpr std::uint64_t kLeafStopVersion = 1U;
+constexpr std::uint64_t kLeafIllegalInstruction = 1U;
+constexpr std::uint64_t kLeafGuestFault = 1U;
+constexpr int kLeafStopFd = 4;
+constexpr LeafStopRecord kExpectedLeafStop{
+    kLeafStopMagic,
+    kLeafStopVersion,
+    kLeafIllegalInstruction,
+    0x10U, // Original ELF entry, normalized across host ASLR.
+    8U,    // Exactly eight applied RELATIVE patches.
+    kWorkerId.value,
+    kThreadId.value,
+    kLeafGuestFault,
+};
+static_assert(kLeafStopBytes == 64U);
+
+[[nodiscard]] bool valid_leaf_stop(
+    const LeafStopRecord& record) noexcept {
+    return record == kExpectedLeafStop;
+}
 
 [[nodiscard]] bool exact_pinned_title(std::span<const std::byte> bytes) {
     return !bytes.empty() && bytes.size() <= kMaxTitleBytes &&
@@ -192,6 +222,7 @@ constexpr e::GuestThreadId kThreadId{1U};
 struct Terminal {
     e::GuestWorkerFault fault;
     e::GuestWorkerStop stop;
+    std::uint64_t load_base = 0U;
 };
 
 [[nodiscard]] std::optional<Terminal> execute_pinned_owned_title(
@@ -320,10 +351,11 @@ struct Terminal {
     // parameters. This NEVER promotes an initial-process ABI contract.
     stage = 8U;
     if (restricted_leaf) {
-        // No writable parent IPC exists in this process. The filter is
-        // installed before the backend starts its dedicated guest thread,
-        // so that newly created thread inherits this policy. The thread's
-        // existing IP-scoped seccomp trap remains an additional layer.
+        // No effectful controller service channel exists in this leaf.
+        // Its fixed untrusted observation mapping conveys data only after
+        // child exit. The filter is installed before the backend starts its
+        // guest thread, which inherits this policy; the existing IP-scoped
+        // guest syscall trap remains an additional layer.
         if (!install_pinned_leaf_policy()) return std::nullopt;
         errno = 0;
         if (::syscall(SYS_write, STDOUT_FILENO, "!", 1U) != -1 ||
@@ -362,6 +394,7 @@ struct Terminal {
             .reason = e::GuestWorkerStopReason::guest_fault,
             .guest_rip = m::GuestAddress{image.elf.header.entry},
         },
+        .load_base = base.value(),
     };
 }
 
@@ -443,14 +476,49 @@ read_local_exact_title(std::string_view path);
         ::setrlimit(RLIMIT_CPU, &cpu_limit) != 0 ||
         ::setrlimit(RLIMIT_AS, &as_limit) != 0) return 71;
     auto bytes = e::read_linux_sealed_worker_artifact(kMaxTitleBytes);
-    // The artifact API closes fd3 on success or a validated failure.
     if (!bytes.has_value() || !exact_pinned_title(bytes.value()))
         return 72;
+    // The parent owns a fixed-size anonymous observation memfd. It is
+    // neither a controller socket nor a syscall broker. Close the fd
+    // *before* guest entry; only a single writable shared-memory mapping
+    // remains. The controller reads it only after reaping the child.
+    struct stat report_info{};
+    constexpr int kObservationSeals =
+        F_SEAL_GROW | F_SEAL_SHRINK | F_SEAL_SEAL;
+    const int seals = ::fcntl(kLeafStopFd, F_GET_SEALS);
+    if (seals < 0 || (seals & kObservationSeals) != kObservationSeals ||
+        ::fstat(kLeafStopFd, &report_info) != 0 ||
+        !S_ISREG(report_info.st_mode) ||
+        report_info.st_size != static_cast<off_t>(kLeafStopBytes))
+        return 74;
+    void* observation = ::mmap(
+        nullptr, kLeafStopBytes, PROT_READ | PROT_WRITE,
+        MAP_SHARED, kLeafStopFd, 0);
+    if (observation == MAP_FAILED) return 74;
+    if (::close(kLeafStopFd) != 0) return 74;
     std::uint64_t stage = 0U;
     auto result = execute_pinned_owned_title(bytes.value(), stage, true);
-    // The checked loader, all eight patches and the actual native illegal-
-    // instruction RIP must match. No report channel is open during entry.
-    return result.has_value() && stage == 0U ? 0 : 73;
+    if (!result.has_value() || stage != 0U ||
+        result->fault.kind != e::GuestWorkerFaultKind::illegal_instruction ||
+        result->stop.reason != e::GuestWorkerStopReason::guest_fault ||
+        result->stop.guest_rip != result->fault.guest_rip ||
+        result->stop.guest_rip.value() < result->load_base)
+        return 73;
+    // This record is constructed only after observing the actual native
+    // stop, not inferred from the source-level expected UD2 instruction.
+    const LeafStopRecord record{
+        kLeafStopMagic,
+        kLeafStopVersion,
+        kLeafIllegalInstruction,
+        result->stop.guest_rip.value() - result->load_base,
+        8U,
+        result->fault.worker_id.value,
+        result->fault.thread_id.value,
+        kLeafGuestFault,
+    };
+    std::memcpy(observation, record.data(), kLeafStopBytes);
+    // No write/pwrite/msync syscall or effectful controller callback.
+    return 0;
 }
 
 struct SourceFd {
@@ -486,11 +554,26 @@ struct SourceFd {
 
 [[nodiscard]] std::optional<int> run_isolated_leaf(
     const std::string& executable,
-    std::span<const std::byte> source_bytes) {
+    std::span<const std::byte> source_bytes,
+    LeafStopRecord* observation_out = nullptr) {
     SourceFd artifact;
     if (!prepare_sealed_source(source_bytes, artifact)) return std::nullopt;
-    SourceFd transport{::fcntl(artifact.fd, F_DUPFD_CLOEXEC, 4)};
-    if (transport.fd < 4) return std::nullopt;
+    // Reserve fd3 for immutable source and fd4 for the strictly fixed-size
+    // one-way observation memory. Both are closed in the leaf before entry.
+    SourceFd report{static_cast<int>(::syscall(
+        SYS_memfd_create, "astraea-c1-typed-stop",
+        MFD_CLOEXEC | MFD_ALLOW_SEALING))};
+    if (report.fd < 0 ||
+        ::ftruncate(report.fd, static_cast<off_t>(kLeafStopBytes)) != 0)
+        return std::nullopt;
+    constexpr int kObservationSeals =
+        F_SEAL_GROW | F_SEAL_SHRINK | F_SEAL_SEAL;
+    if (::fcntl(report.fd, F_ADD_SEALS, kObservationSeals) != 0)
+        return std::nullopt;
+    SourceFd transport{::fcntl(artifact.fd, F_DUPFD_CLOEXEC, 5)};
+    SourceFd report_transport{::fcntl(report.fd, F_DUPFD_CLOEXEC, 6)};
+    if (transport.fd < 5 || report_transport.fd < 6)
+        return std::nullopt;
     posix_spawn_file_actions_t actions{};
     if (::posix_spawn_file_actions_init(&actions) != 0)
         return std::nullopt;
@@ -508,7 +591,9 @@ struct SourceFd {
             &actions, STDERR_FILENO, "/dev/null", O_WRONLY, 0) != 0 ||
         ::posix_spawn_file_actions_adddup2(
             &actions, transport.fd, e::kLinuxWorkerArtifactFd) != 0 ||
-        ::posix_spawn_file_actions_addclosefrom_np(&actions, 4) != 0)
+        ::posix_spawn_file_actions_adddup2(
+            &actions, report_transport.fd, kLeafStopFd) != 0 ||
+        ::posix_spawn_file_actions_addclosefrom_np(&actions, 5) != 0)
         return std::nullopt;
 
     posix_spawnattr_t attributes{};
@@ -547,6 +632,18 @@ struct SourceFd {
         return std::nullopt;
     }
     if (!WIFEXITED(status)) return std::nullopt;
+    LeafStopRecord observed{};
+    // The directly supervised child has exited. This source-reviewed UD2
+    // fixture starts no descendants; arbitrary hostile native guest code
+    // might leave shared-memory-capable descendants, so this snapshot is
+    // untrusted and cannot authenticate an event. No controller callbacks
+    // or host service side effects follow from any record contents.
+    const auto bytes_read = ::pread(
+        report.fd, observed.data(), kLeafStopBytes, 0);
+    if (bytes_read != static_cast<ssize_t>(kLeafStopBytes))
+        return std::nullopt;
+    if (observation_out != nullptr)
+        *observation_out = observed;
     return WEXITSTATUS(status);
 }
 
@@ -555,20 +652,35 @@ struct SourceFd {
     if (!input.has_value()) return 2;
     const std::string executable =
         std::filesystem::read_symlink("/proc/self/exe").string();
+    LeafStopRecord first{};
     for (unsigned run = 0; run < 2U; ++run) {
-        auto status = run_isolated_leaf(executable, input.value());
-        if (!status.has_value() || status.value() != 0) {
-            std::cerr << "Pinned isolated leaf fault proof failed on run "
+        LeafStopRecord observed{};
+        auto status = run_isolated_leaf(executable, input.value(), &observed);
+        if (!status.has_value() || status.value() != 0 ||
+            !valid_leaf_stop(observed) ||
+            (run == 1U && observed != first)) {
+            std::cerr << "Pinned isolated leaf typed stop failed on run "
                       << run << " child="
                       << (status.has_value() ? status.value() : -1) << "\n";
             return 3;
         }
+        if (run == 0U) first = observed;
+    }
+    // Eight independently corrupted fields, including the exact RIP,
+    // version, identity and stop type, must all be refused by the parent.
+    for (std::size_t field = 0U; field < first.size(); ++field) {
+        auto forged = first;
+        forged[field] ^= 1U;
+        if (valid_leaf_stop(forged)) return 5;
     }
     // Check actual leaf admission, not only controller-side byte hashing.
     auto tampered = input.value();
     tampered[0] ^= std::byte{1U};
-    const auto denied = run_isolated_leaf(executable, tampered);
-    if (!denied.has_value() || denied.value() != 72) {
+    LeafStopRecord rejected_observation{};
+    const auto denied = run_isolated_leaf(
+        executable, tampered, &rejected_observation);
+    if (!denied.has_value() || denied.value() != 72 ||
+        rejected_observation != LeafStopRecord{}) {
         std::cerr << "Tampered isolated leaf artifact was not refused\n";
         return 4;
     }
@@ -576,7 +688,11 @@ struct SourceFd {
               << "source_sha256=" << kTitleSha256 << "\n"
               << "isolated_actual_guestimage_ud2_runs=2\n"
               << "relocations_per_run=8\n"
-              << "leaf_report=bounded_exit_verdict_only\n"
+              << "leaf_report=bounded_untrusted_typed_stop_v1\n"
+              << "observed_stop=guest_fault_illegal_instruction\n"
+              << "normalized_guest_rip=0x10\n"
+              << "malformed_report_fields=8_refused\n"
+              << "repeat_normalized_reports=identical\n"
               << "tampered_sealed_input=refused_by_leaf\n"
               << "effectful_controller_ipc=not_inherited\n"
               << "process_entry_profile=synthetic_research_only\n"
