@@ -223,6 +223,10 @@ jobs:
             "$RUNNER_TEMP/independent-breakout-import-identity.txt"
           grep -Fx "relocation_executable_targets=none" \
             "$RUNNER_TEMP/independent-breakout-import-identity.txt"
+          grep -Fx "writable_executable_load_segments=1" \
+            "$RUNNER_TEMP/independent-breakout-import-identity.txt"
+          grep -Fx "native_guest_entry=blocked_by_source_rwx_load" \
+            "$RUNNER_TEMP/independent-breakout-import-identity.txt"
           python3 - <<'PY'
           from pathlib import Path
           import os
@@ -301,9 +305,11 @@ jobs:
           if run.returncode != 2 or "pinned_elf_identity_drift" not in run.stderr:
               raise SystemExit("drifted external ELF source admitted")
 
-          # A target landing in a read-only/executable load is not an
-          # admissible relocation write. Derive the address from the
-          # independently verified ELF's own program headers.
+          # The exact pinned ELF's sole executable segment is RWX,
+          # independently establishing a *native admission blocker*.
+          # A relocation write into an executable load is still refused,
+          # even when that load is source-marked writable. Never drop W^X
+          # to make this external fixture executable.
           import struct
           original = original_elf.read_bytes()
           phoff = struct.unpack_from("<Q", original, 32)[0]
@@ -312,12 +318,10 @@ jobs:
           for i in range(phnum):
               typ, flags, _off, va, _pa, _fsize, memsz, _align = (
                   struct.unpack_from("<IIQQQQQQ", original, phoff + i * entsize))
-              if typ == 1 and (flags & 1) and not (flags & 2) and memsz >= 8:
+              if typ == 1 and (flags & 1) and memsz >= 8:
                   readonly.append(va)
-          if not readonly:
-              raise SystemExit("pinned ELF has no non-writable executable load")
-          # Multiple RX load segments are legitimate; select the first
-          # bounded segment without inventing a unique-load guarantee.
+          if len(readonly) != 1:
+              raise SystemExit("pinned executable load count drift")
           readonly_manifest, count = re.subn(
               r"(?m)^relocation\[1\]\.target=0x[0-9a-f]+$",
               "relocation[1].target=" + hex(readonly[0]), manifest)
@@ -330,8 +334,8 @@ jobs:
                str(original_source), "--manifest", str(negative_path),
                "--elf", str(original_elf)],
               capture_output=True, text=True, timeout=15, check=False)
-          if run.returncode != 2 or "relocation_target_not_writable" not in run.stderr:
-              raise SystemExit("read-only guest relocation target admitted")
+          if run.returncode != 2 or "relocation_target_executable" not in run.stderr:
+              raise SystemExit("executable guest relocation target admitted")
           print("BREAKOUT IMPORT NEGATIVE AUDIT PASS")
           print("guest_execution=none")
           PY
