@@ -2,6 +2,9 @@
 // This binary is built only with ASTRAEA_BUILD_C1_RESEARCH=ON (Linux x86-64).
 // It accepts ONE independently authored, pinned SHA-256 image. It does not
 // implement or enable production retail entry or Sony process ABI semantics.
+#if !defined(_GNU_SOURCE)
+#define _GNU_SOURCE 1
+#endif
 #include "owned_pair_sha256.hpp"
 
 #include <astraea/execution/context.hpp>
@@ -39,9 +42,17 @@
 #include <vector>
 
 #include <csignal>
+#include <fcntl.h>
+#include <linux/audit.h>
+#include <linux/filter.h>
+#include <linux/seccomp.h>
+#include <spawn.h>
 #include <sys/mman.h>
 #include <sys/prctl.h>
+#include <sys/resource.h>
+#include <sys/syscall.h>
 #include <sys/types.h>
+#include <sys/wait.h>
 #include <unistd.h>
 
 namespace {
@@ -127,6 +138,57 @@ constexpr e::GuestThreadId kThreadId{1U};
     return address;
 }
 
+// This is a narrow research-only process policy for the ONE pinned UD2
+// workload. The leaf is a new exec-created process, is never ASan-linked,
+// has no controller socket or effectful reporting descriptor, and cannot
+// perform write/open/socket/exec after the filter is installed. This still
+// permits thread creation and virtual memory operations for Astraea's
+// actual native backend; it is not hostile-code memory containment.
+[[nodiscard]] bool install_pinned_leaf_policy() noexcept {
+    constexpr std::array<int, 22U> kHostRuntimeSyscalls{
+        SYS_brk, SYS_clone, SYS_clone3, SYS_exit, SYS_exit_group,
+        SYS_futex, SYS_getpid, SYS_gettid, SYS_madvise,
+        SYS_mmap, SYS_mprotect, SYS_munmap, SYS_prctl,
+        SYS_rt_sigaction, SYS_rt_sigprocmask, SYS_rt_sigreturn,
+        SYS_rseq, SYS_seccomp, SYS_set_robust_list, SYS_sigaltstack,
+        SYS_clock_gettime, SYS_sched_getaffinity,
+    };
+    constexpr auto kLoad = static_cast<std::uint16_t>(BPF_LD | BPF_W | BPF_ABS);
+    constexpr auto kEq = static_cast<std::uint16_t>(BPF_JMP | BPF_JEQ | BPF_K);
+    constexpr auto kGe = static_cast<std::uint16_t>(BPF_JMP | BPF_JGE | BPF_K);
+    constexpr auto kReturn = static_cast<std::uint16_t>(BPF_RET | BPF_K);
+    constexpr auto kDenied = SECCOMP_RET_ERRNO |
+        static_cast<std::uint32_t>(EPERM);
+    std::array<sock_filter, 7U + 2U * kHostRuntimeSyscalls.size()> rules{};
+    std::size_t i = 0U;
+    const auto statement = [&](std::uint16_t code, std::uint32_t value) {
+        rules[i++] = sock_filter{.code = code, .jt = 0U, .jf = 0U, .k = value};
+    };
+    const auto jump = [&](std::uint16_t code, std::uint32_t value,
+                          std::uint8_t yes, std::uint8_t no) {
+        rules[i++] = sock_filter{.code = code, .jt = yes, .jf = no, .k = value};
+    };
+    statement(kLoad, offsetof(seccomp_data, arch));
+    jump(kEq, AUDIT_ARCH_X86_64, 1U, 0U);
+    statement(kReturn, SECCOMP_RET_KILL_PROCESS);
+    statement(kLoad, offsetof(seccomp_data, nr));
+    jump(kGe, 0x40000000U, 0U, 1U); // Reject x32 and high-number aliases.
+    statement(kReturn, kDenied);
+    for (const int number : kHostRuntimeSyscalls) {
+        jump(kEq, static_cast<std::uint32_t>(number), 0U, 1U);
+        statement(kReturn, SECCOMP_RET_ALLOW);
+    }
+    statement(kReturn, kDenied);
+    if (i != rules.size() ||
+        ::prctl(PR_SET_NO_NEW_PRIVS, 1UL, 0UL, 0UL, 0UL) != 0)
+        return false;
+    sock_fprog program{
+        .len = static_cast<unsigned short>(rules.size()),
+        .filter = rules.data(),
+    };
+    return ::syscall(SYS_seccomp, SECCOMP_SET_MODE_FILTER, 0U, &program) == 0;
+}
+
 struct Terminal {
     e::GuestWorkerFault fault;
     e::GuestWorkerStop stop;
@@ -134,7 +196,8 @@ struct Terminal {
 
 [[nodiscard]] std::optional<Terminal> execute_pinned_owned_title(
     std::span<const std::byte> source,
-    std::uint64_t& stage) {
+    std::uint64_t& stage,
+    bool restricted_leaf = false) {
     stage = 1U;
     if (!exact_pinned_title(source) ||
         !e::linux_guest_syscall_seccomp_available()) return std::nullopt;
@@ -256,6 +319,19 @@ struct Terminal {
     // Explicitly synthetic entry context: UD2 consumes no PS5 process
     // parameters. This NEVER promotes an initial-process ABI contract.
     stage = 8U;
+    if (restricted_leaf) {
+        // No writable parent IPC exists in this process. The filter is
+        // installed before the backend starts its dedicated guest thread,
+        // so that newly created thread inherits this policy. The thread's
+        // existing IP-scoped seccomp trap remains an additional layer.
+        if (!install_pinned_leaf_policy()) return std::nullopt;
+        errno = 0;
+        if (::syscall(SYS_write, STDOUT_FILENO, "!", 1U) != -1 ||
+            errno != EPERM) return std::nullopt;
+        errno = 0;
+        if (::syscall(SYS_socket, 2, 1, 0) != -1 ||
+            errno != EPERM) return std::nullopt;
+    }
     auto run = e::enter_linux_guest_with_seccomp_syscall_trap(
         image, prepared.value(), e::make_synthetic_initial_context(image));
     if (!run.has_value()) {
@@ -347,6 +423,166 @@ struct Terminal {
     return message != nullptr &&
         message->reason ==
             e::GuestWorkerTerminationReason::fatal_guest_fault ? 0 : 18;
+}
+
+[[nodiscard]] std::optional<std::vector<std::byte>>
+read_local_exact_title(std::string_view path);
+
+// A bounded, untrusted *exit verdict*, not guest-controlled protocol IPC.
+// The trusted controller never services a syscall request from this leaf.
+[[nodiscard]] int pinned_leaf_main() {
+    if (!bind_controller()) return 70;
+    // RLIMITs predate guest entry; no filesystem, network or output handle
+    // is inherited except /dev/null stdio and the sealed input fd3.
+    const rlimit core_limit{0U, 0U};
+    const rlimit cpu_limit{5U, 5U};
+    const rlimit as_limit{4ULL * 1024ULL * 1024ULL * 1024ULL,
+                          4ULL * 1024ULL * 1024ULL * 1024ULL};
+    if (::setrlimit(RLIMIT_CORE, &core_limit) != 0 ||
+        ::setrlimit(RLIMIT_FSIZE, &core_limit) != 0 ||
+        ::setrlimit(RLIMIT_CPU, &cpu_limit) != 0 ||
+        ::setrlimit(RLIMIT_AS, &as_limit) != 0) return 71;
+    auto bytes = e::read_linux_sealed_worker_artifact(kMaxTitleBytes);
+    // The artifact API closes fd3 on success or a validated failure.
+    if (!bytes.has_value() || !exact_pinned_title(bytes.value()))
+        return 72;
+    std::uint64_t stage = 0U;
+    auto result = execute_pinned_owned_title(bytes.value(), stage, true);
+    // The checked loader, all eight patches and the actual native illegal-
+    // instruction RIP must match. No report channel is open during entry.
+    return result.has_value() && stage == 0U ? 0 : 73;
+}
+
+struct SourceFd {
+    int fd = -1;
+    ~SourceFd() noexcept { if (fd >= 0) (void)::close(fd); }
+    SourceFd() = default;
+    explicit SourceFd(int value) : fd(value) {}
+    SourceFd(const SourceFd&) = delete;
+    SourceFd& operator=(const SourceFd&) = delete;
+};
+
+// The controller owns this memfd and keeps the source independently pinned.
+// The child independently verifies required seals and source SHA-256.
+[[nodiscard]] bool prepare_sealed_source(
+    std::span<const std::byte> bytes, SourceFd& source) {
+    source.fd = static_cast<int>(::syscall(
+        SYS_memfd_create, "astraea-c1-fixed-ud2",
+        MFD_CLOEXEC | MFD_ALLOW_SEALING));
+    if (source.fd < 0) return false;
+    std::size_t offset = 0U;
+    while (offset < bytes.size()) {
+        const ssize_t count = ::write(
+            source.fd, bytes.data() + offset, bytes.size() - offset);
+        if (count < 0 && errno == EINTR) continue;
+        if (count <= 0) return false;
+        offset += static_cast<std::size_t>(count);
+    }
+    constexpr int seals = F_SEAL_WRITE | F_SEAL_GROW |
+        F_SEAL_SHRINK | F_SEAL_SEAL;
+    return ::fcntl(source.fd, F_ADD_SEALS, seals) == 0 &&
+           ::fcntl(source.fd, F_GET_SEALS) == seals;
+}
+
+[[nodiscard]] std::optional<int> run_isolated_leaf(
+    const std::string& executable,
+    std::span<const std::byte> source_bytes) {
+    SourceFd artifact;
+    if (!prepare_sealed_source(source_bytes, artifact)) return std::nullopt;
+    SourceFd transport{::fcntl(artifact.fd, F_DUPFD_CLOEXEC, 4)};
+    if (transport.fd < 4) return std::nullopt;
+    posix_spawn_file_actions_t actions{};
+    if (::posix_spawn_file_actions_init(&actions) != 0)
+        return std::nullopt;
+    struct ActionsGuard {
+        posix_spawn_file_actions_t& value;
+        ~ActionsGuard() noexcept {
+            (void)::posix_spawn_file_actions_destroy(&value);
+        }
+    } cleanup{actions};
+    if (::posix_spawn_file_actions_addopen(
+            &actions, STDIN_FILENO, "/dev/null", O_RDONLY, 0) != 0 ||
+        ::posix_spawn_file_actions_addopen(
+            &actions, STDOUT_FILENO, "/dev/null", O_WRONLY, 0) != 0 ||
+        ::posix_spawn_file_actions_addopen(
+            &actions, STDERR_FILENO, "/dev/null", O_WRONLY, 0) != 0 ||
+        ::posix_spawn_file_actions_adddup2(
+            &actions, transport.fd, e::kLinuxWorkerArtifactFd) != 0 ||
+        ::posix_spawn_file_actions_addclosefrom_np(&actions, 4) != 0)
+        return std::nullopt;
+
+    posix_spawnattr_t attributes{};
+    if (::posix_spawnattr_init(&attributes) != 0)
+        return std::nullopt;
+    struct AttrGuard {
+        posix_spawnattr_t& value;
+        ~AttrGuard() noexcept { (void)::posix_spawnattr_destroy(&value); }
+    } attr_cleanup{attributes};
+    if (::posix_spawnattr_setflags(
+            &attributes, POSIX_SPAWN_SETPGROUP) != 0 ||
+        ::posix_spawnattr_setpgroup(&attributes, 0) != 0)
+        return std::nullopt;
+    std::string expected_pid = "ASTRAEA_CONTROLLER_PID=" +
+        std::to_string(::getpid());
+    char locale[] = "LC_ALL=C";
+    char* envp[]{expected_pid.data(), locale, nullptr};
+    char* argv[]{const_cast<char*>(executable.c_str()),
+                 const_cast<char*>("--isolated-leaf"), nullptr};
+    pid_t pid = -1;
+    if (::posix_spawn(&pid, executable.c_str(), &actions, &attributes,
+                      argv, envp) != 0 || pid <= 0) return std::nullopt;
+    // Bound every child, including descendants in its distinct process group.
+    int status = 0;
+    pid_t waited = 0;
+    for (unsigned n = 0; n < 500U; ++n) {
+        waited = ::waitpid(pid, &status, WNOHANG);
+        if (waited == pid) break;
+        if (waited < 0 && errno != EINTR) break;
+        (void)::usleep(10000);
+    }
+    if (waited != pid) {
+        (void)::kill(-pid, SIGKILL);
+        (void)::kill(pid, SIGKILL);
+        (void)::waitpid(pid, &status, 0);
+        return std::nullopt;
+    }
+    if (!WIFEXITED(status)) return std::nullopt;
+    return WEXITSTATUS(status);
+}
+
+[[nodiscard]] int isolated_controller_main(std::string_view title_path) {
+    auto input = read_local_exact_title(title_path);
+    if (!input.has_value()) return 2;
+    const std::string executable =
+        std::filesystem::read_symlink("/proc/self/exe").string();
+    for (unsigned run = 0; run < 2U; ++run) {
+        auto status = run_isolated_leaf(executable, input.value());
+        if (!status.has_value() || status.value() != 0) {
+            std::cerr << "Pinned isolated leaf fault proof failed on run "
+                      << run << " child="
+                      << (status.has_value() ? status.value() : -1) << "\n";
+            return 3;
+        }
+    }
+    // Check actual leaf admission, not only controller-side byte hashing.
+    auto tampered = input.value();
+    tampered[0] ^= std::byte{1U};
+    const auto denied = run_isolated_leaf(executable, tampered);
+    if (!denied.has_value() || denied.value() != 72) {
+        std::cerr << "Tampered isolated leaf artifact was not refused\n";
+        return 4;
+    }
+    std::cout << "PINNED OWNED PS5-FORMAT ISOLATED LEAF PASS\n"
+              << "source_sha256=" << kTitleSha256 << "\n"
+              << "isolated_actual_guestimage_ud2_runs=2\n"
+              << "relocations_per_run=8\n"
+              << "leaf_report=bounded_exit_verdict_only\n"
+              << "tampered_sealed_input=refused_by_leaf\n"
+              << "effectful_controller_ipc=not_inherited\n"
+              << "process_entry_profile=synthetic_research_only\n"
+              << "hostile_code_containment=not_established\n"
+              << "commercial_title_execution=not_attempted\n";
+    return 0;
 }
 
 [[nodiscard]] std::optional<std::vector<std::byte>>
@@ -454,9 +690,14 @@ read_local_exact_title(std::string_view path) {
 
 int main(int argc, char** argv) {
     try {
-        if (argc != 2) return 1;
+        if (argc < 2) return 1;
         if (std::string_view{argv[1]} == "--sealed-worker")
             return worker_main();
+        if (std::string_view{argv[1]} == "--isolated-leaf")
+            return pinned_leaf_main();
+        if (argc == 3 && std::string_view{argv[1]} == "--isolated")
+            return isolated_controller_main(argv[2]);
+        if (argc != 2) return 1;
         return controller_main(argv[1]);
     } catch (const std::exception& error) {
         std::cerr << "Research probe infrastructure error: "
