@@ -330,6 +330,7 @@ struct TemporaryGuestMemoryEvidence {
     std::size_t restricted_source_write_bytes = 0U;
     std::size_t mapped_shared_page_compared_bytes = 0U;
     std::size_t original_imports_unchanged = 0U;
+    bool prepared_guest_page_write_denied = false;
 };
 
 [[nodiscard]] std::optional<TemporaryGuestMemoryEvidence>
@@ -550,6 +551,30 @@ prepare_temporary_breakout_guest_memory(const l::GuestImage& original) {
     if (result.mapped_shared_page_compared_bytes != kPageSize ||
         result.original_imports_unchanged != 19U)
         return fail("incomplete_native_image_readback");
+
+    // Unlike #424's unrelated scratch page, this negative attempts an
+    // actual write through the real prepared guest VA. It must SIGSEGV or
+    // SIGBUS; the disposable child never enters guest instructions.
+    const pid_t child = ::fork();
+    if (child < 0) return fail("guest_permission_negative_fork");
+    if (child == 0) {
+        const rlimit no_core{0U, 0U};
+        (void)::setrlimit(RLIMIT_CORE, &no_core);
+        auto* const target_byte = reinterpret_cast<volatile unsigned char*>(
+            static_cast<std::uintptr_t>(base + kScratchGuestPage + 0x900U));
+        *target_byte = static_cast<unsigned char>(0x5a);
+        ::_exit(91);
+    }
+    int status = 0;
+    pid_t waited = -1;
+    do {
+        waited = ::waitpid(child, &status, 0);
+    } while (waited == -1 && errno == EINTR);
+    if (waited != child || !WIFSIGNALED(status) ||
+        (WTERMSIG(status) != SIGSEGV && WTERMSIG(status) != SIGBUS))
+        return fail("prepared_guest_code_data_page_was_writable");
+    result.prepared_guest_page_write_denied = true;
+
     // RAII LinuxPreparedMemory destruction tears down guest VMAs here.
     // No execution callback, synthetic HLE gate, IPC or provider lookup.
     return result;
@@ -700,7 +725,8 @@ prepare_temporary_breakout_guest_memory(const l::GuestImage& original) {
         return 19;
 
     auto prepared = prepare_temporary_breakout_guest_memory(image.value());
-    if (!prepared.has_value()) return 20;
+    if (!prepared.has_value() || !prepared->prepared_guest_page_write_denied)
+        return 20;
 
     std::cout << "PINNED BREAKOUT ACTUAL MEMORY PLAN PREFLIGHT PASS\n"
               << "source_sha256=" << kPinnedSha256 << '\n'
@@ -744,6 +770,7 @@ prepare_temporary_breakout_guest_memory(const l::GuestImage& original) {
               << prepared->mapped_shared_page_compared_bytes << '\n'
               << "temporary_guest_unresolved_got_words_unchanged="
               << prepared->original_imports_unchanged << '\n'
+              << "temporary_guest_real_page_write=denied_by_kernel\n"
               << "temporary_guest_actual_native_relatives=1\n"
               << "temporary_guest_writable_code_semantics=unsupported\n"
               << "native_guest_memory_mapped_at_report=0\n"
