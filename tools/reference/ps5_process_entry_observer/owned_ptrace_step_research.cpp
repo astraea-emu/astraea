@@ -710,7 +710,7 @@ int main(int argc, char** argv) {
     std::puts("owned_fault_repeated=2");
     std::puts("owned_syscall_exit_prevented_repeated=2");
     std::puts("owned_host_ip_escape_denied_repeated=2");
-    std::puts("host_sentinel_canary=unchanged");
+    std::puts("host_sentinel_canary=unchanged_in_denied_cases");
     std::puts("owned_write_rx_sigsegv_repeated=2");
     std::puts("owned_write_none_sigsegv_repeated=2");
     std::puts("owned_write_rw_non_guest_side_effect_repeated=2");
