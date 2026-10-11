@@ -351,6 +351,10 @@ jobs:
             "$RUNNER_TEMP/actual-breakout-plan.txt"
           grep -Fx "source_plan=mixed_write_execute_page" \
             "$RUNNER_TEMP/actual-breakout-plan.txt"
+          grep -Fx "research_narrowed_plan=blocked_mixed_write_execute_page" \
+            "$RUNNER_TEMP/actual-breakout-plan.txt"
+          grep -Fx "research_narrowed_host_page_conflict=rx_rw_distinct_loads" \
+            "$RUNNER_TEMP/actual-breakout-plan.txt"
           grep -Fx "guestimage_load_segments=3" \
             "$RUNNER_TEMP/actual-breakout-plan.txt"
           grep -Fx "source_rwx_executable_loads=1" \
@@ -365,10 +369,12 @@ jobs:
           narrowed = int(fields["research_narrowed_mapping_count"])
           if fragments < 1 or fragments != narrowed:
               raise SystemExit("RWX mapping fragments were not all narrowed")
-          if fields["research_narrowed_plan"] not in {
-              "accepted_no_host_rwx", "blocked_mixed_write_execute_page"
-          }:
-              raise SystemExit("unclassified copied mapping plan")
+          page = int(fields["research_narrowed_mixed_page"], 16)
+          if page % 4096 or page < 0:
+              raise SystemExit("reported mixed host page is not aligned")
+          if (int(fields["research_rx_source_ph_index"]) ==
+                  int(fields["research_rw_source_ph_index"])):
+              raise SystemExit("mixed host page not from distinct PT_LOAD sources")
           print("ACTUAL BREAKOUT SOURCE-MAPPING POLICY ASSERTIONS PASS")
           PY
           grep -Fx "original_guest_permissions=unchanged" \
