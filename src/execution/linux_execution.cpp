@@ -1024,17 +1024,14 @@ install_guest_executable_syscall_filter(
         std::endian::native ==
         std::endian::little);
 
-    // Selected resource-acquisition and descriptor-output syscalls must
-    // not succeed when guest control flow reaches host instructions.
-    // This is guest-thread defense in depth, NOT a process sandbox:
-    // many syscalls, inherited descriptors and controller IPC remain.
-    constexpr std::array<int, 16U> kDeniedOutsideGuestIp{
+    // Selected host resource acquisitions remain blocked even if guest
+    // control flow escapes the registered guest executable ranges.
+    // This guest-thread filter is defense in depth, NOT a sandbox.
+    constexpr std::array<int, 14U> kDeniedOutsideGuestIp{
         SYS_open,
         SYS_openat,
         SYS_openat2,
         SYS_creat,
-        SYS_write,
-        SYS_writev,
         SYS_socket,
         SYS_socketpair,
         SYS_connect,
@@ -1048,7 +1045,8 @@ install_guest_executable_syscall_filter(
     };
     constexpr std::size_t kInstructionsPerRange = 11U;
     // Count the emitted BPF statements exactly: arch guard 3, x32 guard 3,
-    // legacy-x32 alias guard 3, final host ALLOW 1, plus 2 per deny entry.
+    // legacy-x32 alias guard 3, final host ALLOW 1, plus 2 per deny entry
+    // and six instructions for the host write/writev descriptor boundary.
     constexpr std::size_t kArchGuardInstructions = 3U;
     constexpr std::size_t kX32GuardInstructions = 3U;
     constexpr std::size_t kLegacyAliasGuardInstructions = 3U;
@@ -1056,7 +1054,7 @@ install_guest_executable_syscall_filter(
     constexpr std::size_t kTrailingInstructions =
         kArchGuardInstructions + kX32GuardInstructions +
         kLegacyAliasGuardInstructions + kHostFallbackInstructions +
-        2U * kDeniedOutsideGuestIp.size();
+        2U * kDeniedOutsideGuestIp.size() + 6U;
     constexpr auto kMaxProgramLength =
         static_cast<std::size_t>(
             std::numeric_limits<
@@ -1264,6 +1262,33 @@ install_guest_executable_syscall_filter(
                     SECCOMP_RET_ERRNO |
                         static_cast<std::uint32_t>(EPERM)));
         }
+        // Preserve existing stdout/stderr protocol and sanitizer support:
+        // these are ALREADY permitted by the old host fallback. Refuse
+        // escaped writes through any other fd (3+), including inherited
+        // file, pipe, and socket descriptors. Guest-controlled stdout is
+        // STILL an effectful controller-protocol escape, so #410 remains
+        // open until the separate, capability-limited execution leaf.
+        //
+        // The syscall argument 0 is the native int fd; its low 32 bits
+        // decide the destination on x86-64. Negative fds have a low word
+        // above 2 and are denied here too.
+        // If write: skip writev check; if neither: skip the four fd rules.
+        program.push_back(
+            bpf_jump(kJumpEqual, SYS_write, 1U, 0U));
+        program.push_back(
+            bpf_jump(kJumpEqual, SYS_writev, 0U, 4U));
+        program.push_back(
+            bpf_statement(
+                kLoadAbsoluteWord,
+                static_cast<std::uint32_t>(
+                    offsetof(seccomp_data, args))));
+        program.push_back(
+            bpf_jump(kJumpGreaterEqual, 3U, 1U, 0U));
+        program.push_back(
+            bpf_statement(kReturnConstant, SECCOMP_RET_ALLOW));
+        program.push_back(
+            bpf_statement(kReturnConstant, kRefuseHostSyscall));
+
         // Existing worker protocol/teardown needs host syscalls after the
         // guest stop. Remaining ALLOW is intentionally NOT a hostile-code
         // security guarantee; the wider escape remains open under #410.
