@@ -22,6 +22,7 @@
 
 #include <algorithm>
 #include <array>
+#include <bit>
 #include <charconv>
 #include <cerrno>
 #include <cstddef>
@@ -217,6 +218,122 @@ static_assert(kLeafStopBytes == 64U);
         .filter = rules.data(),
     };
     return ::syscall(SYS_seccomp, SECCOMP_SET_MODE_FILTER, 0U, &program) == 0;
+}
+
+// Fixed, Astraea-authored adversarial GuestImage. Unlike the #417 toy RX
+// entry, this enters through the existing GuestImage/native Linux backend
+// inside the same exec-separated leaf as the pinned PS5-format UD2 workload.
+// Its sole intended host effect is a write to the leaf's /dev/null stdout;
+// deny-by-default seccomp must refuse that syscall at an OUTSIDE-guest RIP.
+constexpr std::array<char, 8U> kEscapeMarker{
+    'A', 'S', 'T', 'R', 'A', 'E', 'A', '2',
+};
+
+[[gnu::noinline]] std::int64_t source_owned_host_write_probe(
+    int descriptor, const void* bytes, std::size_t count) noexcept {
+    errno = 0;
+    const long result = ::syscall(SYS_write, descriptor, bytes, count);
+    return result < 0 ? -static_cast<std::int64_t>(errno) : result;
+}
+
+void append_owned_movabs(
+    std::vector<std::byte>& code,
+    unsigned register_index,
+    std::uint64_t value) {
+    const auto opcode = static_cast<unsigned char>(0xb8U + register_index);
+    code.push_back(std::byte{0x48});
+    code.push_back(static_cast<std::byte>(opcode));
+    for (unsigned i = 0U; i < 8U; ++i)
+        code.push_back(static_cast<std::byte>(value >> (8U * i)));
+}
+
+[[nodiscard]] bool prove_guestimage_host_ip_write_denial() {
+    // Deliberately unreachable before the exact pinned source check and
+    // installation of the inherited leaf-wide deny-by-default policy.
+    const auto base = choose_free_base();
+    if (!base.has_value()) return false;
+    const std::uint64_t stack_base = base.value() + kStackOffset;
+    constexpr std::uint64_t kStackBytes = 4096U;
+
+    std::vector<std::byte> code{
+        std::byte{0x48}, std::byte{0x83},
+        std::byte{0xec}, std::byte{0x08}, // SysV call alignment.
+    };
+    append_owned_movabs(code, 7U, STDOUT_FILENO); // RDI
+    append_owned_movabs(code, 6U, static_cast<std::uint64_t>(
+        reinterpret_cast<std::uintptr_t>(kEscapeMarker.data()))); // RSI
+    append_owned_movabs(code, 2U, kEscapeMarker.size()); // RDX
+    append_owned_movabs(code, 0U, static_cast<std::uint64_t>(
+        reinterpret_cast<std::uintptr_t>(&source_owned_host_write_probe)));
+    code.push_back(std::byte{0xff});
+    code.push_back(std::byte{0xd0}); // guest-controlled CALL RAX to host
+    code.push_back(std::byte{0x48});
+    code.push_back(std::byte{0x83});
+    code.push_back(std::byte{0xc4});
+    code.push_back(std::byte{0x08});
+    const auto fault_offset = static_cast<std::uint64_t>(code.size());
+    code.push_back(std::byte{0x0f});
+    code.push_back(std::byte{0x0b}); // Observed native SIGILL after call.
+
+    const auto code_range = m::GuestRange::create(
+        m::GuestAddress{base.value()}, m::GuestSize{code.size()});
+    const auto stack_range = m::GuestRange::create(
+        m::GuestAddress{stack_base}, m::GuestSize{kStackBytes});
+    const auto rsp = m::GuestAddress{stack_base + kStackBytes - 8U};
+    const auto used_range = m::GuestRange::create(rsp, m::GuestSize{0U});
+    const auto permissions = m::GuestPermissions::checked_from_bits(
+        static_cast<std::uint8_t>(m::GuestPermission::read) |
+        static_cast<std::uint8_t>(m::GuestPermission::execute));
+    if (!code_range.has_value() || !stack_range.has_value() ||
+        !used_range.has_value() || !permissions.has_value())
+        return false;
+    l::ElfHeader elf_header{};
+    elf_header.entry = base.value();
+    const auto code_size = static_cast<std::uint64_t>(code.size());
+    l::GuestImage image{
+        .image_bytes = std::move(code),
+        .elf = l::ElfImage{.header = elf_header, .program_headers = {}},
+        .mappings = {
+            m::MappingIntent{
+                .range = code_range.value(),
+                .permissions = permissions.value(),
+                .backing = m::MappingBacking{
+                    .kind = m::MappingBackingKind::file,
+                    .file_offset = 0U,
+                    .byte_count = m::GuestSize{code_size},
+                },
+                .source_index = 0U,
+            },
+        },
+        .dynamic_table = std::nullopt,
+        .dynamic_strings = std::nullopt,
+        .dynamic_symbols = std::nullopt,
+        .general_relocations = l::GeneralDynamicRelocationMetadata{
+            .rel = std::nullopt,
+            .rela = std::nullopt,
+        },
+        .plt_relocations = std::nullopt,
+        .tls = std::nullopt,
+        .initial_stack = l::InitialStackImage{
+            .storage = stack_range.value(),
+            .used_range = used_range.value(),
+            .rsp = rsp,
+            .bytes = {},
+        },
+    };
+    const auto prepared = e::prepare_linux_guest_memory(image);
+    if (!prepared.has_value()) return false;
+    const auto result = e::enter_linux_guest_with_seccomp_syscall_trap(
+        image, prepared.value(), e::make_synthetic_initial_context(image));
+    if (!result.has_value()) return false;
+    const auto* stopped = std::get_if<e::ExecutionStop>(&result.value());
+    return stopped != nullptr &&
+        stopped->reason == e::ExecutionStopReason::guest_fault &&
+        stopped->has_fault &&
+        stopped->fault.kind == e::GuestFaultKind::illegal_instruction &&
+        stopped->fault.instruction_pointer == base.value() + fault_offset &&
+        stopped->context.rax == std::bit_cast<std::uint64_t>(
+            -static_cast<std::int64_t>(EPERM));
 }
 
 struct Terminal {
@@ -516,6 +633,11 @@ read_local_exact_title(std::string_view path);
         result->fault.thread_id.value,
         kLeafGuestFault,
     };
+    // This second source-owned GuestImage actually transfers to a host
+    // syscall site outside all guest ranges under the SAME isolated leaf
+    // policy. The refusal must be EPERM and the post-call UD2 real.
+    // The pinned title remains exact and unchanged.
+    if (!prove_guestimage_host_ip_write_denial()) return 75;
     std::memcpy(observation, record.data(), kLeafStopBytes);
     // No write/pwrite/msync syscall or effectful controller callback.
     return 0;
@@ -693,6 +815,7 @@ struct SourceFd {
               << "normalized_guest_rip=0x10\n"
               << "malformed_report_fields=8_refused\n"
               << "repeat_normalized_reports=identical\n"
+              << "real_guestimage_host_ip_write_denied_runs=2\n"
               << "tampered_sealed_input=refused_by_leaf\n"
               << "effectful_controller_ipc=not_inherited\n"
               << "process_entry_profile=synthetic_research_only\n"
