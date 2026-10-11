@@ -136,7 +136,42 @@ jobs:
             -DASTRAEA_WARNINGS_AS_ERRORS=ON \
             -DASTRAEA_BUILD_C1_RESEARCH=ON
           cmake --build "$RUNNER_TEMP/astraea-native-title-smoke" \
-            --target astraea astraea_c1_owned_entry_research --parallel 3
+            --target astraea astraea_c1_owned_entry_research astraea_c1_ptrace_step_research --parallel 3
+
+      - name: Verify independent tracer's exact source-owned guest step boundary
+        run: |
+          set -euo pipefail
+          tracer="$RUNNER_TEMP/astraea-native-title-smoke/astraea_c1_ptrace_step_research"
+          timeout 25s "$tracer" | tee "$RUNNER_TEMP/c1-owned-ptrace-boundary.txt"
+          for expected in \
+            "C1 OWNED PTRACE SYSEMU STEP BOUNDARY PASS" \
+            "owned_fault_repeated=2" \
+            "owned_syscall_exit_prevented_repeated=2" \
+            "owned_host_ip_escape_denied_repeated=2" \
+            "host_sentinel_canary=unchanged" \
+            "observations=tracer_ptrace_registers_only" \
+            "tracee_external_files_and_controller_ipc=none" \
+            "external_elf_guest_instructions=0" \
+            "hostile_guest_sandbox=not_established"; do
+            grep -Fx "$expected" "$RUNNER_TEMP/c1-owned-ptrace-boundary.txt"
+          done
+          python3 - <<'PY'
+          import os
+          from pathlib import Path
+          import subprocess
+
+          exe = Path(os.environ["RUNNER_TEMP"]) / (
+              "astraea-native-title-smoke/astraea_c1_ptrace_step_research")
+          for command in (["--leaf", "fault"], ["--leaf", "invalid"],
+                          ["--unsupported"]):
+              proc = subprocess.run([str(exe), *command],
+                                    capture_output=True, timeout=5,
+                                    check=False)
+              if proc.returncode == 0 or proc.stdout or proc.stderr:
+                  raise SystemExit(f"unsafe direct tracer entry: {command}")
+          print("C1 OWNED TRACER DIRECT-LEAF NEGATIVES PASS")
+          print("EXTERNAL TITLE NATIVE EXECUTION NOT AUTHORIZED")
+          PY
 
       - name: Probe public independent PS5-format title with Astraea
         run: |
