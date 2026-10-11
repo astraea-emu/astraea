@@ -1,20 +1,31 @@
-// C1 source-pinned Breakout pre-entry memory-plan assessment only.
-// No host mappings, relocations, guest entry, import resolution or HLE.
+// C1 exact-source-pinned Breakout pre-entry research only.
+// One isolated scratch page (not a guest-VA mapping) stages one RELATIVE,
+// then changes RW -> RX. No guest entry, GLOB_DAT binding, or HLE.
 #include "owned_pair_sha256.hpp"
 
 #include <astraea/execution/memory_plan.hpp>
+#include <astraea/execution/owned_relative_patch.hpp>
 #include <astraea/loader/guest_image.hpp>
 #include <astraea/memory/mapping.hpp>
 
 #include <algorithm>
+#include <array>
+#include <cerrno>
+#include <csignal>
 #include <cstddef>
 #include <cstdint>
+#include <cstring>
 #include <fstream>
 #include <iostream>
 #include <limits>
 #include <optional>
 #include <span>
 #include <string_view>
+#include <sys/mman.h>
+#include <sys/resource.h>
+#include <sys/types.h>
+#include <sys/wait.h>
+#include <unistd.h>
 #include <utility>
 #include <vector>
 
@@ -56,6 +67,181 @@ constexpr std::uint64_t kPageSize = 4096U;
         .stack_pointer = image.initial_stack.rsp,
         .host_page_size = kPageSize,
     });
+}
+
+// No SCE-provider address exists yet. This proof stages the ONE externally
+// observed RELATIVE record, then verifies ALL 19 GLOB_DAT targets remain
+// original/unknown. Staging the imports would require verified addresses.
+constexpr std::uint64_t kScratchGuestPage = 0x6000U;
+constexpr std::uint64_t kScratchGuestLimit = kScratchGuestPage + kPageSize;
+constexpr std::uint64_t kResearchLoadBias = 0x10000000U;
+
+struct ScratchStagingResult {
+    std::size_t initialized_fragments = 0U;
+    std::size_t relative_patches = 0U;
+    std::size_t unresolved_imports = 0U;
+    bool post_freeze_write_refused = false;
+};
+
+[[nodiscard]] std::optional<ScratchStagingResult> stage_scratch_page(
+    const l::GuestImage& image) {
+    const auto refuse = [](std::string_view code)
+        -> std::optional<ScratchStagingResult> {
+        std::cerr << "scratch_stage_refused=" << code << '\n';
+        return std::nullopt;
+    };
+    const auto view = image.initialized_image_view();
+    if (!view.has_value() || !image.dynamic_symbols.has_value() ||
+        !image.general_relocations.rela.has_value() ||
+        image.general_relocations.rela->count != 20U)
+        return refuse("image_or_relocations_unavailable");
+
+    // This is deliberately NOT a fixed guest address or a second alias.
+    // The only host mapping starts RW/NX and can become RX/NW later.
+    void* raw = ::mmap(nullptr, static_cast<std::size_t>(kPageSize),
+                       PROT_READ | PROT_WRITE,
+                       MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+    if (raw == MAP_FAILED) return refuse("scratch_mmap");
+    struct OwnedScratch {
+        void* address;
+        ~OwnedScratch() { (void)::munmap(address, kPageSize); }
+    } scratch{raw};
+    auto* bytes = static_cast<std::byte*>(raw);
+    std::array<bool, static_cast<std::size_t>(kPageSize)> coverage{};
+    ScratchStagingResult evidence{};
+
+    // Copy initialized bytes by the REAL GuestImage backing intents, not
+    // independent ELF offset arithmetic. The untouched gaps stay zero.
+    for (const auto& mapping : image.mappings) {
+        const std::uint64_t first = mapping.range.base().value();
+        const std::uint64_t last = first + mapping.range.size().value();
+        const std::uint64_t from = std::max(first, kScratchGuestPage);
+        const std::uint64_t to = std::min(last, kScratchGuestLimit);
+        if (from >= to) continue;
+        const auto offset = static_cast<std::size_t>(from - kScratchGuestPage);
+        const auto length = static_cast<std::size_t>(to - from);
+        if (std::any_of(coverage.begin() + offset,
+                        coverage.begin() + offset + length,
+                        [](bool covered) { return covered; }))
+            return refuse("overlapping_mapping_sources");
+        const auto guest_extent = m::GuestRange::create(
+            m::GuestAddress{from}, m::GuestSize{length});
+        if (!guest_extent.has_value() ||
+            !view->copy_bytes(guest_extent.value(),
+                              std::span<std::byte>{bytes + offset, length})
+                 .has_value())
+            return refuse("initialized_source_mismatch");
+        std::fill(coverage.begin() + offset,
+                  coverage.begin() + offset + length, true);
+        ++evidence.initialized_fragments;
+    }
+    if (evidence.initialized_fragments < 2U)
+        return refuse("missing_shared_code_and_data");
+
+    std::array<std::byte, static_cast<std::size_t>(kPageSize)> initial{};
+    std::memcpy(initial.data(), bytes, initial.size());
+
+    std::array<bool, static_cast<std::size_t>(kPageSize)> relocation_ranges{};
+    std::optional<e::OwnedRelativePatch> relative_patch;
+    for (std::uint64_t i = 0; i < 20U; ++i) {
+        const auto record = l::parse_dynamic_relocation(
+            image.general_relocations.rela.value(), i,
+            image.dynamic_symbols.value(), view.value());
+        if (!record.has_value()) return refuse("relocation_parse");
+        const std::uint64_t target = record->target.value();
+        if (target < kScratchGuestPage ||
+            target > kScratchGuestLimit - 8U)
+            return refuse("relocation_outside_scratch");
+        const auto off = static_cast<std::size_t>(
+            target - kScratchGuestPage);
+        for (std::size_t j = off; j < off + 8U; ++j) {
+            if (!coverage[j] || relocation_ranges[j])
+                return refuse("relocation_unmapped_or_overlap");
+            relocation_ranges[j] = true;
+        }
+        const auto owner = std::count_if(
+            image.mappings.begin(), image.mappings.end(),
+            [&](const auto& mapping) {
+                return mapping.range.contains(record->target) &&
+                    mapping.range.base().value() +
+                    mapping.range.size().value() >= target + 8U &&
+                    mapping.permissions.has(m::GuestPermission::write) &&
+                    !mapping.permissions.has(m::GuestPermission::execute);
+            });
+        if (owner != 1) return refuse("relocation_owner_not_unique_writable");
+        if (record->table_kind != l::RelocationTableKind::rela)
+            return refuse("unexpected_relocation_table");
+        if (record->relocation_type == 8U &&
+            record->symbol_index == 0U) {
+            if (relative_patch.has_value())
+                return refuse("duplicate_relative");
+            auto patch = e::build_owned_x86_64_relative_patch(
+                record.value(), m::GuestAddress{kResearchLoadBias});
+            if (!patch.has_value())
+                return refuse("relative_patch_invalid");
+            relative_patch = patch.value();
+            ++evidence.relative_patches;
+        } else if (record->relocation_type == 6U &&
+                   record->symbol_index != 0U) {
+            ++evidence.unresolved_imports;
+            // No placeholder gate, guessed Sony export or host callback.
+        } else {
+            return refuse("unexpected_relocation_kind");
+        }
+    }
+    if (evidence.relative_patches != 1U ||
+        evidence.unresolved_imports != 19U ||
+        !relative_patch.has_value() ||
+        relative_patch->target.value() != 0x6900U)
+        return refuse("pinned_relocation_census_drift");
+
+    const auto relative_offset = static_cast<std::size_t>(
+        relative_patch->target.value() - kScratchGuestPage);
+    std::memcpy(bytes + relative_offset,
+                relative_patch->bytes.data(),
+                relative_patch->bytes.size());
+    if (std::memcmp(bytes + relative_offset,
+                    relative_patch->bytes.data(),
+                    relative_patch->bytes.size()) != 0)
+        return refuse("relative_readback_mismatch");
+    // Byte-for-byte prove no other source byte (including all 19 unresolved
+    // GOT locations) has been changed by this research-only staging.
+    for (std::size_t i = 0U; i < initial.size(); ++i) {
+        if (i >= relative_offset &&
+            i < relative_offset + relative_patch->bytes.size()) continue;
+        if (bytes[i] != initial[i])
+            return refuse("unresolved_import_or_code_changed");
+    }
+
+    if (::mprotect(raw, static_cast<std::size_t>(kPageSize),
+                   PROT_READ | PROT_EXEC) != 0)
+        return refuse("rw_to_rx_freeze");
+    if (std::memcmp(bytes + relative_offset,
+                    relative_patch->bytes.data(),
+                    relative_patch->bytes.size()) != 0)
+        return refuse("post_freeze_readback");
+
+    // A disposable fork is used ONLY to test a write fault on the frozen
+    // page. The child never executes title bytes and has no controller IPC.
+    const pid_t pid = ::fork();
+    if (pid < 0) return refuse("write_negative_fork");
+    if (pid == 0) {
+        const rlimit no_core{0U, 0U};
+        (void)::setrlimit(RLIMIT_CORE, &no_core);
+        auto* target = reinterpret_cast<volatile unsigned char*>(raw);
+        target[relative_offset] = static_cast<unsigned char>(0x5a);
+        ::_exit(90); // An unexpectedly allowed write is failure.
+    }
+    int status = 0;
+    pid_t waited = -1;
+    do {
+        waited = ::waitpid(pid, &status, 0);
+    } while (waited == -1 && errno == EINTR);
+    if (waited != pid || !WIFSIGNALED(status) ||
+        (WTERMSIG(status) != SIGSEGV && WTERMSIG(status) != SIGBUS))
+        return refuse("post_freeze_guest_style_write_not_refused");
+    evidence.post_freeze_write_refused = true;
+    return evidence;
 }
 
 [[nodiscard]] int inspect(const char* path) {
@@ -196,6 +382,12 @@ constexpr std::uint64_t kPageSize = 4096U;
     // ELF bytes, GuestImage permissions, or native backend policy.
     if (research_candidate == image->mappings) return 15;
 
+    auto staged = stage_scratch_page(image.value());
+    if (!staged.has_value() || staged->relative_patches != 1U ||
+        staged->unresolved_imports != 19U ||
+        !staged->post_freeze_write_refused)
+        return 19;
+
     std::cout << "PINNED BREAKOUT ACTUAL MEMORY PLAN PREFLIGHT PASS\n"
               << "source_sha256=" << kPinnedSha256 << '\n'
               << "guestimage_load_segments=" << loads << '\n'
@@ -227,8 +419,12 @@ constexpr std::uint64_t kPageSize = 4096U;
     std::cout
               << "original_guest_permissions=unchanged\n"
               << "elf_bytes=unchanged\n"
-              << "native_memory_mapped=0\n"
-              << "relocations_applied=0\n"
+              << "native_guest_memory_mapped=0\n"
+              << "scratch_page_rw_to_rx=verified\n"
+              << "scratch_relative_patches=" << staged->relative_patches << '\n'
+              << "scratch_unresolved_imports=" << staged->unresolved_imports << '\n'
+              << "scratch_postfreeze_write=denied_by_kernel\n"
+              << "guest_relocations_applied=0\n"
               << "imports_resolved=0\n"
               << "guest_instructions=0\n"
               << "guest_write_semantics_preserved=not_proven\n"
