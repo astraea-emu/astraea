@@ -4,6 +4,9 @@
 // Deliberate page permission narrowing is NOT faithful writable-code support.
 #include "owned_pair_sha256.hpp"
 #include "breakout_offline_entry_interpreter.hpp"
+#include "source_x86_64_decoder.hpp"
+
+#include <Zydis/Mnemonic.h>
 
 #include <astraea/execution/memory_plan.hpp>
 #include <astraea/execution/linux_memory.hpp>
@@ -818,6 +821,46 @@ prepare_temporary_breakout_guest_memory(
         interpreted->return_rip != interpreted->entry_rip + 9U)
         return 23;
 
+    // Independently decode the two verified entry instructions and a
+    // bounded prefix of their *actual* branch target with a maintained
+    // MIT-licensed x86 decoder. Decoding is NEVER execution; the existing
+    // model remains limited to the two entry instructions above.
+    const auto entry_decode =
+        astraea::research::decode_source_x86_64(
+            image.value(), interpreted->entry_rip, 2U);
+    if (!entry_decode.has_value() || entry_decode->count != 2U ||
+        entry_decode->instructions[0].length != 4U ||
+        entry_decode->instructions[1].length != 5U ||
+        entry_decode->instructions[1].rip != interpreted->entry_rip + 4U ||
+        entry_decode->instructions[0].mnemonic != ZYDIS_MNEMONIC_AND ||
+        entry_decode->instructions[1].mnemonic != ZYDIS_MNEMONIC_CALL)
+        return 29;
+    const auto callee_decode =
+        astraea::research::decode_source_x86_64(
+            image.value(), interpreted->branch_target,
+            astraea::research::kC1MaxDecodedInstructions);
+    if (!callee_decode.has_value() ||
+        callee_decode->count != astraea::research::kC1MaxDecodedInstructions ||
+        callee_decode->instructions[0].rip != interpreted->branch_target ||
+        callee_decode->next_rip <= interpreted->branch_target)
+        return 30;
+    // Decoder misuse and a source address without an executable mapping
+    // must be typed refusals, not partial or synthetic instruction records.
+    const auto zero_budget = astraea::research::decode_source_x86_64(
+        image.value(), interpreted->branch_target, 0U);
+    const auto oversized_budget = astraea::research::decode_source_x86_64(
+        image.value(), interpreted->branch_target,
+        astraea::research::kC1MaxDecodedInstructions + 1U);
+    const auto wrong_address = astraea::research::decode_source_x86_64(
+        image.value(), 0xffff000000000000ULL, 1U);
+    if (zero_budget.has_value() || oversized_budget.has_value() ||
+        wrong_address.has_value() ||
+        zero_budget.error() != astraea::research::SourceDecodeError::invalid_budget ||
+        oversized_budget.error() != astraea::research::SourceDecodeError::invalid_budget ||
+        wrong_address.error() !=
+            astraea::research::SourceDecodeError::target_not_executable)
+        return 31;
+
     // Adversarial decoder and memory negatives operate on owned copies of
     // the exact pinned image. They must refuse BEFORE any modeled state
     // commits; the baseline image and its source hash remain unchanged.
@@ -995,6 +1038,36 @@ prepare_temporary_breakout_guest_memory(
                   << '\n';
     } else {
         std::cout << "none\n";
+    }
+    std::cout
+              << "source_x86_decoder=zydis_4_1_1_pinned\n"
+              << "source_x86_decoder_dependency=zycore_1_5_2_pinned\n"
+              << "source_x86_entry_decode=AND_4_CALL_5_verified\n"
+              << "source_x86_callee_first_rip=0x" << std::hex
+              << interpreted->branch_target << std::dec << '\n'
+              << "source_x86_callee_decode_count="
+              << callee_decode->count << '\n'
+              << "source_x86_callee_decode_next_rip=0x" << std::hex
+              << callee_decode->next_rip << std::dec << '\n'
+              << "source_x86_decoder_invalid_requests=3_refused\n"
+              << "source_x86_callee_executed_instructions=0\n";
+    constexpr char hex_digits[] = "0123456789abcdef";
+    for (std::size_t i = 0U; i < callee_decode->count; ++i) {
+        const auto& insn = callee_decode->instructions[i];
+        std::cout << "source_x86_callee[" << i << "].rip=0x"
+                  << std::hex << insn.rip << std::dec << '\n'
+                  << "source_x86_callee[" << i << "].length="
+                  << static_cast<unsigned>(insn.length) << '\n'
+                  << "source_x86_callee[" << i << "].mnemonic="
+                  << astraea::research::source_mnemonic_name(
+                         insn.mnemonic) << '\n'
+                  << "source_x86_callee[" << i << "].bytes_hex=";
+        for (std::size_t j = 0U; j < insn.length; ++j) {
+            const auto byte = std::to_integer<unsigned>(insn.bytes[j]);
+            std::cout << hex_digits[byte >> 4U]
+                      << hex_digits[byte & 0xfU];
+        }
+        std::cout << '\n';
     }
     std::cout
               << "original_guest_permissions=unchanged\n"
