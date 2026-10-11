@@ -182,6 +182,18 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND
         "${CMAKE_SOURCE_DIR}/tools/reference/ps5_process_entry_observer/emit_observation.cpp"
         probe/ps5_process_entry_observer_harness.S
     )
+else()
+    # Keep the explicit source inventory complete on macOS/Windows without
+    # compiling Linux-only syscall/spawn implementations on those hosts.
+    target_sources(astraea_core_tests PRIVATE
+        execution/c1_isolated_leaf_probe_main.cpp
+        execution/c1_isolated_leaf_process_tests.cpp
+    )
+    set_source_files_properties(
+        execution/c1_isolated_leaf_probe_main.cpp
+        execution/c1_isolated_leaf_process_tests.cpp
+        PROPERTIES HEADER_FILE_ONLY TRUE
+    )
 endif()
 add_dependencies(
     astraea_core_tests
