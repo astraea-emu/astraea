@@ -1,6 +1,7 @@
 #include <astraea/execution/linux_execution.hpp>
 
 #include <array>
+#include <atomic>
 #include <cerrno>
 #include <cstddef>
 #include <cstdint>
@@ -709,23 +710,47 @@ TEST_CASE(
         // The child gets a private address space and no controller channel.
         auto image = make_guest_image(
             base, stack_base, page, std::move(code));
+        // A shared progress word is observation only. The child never gets
+        // a writable controller IPC descriptor, and the observation does not
+        // influence the seccomp filter or the guest execution outcome.
+        void* const shared_stage = ::mmap(
+            nullptr, static_cast<std::size_t>(page),
+            PROT_READ | PROT_WRITE, MAP_SHARED | MAP_ANONYMOUS, -1, 0);
+        REQUIRE(shared_stage != MAP_FAILED);
+        struct UnmapOnExit {
+            void* address;
+            std::size_t length;
+            ~UnmapOnExit() noexcept {
+                static_cast<void>(::munmap(address, length));
+            }
+        } unmap{shared_stage, static_cast<std::size_t>(page)};
+        static_assert(std::atomic_ref<std::uint32_t>::is_always_lock_free);
+        auto* const progress =
+            static_cast<std::uint32_t*>(shared_stage);
+        *progress = 0U;
+        std::atomic_ref<std::uint32_t> stage(*progress);
         const pid_t child = ::fork();
         REQUIRE(child >= 0);
         if (child == 0) {
+            stage.store(10U);
             static_cast<void>(::close(pipe_descriptors[0]));
             auto prepared =
                 astraea::execution::prepare_linux_guest_memory(image);
             if (!prepared.has_value()) ::_exit(11);
+            stage.store(20U);
             if (!install_test_leaf_allowlist()) ::_exit(12);
+            stage.store(30U);
 
             // Astraea's guest-IP filter is stacked beneath the leaf's
             // deny-by-default filter on a newly spawned execution thread.
+            stage.store(40U);
             auto result =
                 astraea::execution::
                     enter_linux_guest_with_seccomp_syscall_trap(
                         image, prepared.value(),
                         astraea::execution::
                             make_synthetic_initial_context(image));
+            stage.store(50U);
             if (!result.has_value()) ::_exit(13);
             if (escaped_host_write) {
                 const auto* stop =
@@ -755,6 +780,7 @@ TEST_CASE(
                     ::_exit(15);
                 }
             }
+            stage.store(60U);
             ::_exit(0);
         }
 
@@ -775,6 +801,8 @@ TEST_CASE(
             static_cast<void>(::waitpid(child, &status, 0));
             FAIL("research leaf failed to exit within the bounded window");
         }
+        INFO("leaf progress stage=" << stage.load()
+             << ", raw wait status=" << status);
         REQUIRE(WIFEXITED(status));
         REQUIRE(WEXITSTATUS(status) == 0);
         std::array<char, kMarker.size()> received{};
