@@ -25,7 +25,8 @@ Sony Interactive Entertainment.
 | Graphics V0-V3 | **Complete for bounded owned workloads** — AGC/RDNA2 input through typed guest GPU state to deterministic Vulkan execution/readback |
 | Retail C0 | **Complete on Linux x86-64** — supervised sealed-artifact diagnostic with typed first-boundary reporting |
 | Retail C1 | **Active, commercial entry blocked** — supervised generic two-ELF `JUMP_SLOT` execution and an exact source-built PS5-format `UD2` first-instruction fault after eight checked `RELATIVE` relocations; synthetic entry only |
-| Public homebrew static closure | **Read-only only** — PS5-marked raw ET_DYN analysis (#406) and bounded GNU-hash symbol counts (#408) are merged; independent Breakout corpus has 5 libraries, 20 dynamic symbols and 20 relocations |
+| Public homebrew Breakout | **Read-only ELF; CPU-only host reference** — 5 library names, 20 dynamic symbols, 1 RELATIVE + 19 GLOB_DAT; source NIDs verified 19/19; host-compiled CPU canvas reference #413 is **not** guest rendering |
+| Execution security gate | **Open (#410)** — bounded research-only worker, proven guest-to-host capability escape (#414); #415 forked-leaf test is a draft prototype, not production confinement |
 | Verification S0 | **Established** — multi-platform CI, ASan/UBSan, fuzz smoke, traces, probes, typed unsupported behavior, ADR/provenance discipline |
 | Commercial game boot/playability | **Not claimed** |
 
@@ -125,22 +126,24 @@ Astraea tracks three orthogonal axes:
 - **C — compatibility:** diagnostic -> first retail instruction -> first deterministic post-entry divergence -> runtime closure -> boot -> headless frame -> presentation -> in-game/playable -> reference-guarded support;
 - **S — scalability/readiness:** first-divergence coverage, cross-title regression guards, architecture ratchets, measured performance, and eventual release quality.
 
-The current critical path is **C1, software-first**. The larger pinned
-public native-title boilerplate stops at `unsupported_dynamic_dependencies`;
-its source-generated non-Sony PRX companion supplies structural research
-coverage but not working Sony runtime services. The smaller, independently
-source-built PS5-format diagnostic from [PR #400](https://github.com/astraea-emu/astraea/pull/400)
-has no runtime imports and eight standard `R_X86_64_RELATIVE` relocations;
-production `diagnose` stops at `unsupported_relocations` before entry.
-Separately, [PR #399](https://github.com/astraea-emu/astraea/pull/399)
-demonstrates actual supervised host-linked two-ELF `JUMP_SLOT` execution in a
-**generic, research-only** profile. An opt-in Linux-only, source-pinned research path now applies those eight
-real relocations and reproduces the authored PS5-format `UD2` fault in two
-sealed worker launches, with tampered-source refusal. This is **not** evidence
-of Sony startup ABI correctness or any commercial game instruction. The next integration work is one verified test-only external-service boundary
-for that pinned ELF, only after reviewing and strengthening the native worker's
-control-flow and syscall-containment guarantees. No full Sony process-entry
-contract or retail game execution has been established.
+The current critical path is **C1, software-first**: safely execute the
+**exact independently authored Breakout ELF** in a research-only confined
+worker until its **first observed, typed unsupported imported-service stop**.
+This is distinct from the completed, source-pinned, import-free PS5-format
+`UD2` first-instruction experiment ([#403](https://github.com/astraea-emu/astraea/pull/403))
+and from the CPU-only Breakout framebuffer reference ([#413](https://github.com/astraea-emu/astraea/pull/413)).
+Neither has established genuine runtime service binding or commercial-title
+execution.
+
+Security is a **measured prerequisite**: [#410](https://github.com/astraea-emu/astraea/issues/410)
+tracks the demonstrated host-capability escape; [draft #414](https://github.com/astraea-emu/astraea/pull/414)
+reproduces it, and [stacked draft #415](https://github.com/astraea-emu/astraea/pull/415)
+explores test-only process confinement. Neither proves a production sandbox.
+Concurrently, a legitimately held retail executable may undergo **read-only
+C0 preflight** without enabling native guest entry. The actual PS5 startup
+observation [#334](https://github.com/astraea-emu/astraea/issues/334)
+comes only when a normal-title launch/logging route and a selected-path ABI
+question justify reference hardware.
 
 For the exact PC-first gating sequence and the deliberately delayed firmware-13.00 hardware experiment, read the [C1 execution and hardware readiness plan](docs/research/c1_pc_first_execution_hardware_readiness_2026-10-09.md).
 
