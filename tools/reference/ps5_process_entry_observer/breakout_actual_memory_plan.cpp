@@ -13,7 +13,9 @@
 #include <iostream>
 #include <limits>
 #include <optional>
+#include <span>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 namespace {
@@ -88,6 +90,7 @@ constexpr std::uint64_t kPageSize = 4096U;
     std::size_t executable_count = 0U;
     std::size_t source_rwx_count = 0U;
     bool entry_in_source_rwx = false;
+    std::optional<std::uint64_t> source_rwx_first_page;
     const auto entry = m::GuestAddress{image->elf.header.entry};
     for (const auto& mapping : image->mappings) {
         const bool write = mapping.permissions.has(m::GuestPermission::write);
@@ -96,6 +99,9 @@ constexpr std::uint64_t kPageSize = 4096U;
         source_rwx_count += write && execute ? 1U : 0U;
         if (mapping.range.contains(entry) && write && execute)
             entry_in_source_rwx = true;
+        if (write && execute)
+            source_rwx_first_page =
+                mapping.range.base().value() & ~(kPageSize - 1U);
     }
     if (executable_count != 1U || source_rwx_count != 1U ||
         !entry_in_source_rwx) return 6;
@@ -106,15 +112,8 @@ constexpr std::uint64_t kPageSize = 4096U;
         !source.error().guest_address.has_value())
         return 7;
     const auto refused_address = source.error().guest_address.value();
-    const bool in_executable = std::any_of(
-        image->mappings.begin(), image->mappings.end(),
-        [&](const auto& mapping) {
-            return mapping.range.contains(refused_address) &&
-                mapping.permissions.has(m::GuestPermission::execute);
-        });
-    // If rounding points to a leading host-page boundary just before
-    // a nonaligned segment, this check is intentionally conservative.
-    if (!in_executable && refused_address.value() > image->elf.header.entry)
+    if (!source_rwx_first_page.has_value() ||
+        refused_address.value() != source_rwx_first_page.value())
         return 8;
 
     auto research_candidate = image->mappings;
@@ -153,8 +152,7 @@ constexpr std::uint64_t kPageSize = 4096U;
     }
     // The experiment is a copy of mapping descriptors, not a change to
     // ELF bytes, GuestImage permissions, or native backend policy.
-    if (!image->mappings[0].permissions.has(m::GuestPermission::write) &&
-        research_candidate == image->mappings) return 15;
+    if (research_candidate == image->mappings) return 15;
 
     std::cout << "PINNED BREAKOUT ACTUAL MEMORY PLAN PREFLIGHT PASS\n"
               << "source_sha256=" << kPinnedSha256 << '\n'
