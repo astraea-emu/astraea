@@ -92,6 +92,7 @@ constexpr std::uint64_t kArithmeticFlags = kCF | kPF | kAF | kZF | kSF | kOF;
     return OwnedCpuStepResult::failure(OwnedCpuStepStop{
         .code = code,
         .guest_rip = rip,
+        .memory_fault = std::nullopt,
     });
 }
 
