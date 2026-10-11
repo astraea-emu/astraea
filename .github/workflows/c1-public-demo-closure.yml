@@ -387,6 +387,16 @@ jobs:
             "$RUNNER_TEMP/actual-breakout-plan.txt"
           grep -Fx "scratch_unresolved_imports=19" \
             "$RUNNER_TEMP/actual-breakout-plan.txt"
+          grep -Fx "real_sce_planner_bare_nid_refusals=19" \
+            "$RUNNER_TEMP/actual-breakout-plan.txt"
+          grep -Fx "unverified_provider_binding_refusals=1" \
+            "$RUNNER_TEMP/actual-breakout-plan.txt"
+          grep -Fx "registered_sony_provider_bindings=0" \
+            "$RUNNER_TEMP/actual-breakout-plan.txt"
+          grep -Fx "synthetic_import_gate_patches=0" \
+            "$RUNNER_TEMP/actual-breakout-plan.txt"
+          grep -Fx "import_call_observed=0" \
+            "$RUNNER_TEMP/actual-breakout-plan.txt"
           grep -Fx "scratch_postfreeze_write=denied_by_kernel" \
             "$RUNNER_TEMP/actual-breakout-plan.txt"
           grep -Fx "guest_relocations_applied=0" \
