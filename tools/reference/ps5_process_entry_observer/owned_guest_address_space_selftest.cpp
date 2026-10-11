@@ -61,6 +61,26 @@ using Code = r::OwnedGuestMemoryError;
     if (!model.read(0x2010U, copied_stack).has_value() ||
         copied_stack != payload) return false;
 
+    // Overlapping virtual read/write transfers must use memmove semantics
+    // when their caller-owned spans refer to the same allocation.
+    for (std::size_t i = 0U; i < 8U; ++i)
+        stack[i] = static_cast<std::byte>(i + 1U);
+    if (!model.write(0x2004U,
+            std::span<const std::byte>{stack.data(), 8U}).has_value())
+        return false;
+    for (std::size_t i = 0U; i < 8U; ++i)
+        if (stack[i + 4U] != static_cast<std::byte>(i + 1U))
+            return false;
+    std::array<std::byte, 8U> snapshot{};
+    for (std::size_t i = 0U; i < 8U; ++i)
+        snapshot[i] = stack[i + 4U];
+    if (!model.read(0x2004U,
+            std::span<std::byte>{stack.data() + 6U, 8U}).has_value())
+        return false;
+    for (std::size_t i = 0U; i < 8U; ++i)
+        if (stack[i + 6U] != snapshot[i])
+            return false;
+
     // Rejecting a cross-boundary access must not write its valid prefix.
     const auto stack_before = stack;
     if (!is_error(model.write(0x201cU, payload), Code::unmapped) ||
@@ -126,6 +146,7 @@ int main() {
               << "execute_nonexec=refused\n"
               << "read_no_read_permission=refused\n"
               << "cross_region_write=refused_without_partial_mutation\n"
+              << "overlapping_caller_spans=memmove_safe\n"
               << "overflow_unmapped_empty=refused\n"
               << "overlap_host_alias=refused\n"
               << "guest_virtual_wx=represented_without_host_executable_mapping\n"
