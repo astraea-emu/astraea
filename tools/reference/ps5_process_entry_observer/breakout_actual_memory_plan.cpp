@@ -330,11 +330,14 @@ struct TemporaryGuestMemoryEvidence {
     std::size_t restricted_source_write_bytes = 0U;
     std::size_t mapped_shared_page_compared_bytes = 0U;
     std::size_t original_imports_unchanged = 0U;
+    std::size_t staged_unsupported_imports = 0U;
+    std::size_t synthetic_trap_page_compared_bytes = 0U;
     bool prepared_guest_page_write_denied = false;
 };
 
 [[nodiscard]] std::optional<TemporaryGuestMemoryEvidence>
-prepare_temporary_breakout_guest_memory(const l::GuestImage& original) {
+prepare_temporary_breakout_guest_memory(
+    const l::GuestImage& original, bool stage_unsupported_import_stops) {
     auto fail = [](std::string_view code)
         -> std::optional<TemporaryGuestMemoryEvidence> {
         std::cerr << "transient_guest_memory_refused=" << code << '\n';
@@ -350,6 +353,9 @@ prepare_temporary_breakout_guest_memory(const l::GuestImage& original) {
 
     constexpr std::uint64_t kReserveBytes = 32U * 1024U * 1024U;
     constexpr std::uint64_t kMaxGuestOffset = 16U * 1024U * 1024U;
+    constexpr std::uint64_t kStopPageOffset = 16U * 1024U * 1024U;
+    constexpr std::size_t kStopStride = 16U;
+    constexpr std::size_t kImportCount = 19U;
     for (const auto& mapping : original.mappings) {
         const auto first = mapping.range.base().value();
         if (first >= kMaxGuestOffset ||
@@ -484,6 +490,120 @@ prepare_temporary_breakout_guest_memory(const l::GuestImage& original) {
               transient.image_bytes.begin() +
                   static_cast<std::ptrdiff_t>(file_offset));
 
+    // Optional, entirely test-owned stop staging. These are NOT Sony HLE
+    // bindings, not provider identities, and not an execution admission.
+    // Each raw NID receives a distinct UD2 destination so a *future*
+    // authenticated runtime event can distinguish unsupported imports.
+    // Stop-page filler is INT3 rather than executable host helper code.
+    std::array<std::array<std::byte, 8U>, 20U> import_words{};
+    std::array<std::uint64_t, 20U> import_targets{};
+    std::array<bool, 20U> seen_imports{};
+    if (stage_unsupported_import_stops) {
+        if (!original.dynamic_strings.has_value() ||
+            !original.dynamic_strings->string_table.has_value() ||
+            transient.image_bytes.size() >
+                std::numeric_limits<std::size_t>::max() -
+                    static_cast<std::size_t>(kPageSize))
+            return fail("unsupported_stop_source_preflight");
+
+        const auto stop_file_offset = transient.image_bytes.size();
+        transient.image_bytes.insert(
+            transient.image_bytes.end(),
+            static_cast<std::size_t>(kPageSize), std::byte{0xcc});
+        std::size_t import_count = 0U;
+        for (std::uint64_t i = 0U; i < 20U; ++i) {
+            const auto relocation = l::parse_dynamic_relocation(
+                original.general_relocations.rela.value(), i,
+                original.dynamic_symbols.value(), view.value());
+            if (!relocation.has_value()) return fail("stop_relocation_parse");
+            if (relocation->relocation_type == 8U &&
+                relocation->symbol_index == 0U) continue;
+            const auto symbol_index = relocation->symbol_index;
+            if (relocation->relocation_type != 6U ||
+                symbol_index == 0U || symbol_index > kImportCount ||
+                seen_imports[symbol_index])
+                return fail("stop_import_identity_or_duplicate");
+            const auto symbol = l::materialize_sce_dynamic_symbol(
+                original.dynamic_symbols.value(),
+                original.dynamic_strings->string_table.value(),
+                symbol_index, view.value());
+            if (!symbol.has_value() || symbol->symbol.index != symbol_index ||
+                symbol->symbol.section_index_raw != 0U ||
+                symbol->symbol.type() != 2U ||
+                symbol->name.raw.size() != 11U ||
+                symbol->name.identity.has_value())
+                return fail("stop_missing_raw_nid_authority");
+
+            const auto target = relocation->target.value();
+            if (target < kScratchGuestPage ||
+                target > kScratchGuestLimit - 8U ||
+                (target <= 0x6907U && target + 7U >= 0x6900U))
+                return fail("stop_target_outside_writable_import_extent");
+            std::size_t owners = 0U;
+            std::size_t target_file_offset = 0U;
+            for (const auto& mapping : original.mappings) {
+                if (mapping.range.base().value() > target ||
+                    mapping.range.size().value() <
+                        target - mapping.range.base().value() + 8U ||
+                    !mapping.permissions.has(m::GuestPermission::write) ||
+                    mapping.permissions.has(m::GuestPermission::execute) ||
+                    mapping.backing.kind != m::MappingBackingKind::file)
+                    continue;
+                ++owners;
+                target_file_offset = static_cast<std::size_t>(
+                    mapping.backing.file_offset +
+                    target - mapping.range.base().value());
+            }
+            if (owners != 1U ||
+                target_file_offset > stop_file_offset ||
+                stop_file_offset - target_file_offset < 8U)
+                return fail("stop_target_file_backing_invalid");
+
+            const auto stop_va = base + kStopPageOffset +
+                static_cast<std::uint64_t>(symbol_index - 1U) * kStopStride;
+            for (std::size_t byte = 0U; byte < 8U; ++byte) {
+                import_words[symbol_index][byte] = static_cast<std::byte>(
+                    (stop_va >> (8U * byte)) & 0xffU);
+            }
+            std::copy(
+                import_words[symbol_index].begin(),
+                import_words[symbol_index].end(),
+                transient.image_bytes.begin() +
+                    static_cast<std::ptrdiff_t>(target_file_offset));
+            import_targets[symbol_index] = target;
+            seen_imports[symbol_index] = true;
+            ++import_count;
+
+            const auto slot_offset = static_cast<std::size_t>(
+                symbol_index - 1U) * kStopStride;
+            transient.image_bytes[stop_file_offset + slot_offset] =
+                std::byte{0x0f};
+            transient.image_bytes[stop_file_offset + slot_offset + 1U] =
+                std::byte{0x0b}; // UD2: unsupported, never a return stub
+        }
+        if (import_count != kImportCount ||
+            std::any_of(seen_imports.begin() + 1U, seen_imports.end(),
+                        [](bool present) { return !present; }))
+            return fail("stop_incomplete_nid_census");
+
+        const auto stop_range = m::GuestRange::create(
+            m::GuestAddress{base + kStopPageOffset},
+            m::GuestSize{kPageSize});
+        if (!stop_range.has_value()) return fail("stop_range_invalid");
+        transient.mappings.push_back(m::MappingIntent{
+            .range = stop_range.value(),
+            .permissions = page_rights.value(),
+            .backing = m::MappingBacking{
+                .kind = m::MappingBackingKind::file,
+                .file_offset = static_cast<std::uint64_t>(stop_file_offset),
+                .byte_count = m::GuestSize{kPageSize},
+            },
+            .source_index = original.elf.program_headers.size(),
+        });
+        std::sort(transient.mappings.begin(), transient.mappings.end(),
+                  m::mapping_intent_less);
+    }
+
     // This is never used to simulate the original PS5 process entry state.
     // Runtime-only VA rebasing preserves source bytes and file offsets.
     if (original.elf.header.entry >= kMaxGuestOffset)
@@ -528,6 +648,14 @@ prepare_temporary_breakout_guest_memory(const l::GuestImage& original) {
             original_address < target + relative->bytes.size())
             expected = relative->bytes[static_cast<std::size_t>(
                 original_address - target)];
+        if (stage_unsupported_import_stops) {
+            for (std::size_t index = 1U; index <= kImportCount; ++index) {
+                if (original_address >= import_targets[index] &&
+                    original_address < import_targets[index] + 8U)
+                    expected = import_words[index][static_cast<std::size_t>(
+                        original_address - import_targets[index])];
+            }
+        }
         if (guest_shared_page[offset] != expected)
             return fail("prepared_guest_page_readback_mismatch");
         ++result.mapped_shared_page_compared_bytes;
@@ -544,14 +672,41 @@ prepare_temporary_breakout_guest_memory(const l::GuestImage& original) {
             const auto address = relocation->target.value() + j;
             auto source = view->read_byte(m::GuestAddress{address});
             if (!source.has_value() ||
-                guest_shared_page[address - kScratchGuestPage] != source.value())
-                return fail("unresolved_got_modified");
+                relocation->symbol_index == 0U ||
+                relocation->symbol_index > kImportCount)
+                return fail("unsupported_stop_import_readback_source");
+            const auto expected = stage_unsupported_import_stops
+                ? import_words[relocation->symbol_index][j]
+                : source.value();
+            if (guest_shared_page[address - kScratchGuestPage] != expected)
+                return fail("unresolved_import_readback_mismatch");
         }
-        ++result.original_imports_unchanged;
+        if (stage_unsupported_import_stops)
+            ++result.staged_unsupported_imports;
+        else
+            ++result.original_imports_unchanged;
     }
     if (result.mapped_shared_page_compared_bytes != kPageSize ||
-        result.original_imports_unchanged != 19U)
+        (stage_unsupported_import_stops
+            ? result.staged_unsupported_imports != kImportCount
+            : result.original_imports_unchanged != kImportCount))
         return fail("incomplete_native_image_readback");
+
+    if (stage_unsupported_import_stops) {
+        const auto* trap = reinterpret_cast<const std::byte*>(
+            static_cast<std::uintptr_t>(base + kStopPageOffset));
+        for (std::size_t offset = 0U; offset < kPageSize; ++offset) {
+            std::byte expected{0xcc};
+            for (std::size_t index = 0U; index < kImportCount; ++index) {
+                const auto slot = index * kStopStride;
+                if (offset == slot) expected = std::byte{0x0f};
+                if (offset == slot + 1U) expected = std::byte{0x0b};
+            }
+            if (trap[offset] != expected)
+                return fail("unsupported_stop_executable_bytes_mismatch");
+            ++result.synthetic_trap_page_compared_bytes;
+        }
+    }
 
     // Unlike #424's unrelated scratch page, this negative attempts an
     // actual write through the real prepared guest VA. It must SIGSEGV or
@@ -725,9 +880,21 @@ prepare_temporary_breakout_guest_memory(const l::GuestImage& original) {
         !staged->post_freeze_write_refused)
         return 19;
 
-    auto prepared = prepare_temporary_breakout_guest_memory(image.value());
+    auto prepared = prepare_temporary_breakout_guest_memory(
+        image.value(), false);
     if (!prepared.has_value() || !prepared->prepared_guest_page_write_denied)
         return 20;
+
+    // Stage all exact bare NIDs as independent, test-owned *unsupported*
+    // stop destinations in an ephemeral copy. Never execute third-party
+    // instructions or claim a Sony service has been resolved.
+    auto unsupported = prepare_temporary_breakout_guest_memory(
+        image.value(), true);
+    if (!unsupported.has_value() ||
+        unsupported->staged_unsupported_imports != 19U ||
+        unsupported->synthetic_trap_page_compared_bytes != kPageSize ||
+        !unsupported->prepared_guest_page_write_denied)
+        return 21;
 
     std::cout << "PINNED BREAKOUT ACTUAL MEMORY PLAN PREFLIGHT PASS\n"
               << "source_sha256=" << kPinnedSha256 << '\n'
@@ -784,6 +951,12 @@ prepare_temporary_breakout_guest_memory(const l::GuestImage& original) {
               << staged->unverified_provider_refusals << '\n'
               << "registered_sony_provider_bindings=0\n"
               << "synthetic_import_gate_patches=0\n"
+              << "test_only_unsupported_nid_stops_staged="
+              << unsupported->staged_unsupported_imports << '\n'
+              << "test_only_stop_page_readback_bytes="
+              << unsupported->synthetic_trap_page_compared_bytes << '\n'
+              << "test_only_stop_guest_code_executed=0\n"
+              << "test_only_stop_provider_bindings=0\n"
               << "import_call_observed=0\n"
               << "scratch_postfreeze_write=denied_by_kernel\n"
               << "guest_relocations_applied=0\n"
