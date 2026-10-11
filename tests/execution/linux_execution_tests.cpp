@@ -18,6 +18,7 @@
 #include <linux/filter.h>
 #include <linux/seccomp.h>
 #include <fcntl.h>
+#include <signal.h>
 #include <sys/mman.h>
 #include <sys/prctl.h>
 #include <sys/syscall.h>
