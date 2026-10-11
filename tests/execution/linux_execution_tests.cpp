@@ -18,6 +18,7 @@
 #include <fcntl.h>
 #include <sys/mman.h>
 #include <sys/syscall.h>
+#include <sys/uio.h>
 #include <unistd.h>
 #endif
 
@@ -99,6 +100,27 @@ using astraea::memory::MappingIntent;
                  : "a"(kI386Getpid)
                  : "memory", "cc");
     return static_cast<std::int32_t>(result);
+}
+
+// A fixed source-owned guest call reaches the host libc syscall wrapper.
+// The output descriptor points only to a disposable anonymous test pipe.
+// Returning -errno distinguishes filter refusal from a short/successful write.
+[[gnu::noinline]] std::int64_t outside_guest_ip_write_probe(
+    int descriptor, const void* bytes, std::size_t count) noexcept {
+    errno = 0;
+    const long written = ::syscall(SYS_write, descriptor, bytes, count);
+    return written < 0 ? -static_cast<std::int64_t>(errno) : written;
+}
+
+[[gnu::noinline]] std::int64_t outside_guest_ip_writev_probe(
+    int descriptor, const void* bytes, std::size_t count) noexcept {
+    iovec fragment{
+        .iov_base = const_cast<void*>(bytes),
+        .iov_len = count,
+    };
+    errno = 0;
+    const long written = ::syscall(SYS_writev, descriptor, &fragment, 1);
+    return written < 0 ? -static_cast<std::int64_t>(errno) : written;
 }
 
 GuestRange range(std::uint64_t base, std::uint64_t size) {
@@ -453,6 +475,98 @@ TEST_CASE(
         prove_refusal(static_cast<std::uint64_t>(
             reinterpret_cast<std::uintptr_t>(
                 &outside_guest_ip_int80_probe)));
+    }
+}
+
+TEST_CASE(
+    "Linux native GuestImage rejects host-IP descriptor writes after guest escape",
+    "[execution][linux-transition][c1][seccomp][host-ip][security]") {
+    const auto prove_denied_output = [](std::uint64_t host_function_address) {
+        const auto page = page_size();
+        const auto base =
+            find_free_block(static_cast<std::size_t>(page * 3U));
+        const auto stack_base = base + page;
+
+        std::array<int, 2U> descriptors{-1, -1};
+        REQUIRE(::pipe2(
+            descriptors.data(), O_CLOEXEC | O_NONBLOCK) == 0);
+        struct CloseOnExit {
+            std::array<int, 2U>& fds;
+            ~CloseOnExit() noexcept {
+                for (const int fd : fds) {
+                    if (fd >= 0) static_cast<void>(::close(fd));
+                }
+            }
+        } cleanup{descriptors};
+
+        static constexpr std::array<char, 8U> kMarker{
+            'A', 'S', 'T', 'R', 'A', 'E', 'A', '1',
+        };
+        // Existing GuestImage / native transition, not the separate toy
+        // probe. An actual guest-controlled indirect call reaches a host
+        // function outside the guest RIP-scoped syscall trap.
+        std::vector<std::byte> code{
+            std::byte{0x48}, std::byte{0x83},
+            std::byte{0xec}, std::byte{0x08},
+        };
+        append_mov_imm64(
+            code, 7U, static_cast<std::uint64_t>(descriptors[1]));
+        append_mov_imm64(
+            code, 6U, static_cast<std::uint64_t>(
+                reinterpret_cast<std::uintptr_t>(kMarker.data())));
+        append_mov_imm64(
+            code, 2U, static_cast<std::uint64_t>(kMarker.size()));
+        append_mov_imm64(code, 0U, host_function_address);
+        code.push_back(std::byte{0xff});
+        code.push_back(std::byte{0xd0}); // indirect CALL RAX
+        code.push_back(std::byte{0x48});
+        code.push_back(std::byte{0x83});
+        code.push_back(std::byte{0xc4});
+        code.push_back(std::byte{0x08});
+        const auto fault_offset = code.size();
+        code.push_back(std::byte{0x0f});
+        code.push_back(std::byte{0x0b}); // controlled UD2 stop
+
+        auto image =
+            make_guest_image(base, stack_base, page, std::move(code));
+        auto prepared =
+            astraea::execution::prepare_linux_guest_memory(image);
+        REQUIRE(prepared.has_value());
+        const auto outcome =
+            astraea::execution::enter_linux_guest_with_seccomp_syscall_trap(
+                image, prepared.value(),
+                astraea::execution::make_synthetic_initial_context(image));
+        REQUIRE(outcome.has_value());
+        const auto* stop = std::get_if<astraea::execution::ExecutionStop>(
+            &outcome.value());
+        REQUIRE(stop != nullptr);
+        REQUIRE(stop->reason == ExecutionStopReason::guest_fault);
+        REQUIRE(stop->has_fault);
+        REQUIRE(stop->fault.kind == GuestFaultKind::illegal_instruction);
+        REQUIRE(stop->context.rip ==
+                base + static_cast<std::uint64_t>(fault_offset));
+        REQUIRE(stop->context.rax ==
+                static_cast<std::uint64_t>(
+                    -static_cast<std::int64_t>(EPERM)));
+
+        // Close the sole remaining writer. EOF, not only an EPERM return
+        // value, proves the escaped host call did not emit marker bytes.
+        REQUIRE(::close(descriptors[1]) == 0);
+        descriptors[1] = -1;
+        std::array<char, kMarker.size()> received{};
+        REQUIRE(::read(
+            descriptors[0], received.data(), received.size()) == 0);
+    };
+
+    SECTION("host write(2) remains denied") {
+        prove_denied_output(static_cast<std::uint64_t>(
+            reinterpret_cast<std::uintptr_t>(
+                &outside_guest_ip_write_probe)));
+    }
+    SECTION("host writev(2) remains denied") {
+        prove_denied_output(static_cast<std::uint64_t>(
+            reinterpret_cast<std::uintptr_t>(
+                &outside_guest_ip_writev_probe)));
     }
 }
 
