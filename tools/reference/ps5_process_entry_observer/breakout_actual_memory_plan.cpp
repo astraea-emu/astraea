@@ -5,6 +5,8 @@
 
 #include <astraea/execution/memory_plan.hpp>
 #include <astraea/execution/owned_relative_patch.hpp>
+#include <astraea/execution/sce_import_resolution.hpp>
+#include <astraea/loader/sce_dynamic_symbol.hpp>
 #include <astraea/loader/guest_image.hpp>
 #include <astraea/memory/mapping.hpp>
 
@@ -80,6 +82,8 @@ struct ScratchStagingResult {
     std::size_t initialized_fragments = 0U;
     std::size_t relative_patches = 0U;
     std::size_t unresolved_imports = 0U;
+    std::size_t actual_sce_identity_refusals = 0U;
+    std::size_t unverified_provider_refusals = 0U;
     bool post_freeze_write_refused = false;
 };
 
@@ -92,9 +96,24 @@ struct ScratchStagingResult {
     };
     const auto view = image.initialized_image_view();
     if (!view.has_value() || !image.dynamic_symbols.has_value() ||
+        !image.dynamic_strings.has_value() ||
+        !image.dynamic_strings->string_table.has_value() ||
         !image.general_relocations.rela.has_value() ||
-        image.general_relocations.rela->count != 20U)
+        image.general_relocations.rela->count != 20U ||
+        image.dynamic_symbols->symbol_count != 20U)
         return refuse("image_or_relocations_unavailable");
+
+    // Exercise the real production SCE import planner with ZERO registered
+    // services. Breakout's bare NIDs do not carry Sony module/library IDs.
+    // Do not manufacture a descriptor, provider, gate or return value.
+    const auto hle = e::HleRegistry::create({});
+    if (!hle.has_value()) return refuse("empty_hle_registry_failure");
+    const auto bindings = e::SceImportBindingRegistry::create(
+        hle.value(), std::span<const e::SceImportBinding>{});
+    if (!bindings.has_value() || !bindings->bindings().empty())
+        return refuse("empty_binding_registry_failure");
+    std::array<bool, 20U> seen_symbol_indices{};
+
 
     // This is deliberately NOT a fixed guest address or a second alias.
     // The only host mapping starts RW/NX and can become RX/NW later.
@@ -183,6 +202,51 @@ struct ScratchStagingResult {
             ++evidence.relative_patches;
         } else if (record->relocation_type == 6U &&
                    record->symbol_index != 0U) {
+            if (record->symbol_index >= seen_symbol_indices.size() ||
+                seen_symbol_indices[record->symbol_index])
+                return refuse("invalid_duplicate_import_symbol_index");
+            seen_symbol_indices[record->symbol_index] = true;
+
+            const auto symbol = l::materialize_sce_dynamic_symbol(
+                image.dynamic_symbols.value(),
+                image.dynamic_strings->string_table.value(),
+                record->symbol_index, view.value());
+            if (!symbol.has_value() || symbol->symbol.index !=
+                    record->symbol_index ||
+                symbol->symbol.section_index_raw != 0U ||
+                symbol->symbol.type() != 2U ||
+                symbol->name.raw.size() != 11U ||
+                symbol->name.identity.has_value())
+                return refuse("actual_bare_nid_identity_invalid");
+
+            const auto unresolved = e::plan_sce_import_resolution(
+                record.value(), symbol.value(), bindings.value());
+            if (unresolved.has_value() ||
+                unresolved.error().code !=
+                    e::SceImportResolutionPlanErrorCode::missing_sce_identity ||
+                unresolved.error().relocation_symbol_index !=
+                    record->symbol_index)
+                return refuse("bare_nid_accepted_as_sce_provider");
+            ++evidence.actual_sce_identity_refusals;
+
+            // A caller must not be able to invent a provider and gain a
+            // service simply by supplying a syntactically complete ID.
+            // This *local negative* is not a discovered Sony association.
+            if (evidence.unverified_provider_refusals == 0U) {
+                auto invented = symbol.value();
+                invented.name.identity = l::SceSymbolIdentity{
+                    .nid = invented.name.raw,
+                    .library_id = "unverified-library",
+                    .module_id = "unverified-module",
+                };
+                const auto absent_binding = e::plan_sce_import_resolution(
+                    record.value(), invented, bindings.value());
+                if (absent_binding.has_value() ||
+                    absent_binding.error().code !=
+                        e::SceImportResolutionPlanErrorCode::unresolved_import)
+                    return refuse("unverified_provider_binding_accepted");
+                ++evidence.unverified_provider_refusals;
+            }
             ++evidence.unresolved_imports;
             // No placeholder gate, guessed Sony export or host callback.
         } else {
@@ -191,6 +255,12 @@ struct ScratchStagingResult {
     }
     if (evidence.relative_patches != 1U ||
         evidence.unresolved_imports != 19U ||
+        evidence.actual_sce_identity_refusals != 19U ||
+        evidence.unverified_provider_refusals != 1U ||
+        std::any_of(seen_symbol_indices.begin() + 1U,
+                    seen_symbol_indices.end(),
+                    [](bool seen) { return !seen; }) ||
+        seen_symbol_indices[0] ||
         !relative_patch.has_value() ||
         relative_patch->target.value() != 0x6900U)
         return refuse("pinned_relocation_census_drift");
@@ -423,6 +493,13 @@ struct ScratchStagingResult {
               << "scratch_page_rw_to_rx=verified\n"
               << "scratch_relative_patches=" << staged->relative_patches << '\n'
               << "scratch_unresolved_imports=" << staged->unresolved_imports << '\n'
+              << "real_sce_planner_bare_nid_refusals="
+              << staged->actual_sce_identity_refusals << '\n'
+              << "unverified_provider_binding_refusals="
+              << staged->unverified_provider_refusals << '\n'
+              << "registered_sony_provider_bindings=0\n"
+              << "synthetic_import_gate_patches=0\n"
+              << "import_call_observed=0\n"
               << "scratch_postfreeze_write=denied_by_kernel\n"
               << "guest_relocations_applied=0\n"
               << "imports_resolved=0\n"
