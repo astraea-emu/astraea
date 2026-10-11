@@ -379,7 +379,21 @@ jobs:
           PY
           grep -Fx "original_guest_permissions=unchanged" \
             "$RUNNER_TEMP/actual-breakout-plan.txt"
-          grep -Fx "native_guest_memory_mapped=0" \
+          grep -Fx "temporary_guest_va_prepared_and_released=1" \
+            "$RUNNER_TEMP/actual-breakout-plan.txt"
+          grep -Fx "temporary_guest_source_fragments=4" \
+            "$RUNNER_TEMP/actual-breakout-plan.txt"
+          grep -Fx "temporary_guest_page_compared_bytes=4096" \
+            "$RUNNER_TEMP/actual-breakout-plan.txt"
+          grep -Fx "temporary_guest_unresolved_got_words_unchanged=19" \
+            "$RUNNER_TEMP/actual-breakout-plan.txt"
+          grep -Fx "temporary_guest_actual_native_relatives=1" \
+            "$RUNNER_TEMP/actual-breakout-plan.txt"
+          grep -Fx "temporary_guest_real_page_write=denied_by_kernel" \
+            "$RUNNER_TEMP/actual-breakout-plan.txt"
+          grep -Fx "temporary_guest_writable_code_semantics=unsupported" \
+            "$RUNNER_TEMP/actual-breakout-plan.txt"
+          grep -Fx "native_guest_memory_mapped_at_report=0" \
             "$RUNNER_TEMP/actual-breakout-plan.txt"
           grep -Fx "scratch_page_rw_to_rx=verified" \
             "$RUNNER_TEMP/actual-breakout-plan.txt"
@@ -405,6 +419,20 @@ jobs:
             "$RUNNER_TEMP/actual-breakout-plan.txt"
           grep -Fx "guest_instructions=0" \
             "$RUNNER_TEMP/actual-breakout-plan.txt"
+          # The transient map must have split real image fragments to assign
+          # RX on the shared page. Do not require one guessed exact count.
+          python3 - <<'PY'
+          import os
+          from pathlib import Path
+          lines = (Path(os.environ["RUNNER_TEMP"]) /
+                   "actual-breakout-plan.txt").read_text().splitlines()
+          fields = dict(line.split("=", 1) for line in lines if "=" in line)
+          mapped = int(fields["temporary_guest_mapped_fragments"])
+          frozen = int(fields["temporary_source_writable_bytes_frozen"])
+          if mapped <= 4 or frozen < 0x100:
+              raise SystemExit("actual Breakout page ownership not narrowed")
+          print("REAL BREAKOUT GUEST-VA PAGE OWNERSHIP PREFLIGHT PASS")
+          PY
           grep -Fx "guest_write_semantics_preserved=not_proven" \
             "$RUNNER_TEMP/actual-breakout-plan.txt"
           grep -Fx "security_admission=not_granted" \
