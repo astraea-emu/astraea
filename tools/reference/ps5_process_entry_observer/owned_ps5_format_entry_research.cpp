@@ -203,7 +203,7 @@ static_assert(kLeafStopBytes == 64U);
     // Common checks (6), 18 allowlisted syscalls (36), clone3 fallback (2),
     // clone/thread-only flag validation (9), mmap and mprotect (6 each),
     // final deny (1). Keep the BPF program bounded and exact.
-    std::array<sock_filter, 60U> rules{};
+    std::array<sock_filter, 66U> rules{};
     std::size_t i = 0U;
     const auto statement = [&](std::uint16_t code, std::uint32_t value) {
         rules[i++] = sock_filter{.code = code, .jt = 0U, .jf = 0U, .k = value};
