@@ -1,6 +1,6 @@
 # Project Status
 
-**Verified main: `e9b3201c` (2026-10-10).** C0 Linux read-only/pre-entry diagnostics and bounded V0–V3 graphics are merged. C1 remains active and **no commercial PS5 title has executed its first instruction, booted, produced a title-generated frame, reached a menu or become playable in Astraea**. This is an engineering-research emulator, not yet a playable PS5 emulator.
+**Merged evidence snapshot: through #413, verified at `e9b3201c` on 2026-10-10.** C0 Linux read-only/pre-entry diagnostics and bounded V0–V3 graphics are merged. C1 remains active and **no commercial PS5 title has executed its first instruction, booted, produced a title-generated frame, reached a menu or become playable in Astraea**. This is an engineering-research emulator, not yet a playable PS5 emulator.
 
 The [project plan](PROJECT_PLAN.md) defines durable C/V/S gates. This file is the **live merged frontier and next dependency**; open issues/PRs are proposals, not implemented functionality. [Research notes](research/README.md) and [ADRs](adr/README.md) preserve historical evidence.
 

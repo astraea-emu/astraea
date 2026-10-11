@@ -36,7 +36,7 @@ GitHub is authoritative.
 A merged implementation outranks a stale document. When a discrepancy is
 found, fix the document rather than preserving obsolete status language.
 
-## Active C1 execution priority (2026-10-10 strategic review)
+### Current C1 operating priority (2026-10-10 strategic review)
 
 **One active integration goal:** the unmodified, hash-pinned independently authored
 Breakout PS5-marked ELF reaches its **first *observed* imported-service call**,
