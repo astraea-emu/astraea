@@ -859,3 +859,45 @@ jobs:
             "$RUNNER_TEMP/astraea-c1-owned-first-instruction.txt"
           grep -Fx "commercial_title_execution=not_attempted" \
             "$RUNNER_TEMP/astraea-c1-owned-first-instruction.txt"
+
+      - name: Execute exact pinned GuestImage in exec-separated constrained leaf
+        run: |
+          set -euo pipefail
+          research="$RUNNER_TEMP/astraea-native-title-smoke/astraea_c1_owned_entry_research"
+          title="$RUNNER_TEMP/astraea-minimal-native-title/build/eboot.elf"
+          "$research" --isolated "$title" \
+            | tee "$RUNNER_TEMP/astraea-c1-isolated-real-image.txt"
+          grep -Fx "PINNED OWNED PS5-FORMAT ISOLATED LEAF PASS" \
+            "$RUNNER_TEMP/astraea-c1-isolated-real-image.txt"
+          grep -Fx "isolated_actual_guestimage_ud2_runs=2" \
+            "$RUNNER_TEMP/astraea-c1-isolated-real-image.txt"
+          grep -Fx "tampered_sealed_input=refused_by_leaf" \
+            "$RUNNER_TEMP/astraea-c1-isolated-real-image.txt"
+          grep -Fx "effectful_controller_ipc=not_inherited" \
+            "$RUNNER_TEMP/astraea-c1-isolated-real-image.txt"
+          grep -Fx "hostile_code_containment=not_established" \
+            "$RUNNER_TEMP/astraea-c1-isolated-real-image.txt"
+          python3 - <<'PY'
+          import os
+          from pathlib import Path
+          import subprocess
+          root = Path(os.environ["RUNNER_TEMP"])
+          exe = root / "astraea-native-title-smoke/astraea_c1_owned_entry_research"
+          title = root / "astraea-minimal-native-title/build/eboot.elf"
+          # A directly launched leaf lacks the required sealed fd and
+          # expected controller relationship; it must never admit entry.
+          direct = subprocess.run([str(exe), "--isolated-leaf"],
+                                  capture_output=True, timeout=5, check=False)
+          if direct.returncode == 0 or direct.stdout or direct.stderr:
+              raise SystemExit("unsupervised leaf command was accepted")
+          changed = bytearray(title.read_bytes())
+          changed[0] ^= 1
+          tampered = root / "astraea-c1-tampered-minimal.elf"
+          tampered.write_bytes(changed)
+          negative = subprocess.run([str(exe), "--isolated", str(tampered)],
+                                    capture_output=True, timeout=5, check=False)
+          if negative.returncode != 2 or negative.stdout:
+              raise SystemExit("controller admitted altered pinned input")
+          print("ISOLATED ACTUAL GUESTIMAGE ENTRY + NEGATIVE ADMISSION PASS")
+          print("NO ARBITRARY GUEST EXECUTION, SONY ABI, OR RETAIL CLAIM")
+          PY
