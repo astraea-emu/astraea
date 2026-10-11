@@ -292,6 +292,7 @@ if(ASTRAEA_BUILD_C1_RESEARCH)
         tools/reference/ps5_process_entry_observer/breakout_actual_memory_plan.cpp
         tools/reference/ps5_process_entry_observer/breakout_offline_entry_interpreter.cpp
         tools/reference/ps5_process_entry_observer/source_x86_64_decoder.cpp
+        tools/reference/ps5_process_entry_observer/breakout_owned_callee_execution.cpp
     )
     target_link_libraries(astraea_c1_breakout_memory_plan_research
         PRIVATE Astraea::core Zydis)

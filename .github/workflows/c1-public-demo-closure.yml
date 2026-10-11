@@ -458,7 +458,29 @@ jobs:
             "$RUNNER_TEMP/actual-breakout-plan.txt"
           grep -Fx "source_x86_decoder_invalid_requests=3_refused" \
             "$RUNNER_TEMP/actual-breakout-plan.txt"
-          grep -Fx "source_x86_callee_executed_instructions=0" \
+          grep -Fx "source_x86_callee_decoded_instructions=12" \
+            "$RUNNER_TEMP/actual-breakout-plan.txt"
+          grep -Fx "breakout_owned_callee_retired_instructions=11" \
+            "$RUNNER_TEMP/actual-breakout-plan.txt"
+          grep -Fx "breakout_owned_callee_guest_stack_writes=9" \
+            "$RUNNER_TEMP/actual-breakout-plan.txt"
+          grep -Fx "breakout_owned_callee_stop=unresolved_bare_nid_before_call" \
+            "$RUNNER_TEMP/actual-breakout-plan.txt"
+          grep -Fx "breakout_owned_callee_stop_rip=0x23c" \
+            "$RUNNER_TEMP/actual-breakout-plan.txt"
+          grep -Fx "breakout_owned_callee_got_slot=0x68c8" \
+            "$RUNNER_TEMP/actual-breakout-plan.txt"
+          grep -Fx "breakout_owned_callee_symbol_index=13" \
+            "$RUNNER_TEMP/actual-breakout-plan.txt"
+          grep -Fx "breakout_owned_callee_bare_nid=Vo5V8KAwCmk" \
+            "$RUNNER_TEMP/actual-breakout-plan.txt"
+          grep -Fx "breakout_owned_callee_stack_retaddr=preserved" \
+            "$RUNNER_TEMP/actual-breakout-plan.txt"
+          grep -Fx "breakout_owned_callee_negative_cases=3_refused" \
+            "$RUNNER_TEMP/actual-breakout-plan.txt"
+          grep -Fx "breakout_owned_callee_native_guest_execution=0" \
+            "$RUNNER_TEMP/actual-breakout-plan.txt"
+          grep -Fx "breakout_owned_callee_sony_provider_calls=0" \
             "$RUNNER_TEMP/actual-breakout-plan.txt"
           python3 - <<'PY'
           import hashlib
