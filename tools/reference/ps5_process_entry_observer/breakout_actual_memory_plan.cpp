@@ -3,6 +3,7 @@
 // with one pre-staged RELATIVE. No guest entry, GLOB_DAT binding, or HLE.
 // Deliberate page permission narrowing is NOT faithful writable-code support.
 #include "owned_pair_sha256.hpp"
+#include "breakout_offline_entry_interpreter.hpp"
 
 #include <astraea/execution/memory_plan.hpp>
 #include <astraea/execution/linux_memory.hpp>
@@ -799,6 +800,77 @@ prepare_temporary_breakout_guest_memory(
     if (source_rwx_count == 0U || executable_count != source_rwx_count ||
         !entry_in_source_rwx) return 6;
 
+    // The first actual independent Breakout instructions are evaluated
+    // non-natively from the immutable, source-backed GuestImage view.
+    // An owned simulated stack receives exactly one 8-byte return word.
+    // Native guest control is NEVER transferred, and no Sony ABI is assumed.
+    const auto interpreted =
+        astraea::research::interpret_pinned_breakout_entry(image.value());
+    if (!interpreted.has_value()) {
+        std::cerr << "breakout_interpreter_refused="
+                  << static_cast<unsigned>(interpreted.error()) << '\n';
+        return 22;
+    }
+    if (interpreted->interpreted_instructions != 2U ||
+        interpreted->context.rip != interpreted->branch_target ||
+        interpreted->context.rsp != interpreted->guest_stack_write_address ||
+        interpreted->context.rsp % 16U != 8U ||
+        interpreted->return_rip != interpreted->entry_rip + 9U)
+        return 23;
+
+    // Adversarial decoder and memory negatives operate on owned copies of
+    // the exact pinned image. They must refuse BEFORE any modeled state
+    // commits; the baseline image and its source hash remain unchanged.
+    const auto source_map = std::find_if(
+        image->mappings.begin(), image->mappings.end(),
+        [&](const m::MappingIntent& mapping) {
+            return mapping.range.contains(entry) &&
+                mapping.backing.kind == m::MappingBackingKind::file &&
+                mapping.backing.byte_count.value() >=
+                    entry.value() - mapping.range.base().value() + 9U;
+        });
+    if (source_map == image->mappings.end()) return 24;
+    const auto entry_file_offset = source_map->backing.file_offset +
+        entry.value() - source_map->range.base().value();
+    if (entry_file_offset > image->image_bytes.size() ||
+        image->image_bytes.size() - entry_file_offset < 9U)
+        return 25;
+    const auto byte_offset = static_cast<std::size_t>(entry_file_offset);
+    {
+        auto altered = image.value();
+        altered.image_bytes[byte_offset] ^= std::byte{1U};
+        const auto rejected =
+            astraea::research::interpret_pinned_breakout_entry(altered);
+        if (rejected.has_value() ||
+            rejected.error() != astraea::research::
+                BreakoutEntryStopError::unexpected_entry_encoding)
+            return 26;
+    }
+    {
+        auto altered = image.value();
+        altered.image_bytes[byte_offset + 5U] = std::byte{0xff};
+        altered.image_bytes[byte_offset + 6U] = std::byte{0xff};
+        altered.image_bytes[byte_offset + 7U] = std::byte{0xff};
+        altered.image_bytes[byte_offset + 8U] = std::byte{0x7f};
+        const auto rejected =
+            astraea::research::interpret_pinned_breakout_entry(altered);
+        if (rejected.has_value() ||
+            rejected.error() != astraea::research::
+                BreakoutEntryStopError::target_not_executable)
+            return 27;
+    }
+    {
+        auto altered = image.value();
+        altered.initial_stack.rsp = m::GuestAddress{
+            altered.initial_stack.storage.base().value() + 4U};
+        const auto rejected =
+            astraea::research::interpret_pinned_breakout_entry(altered);
+        if (rejected.has_value() ||
+            rejected.error() != astraea::research::
+                BreakoutEntryStopError::invalid_guest_stack)
+            return 28;
+    }
+
     const auto source = plan(image.value(), image->mappings);
     if (source.has_value() ||
         source.error().code != e::ExecutionPlanErrorCode::mixed_write_execute_page ||
@@ -958,10 +1030,22 @@ prepare_temporary_breakout_guest_memory(
               << "test_only_stop_guest_code_executed=0\n"
               << "test_only_stop_provider_bindings=0\n"
               << "import_call_observed=0\n"
+              << "breakout_entry_interpreter=source_backed_two_instruction_bound\n"
+              << "breakout_entry_and_rsp64=interpreted\n"
+              << "breakout_entry_call_rel32=interpreted\n"
+              << "breakout_entry_call_target=0x" << std::hex
+              << interpreted->branch_target << std::dec << '\n'
+              << "breakout_guest_stack_return_word=owned_eight_bytes\n"
+              << "breakout_call_target_source=executable_guest_mapping\n"
+              << "breakout_next_instruction=not_interpreted\n"
+              << "breakout_undefined_AF=unclaimed\n"
+              << "breakout_interpreter_negative_cases=3_refused\n"
+              << "breakout_interpreter_native_guest_entry=none\n"
               << "scratch_postfreeze_write=denied_by_kernel\n"
               << "guest_relocations_applied=0\n"
               << "imports_resolved=0\n"
-              << "guest_instructions=0\n"
+              << "guest_instructions=2_interpreted_only\n"
+              << "native_guest_instructions=0\n"
               << "guest_write_semantics_preserved=not_proven\n"
               << "security_admission=not_granted\n";
     return 0;
