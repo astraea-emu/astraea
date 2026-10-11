@@ -1,0 +1,387 @@
+// C1 Linux x86-64 security research: independent tracer-owned instruction
+// observations. Executes ONLY the three fixed Astraea-authored instruction
+// sequences below, never an external ELF or an arbitrary guest instruction.
+// This is not a hostile-code sandbox or a PS5 ABI implementation.
+#include <array>
+#include <cerrno>
+#include <csignal>
+#include <cstdint>
+#include <cstdio>
+#include <cstdlib>
+#include <cstring>
+#include <fcntl.h>
+#include <limits>
+#include <optional>
+#include <string_view>
+#include <sys/mman.h>
+#include <sys/ptrace.h>
+#include <sys/resource.h>
+#include <sys/syscall.h>
+#include <sys/types.h>
+#include <sys/user.h>
+#include <sys/wait.h>
+#include <unistd.h>
+#include <sys/prctl.h>
+
+namespace {
+constexpr std::uint64_t kGuestBase = 0x0000000100000000ULL;
+constexpr std::uint64_t kHostSentinelBase = 0x0000000100010000ULL;
+constexpr std::uint64_t kCanaryBase = 0x0000000100020000ULL;
+constexpr std::size_t kPage = 4096U;
+constexpr std::size_t kMaxSteps = 8U;
+
+enum class Mode { fault, syscall, escape };
+
+[[nodiscard]] std::optional<Mode> parse_mode(std::string_view name) {
+    if (name == "fault") return Mode::fault;
+    if (name == "syscall") return Mode::syscall;
+    if (name == "escape") return Mode::escape;
+    return std::nullopt;
+}
+[[nodiscard]] const char* mode_name(Mode mode) {
+    switch (mode) {
+    case Mode::fault: return "fault";
+    case Mode::syscall: return "syscall";
+    case Mode::escape: return "escape";
+    }
+    return "invalid";
+}
+
+// Complete instruction bytes are Astraea-owned, fixed at compile time.
+// fault: mov eax,42; ud2
+// syscall: mov eax,60; xor edi,edi; syscall; ud2
+// escape: movabs rax,kHostSentinelBase; jmp rax; ud2
+struct Probe {
+    std::array<unsigned char, 16U> bytes{};
+    std::size_t length = 0U;
+    std::uint64_t terminal_rip = 0U;
+};
+[[nodiscard]] Probe probe_for(Mode mode) {
+    Probe p{};
+    if (mode == Mode::fault) {
+        p.bytes = {0xb8, 0x2a, 0, 0, 0, 0x0f, 0x0b};
+        p.length = 7U;
+        p.terminal_rip = kGuestBase + 5U;
+    } else if (mode == Mode::syscall) {
+        p.bytes = {0xb8, 0x3c, 0, 0, 0, 0x31, 0xff, 0x0f, 0x05, 0x0f, 0x0b};
+        p.length = 11U;
+        p.terminal_rip = kGuestBase + 7U;
+    } else {
+        p.bytes = {0x48, 0xb8, 0, 0, 0, 0, 1, 0, 0, 0, 0xff, 0xe0, 0x0f, 0x0b};
+        p.length = 14U;
+        p.terminal_rip = kHostSentinelBase;
+    }
+    return p;
+}
+
+// If the escaped-to host page were ever executed, this code would write
+// 0x7f to the child-owned canary. The tracer must refuse *before* its first
+// instruction; neither the sentinel nor the canary belongs to the guest.
+constexpr std::array<unsigned char, 15U> kHostSentinel{
+    0x48, 0xb8, 0, 0, 2, 0, 1, 0, 0, 0, // movabs rax,kCanaryBase
+    0xc6, 0x00, 0x7f,                 // mov byte ptr [rax],0x7f
+    0x0f, 0x0b                        // ud2
+};
+
+[[nodiscard]] bool map_exact(std::uint64_t address, int protection,
+                             std::span<const unsigned char> bytes) {
+    void* const requested = reinterpret_cast<void*>(
+        static_cast<std::uintptr_t>(address));
+    void* const mapped = ::mmap(requested, kPage, PROT_READ | PROT_WRITE,
+        MAP_PRIVATE | MAP_ANONYMOUS | MAP_FIXED_NOREPLACE, -1, 0);
+    if (mapped == MAP_FAILED) return false;
+    if (mapped != requested) {
+        (void)::munmap(mapped, kPage);
+        return false;
+    }
+    if (!bytes.empty()) std::memcpy(mapped, bytes.data(), bytes.size());
+    return ::mprotect(mapped, kPage, protection) == 0;
+}
+
+[[nodiscard]] bool controller_identity() {
+    const char* const value = ::getenv("ASTRAEA_PTRACE_PARENT");
+    if (value == nullptr || *value == '\0') return false;
+    char* end = nullptr;
+    errno = 0;
+    const unsigned long parsed = std::strtoul(value, &end, 10);
+    return errno == 0 && end != value && *end == '\0' &&
+        parsed > 1UL && parsed <= static_cast<unsigned long>(
+            std::numeric_limits<pid_t>::max()) &&
+        ::getppid() == static_cast<pid_t>(parsed);
+}
+
+[[nodiscard]] int leaf(Mode mode) {
+    // Trusted bootstrap finishes before PTRACE_TRACEME and SIGSTOP.
+    // Controller sets RIP directly to the inspected guest page on that stop.
+    // The bootstrap's host continuation is never intentionally resumed.
+    if (!controller_identity() ||
+        ::prctl(PR_SET_PDEATHSIG, SIGKILL) != 0 ||
+        !controller_identity()) return 91;
+
+    const rlimit no_core{0, 0};
+    if (::setrlimit(RLIMIT_CORE, &no_core) != 0) return 92;
+    const int nullfd = ::open("/dev/null", O_RDWR | O_CLOEXEC);
+    if (nullfd < 0) return 93;
+    if (::dup2(nullfd, STDIN_FILENO) < 0 ||
+        ::dup2(nullfd, STDOUT_FILENO) < 0 ||
+        ::dup2(nullfd, STDERR_FILENO) < 0)
+        return 94;
+    // Linux-only fail-closed descriptor cleanup; no effectful controller
+    // pipe/file/socket is intentionally inherited into the tracee.
+    if (::syscall(SYS_close_range, 3U, ~0U, 0U) != 0) return 95;
+
+    const Probe probe = probe_for(mode);
+    if (!map_exact(kGuestBase, PROT_READ | PROT_EXEC,
+                   {probe.bytes.data(), probe.length}) ||
+        !map_exact(kHostSentinelBase, PROT_READ | PROT_EXEC,
+                   kHostSentinel) ||
+        !map_exact(kCanaryBase, PROT_READ | PROT_WRITE, {}))
+        return 96;
+    if (::ptrace(PTRACE_TRACEME, 0, nullptr, nullptr) != 0) return 97;
+    if (::raise(SIGSTOP) != 0) return 98;
+    // If this host instruction runs, the tracer mistakenly resumed the
+    // bootstrap instead of applying the guest RIP boundary.
+    return 99;
+}
+
+struct ChildGuard {
+    pid_t pid = -1;
+    ~ChildGuard() {
+        if (pid <= 0) return;
+        (void)::kill(pid, SIGKILL);
+        int status = 0;
+        while (::waitpid(pid, &status, 0) < 0 && errno == EINTR) {}
+    }
+};
+
+[[nodiscard]] bool wait_stop(pid_t child, int& signal) {
+    int status = 0;
+    pid_t got = -1;
+    do {
+        got = ::waitpid(child, &status, 0);
+    } while (got < 0 && errno == EINTR);
+    if (got != child || !WIFSTOPPED(status)) return false;
+    signal = WSTOPSIG(status);
+    return true;
+}
+
+[[nodiscard]] std::optional<user_regs_struct> registers(pid_t child) {
+    user_regs_struct r{};
+    if (::ptrace(PTRACE_GETREGS, child, nullptr, &r) != 0)
+        return std::nullopt;
+    return r;
+}
+
+[[nodiscard]] bool inspect_bytes(pid_t child, std::uint64_t address,
+                                 std::span<const unsigned char> expected) {
+    std::size_t index = 0U;
+    while (index < expected.size()) {
+        errno = 0;
+        const long word = ::ptrace(
+            PTRACE_PEEKDATA, child,
+            reinterpret_cast<void*>(static_cast<std::uintptr_t>(
+                address + index)), nullptr);
+        if (word == -1L && errno != 0) return false;
+        const auto chunk = std::min(expected.size() - index, sizeof(word));
+        if (std::memcmp(&word, expected.data() + index, chunk) != 0)
+            return false;
+        index += chunk;
+    }
+    return true;
+}
+
+[[nodiscard]] bool canary_untouched(pid_t child) {
+    constexpr std::array<unsigned char, sizeof(long)> zeros{};
+    return inspect_bytes(child, kCanaryBase, zeros);
+}
+
+struct Evidence {
+    Mode mode;
+    std::size_t executed = 0U;
+    std::uint64_t terminal_rip = 0U;
+    bool stopped = false;
+    bool syscall_prevented = false;
+    bool host_escape_denied = false;
+    bool host_canary_unchanged = false;
+    bool only_tracer_observations = false;
+};
+
+[[nodiscard]] std::optional<Evidence> run_once(Mode mode) {
+    // SIGALRM terminates a stuck tracer; PTRACE_O_EXITKILL and
+    // PR_SET_PDEATHSIG terminate the tracee if this controller dies.
+    ::alarm(10U);
+    const pid_t child = ::fork();
+    if (child < 0) return std::nullopt;
+    if (child == 0) {
+        char pid_text[32]{};
+        if (std::snprintf(pid_text, sizeof(pid_text), "%ld",
+                          static_cast<long>(::getppid())) <= 0 ||
+            ::setenv("ASTRAEA_PTRACE_PARENT", pid_text, 1) != 0)
+            ::_exit(120);
+        ::execl("/proc/self/exe", "astraea_c1_ptrace_step_research",
+                "--leaf", mode_name(mode), static_cast<char*>(nullptr));
+        ::_exit(121);
+    }
+    ChildGuard guard{child};
+    int signal = 0;
+    if (!wait_stop(child, signal) || signal != SIGSTOP ||
+        ::ptrace(PTRACE_SETOPTIONS, child, nullptr,
+                 PTRACE_O_TRACESYSGOOD | PTRACE_O_EXITKILL |
+                 PTRACE_O_TRACEFORK | PTRACE_O_TRACEVFORK |
+                 PTRACE_O_TRACECLONE | PTRACE_O_TRACEEXEC) != 0)
+        return std::nullopt;
+
+    const Probe probe = probe_for(mode);
+    if (!inspect_bytes(child, kGuestBase,
+                       {probe.bytes.data(), probe.length}) ||
+        !inspect_bytes(child, kHostSentinelBase, kHostSentinel) ||
+        !canary_untouched(child))
+        return std::nullopt;
+
+    auto regs = registers(child);
+    if (!regs.has_value()) return std::nullopt;
+    regs->rip = kGuestBase;
+    regs->rax = 0U;
+    if (::ptrace(PTRACE_SETREGS, child, nullptr, &regs.value()) != 0)
+        return std::nullopt;
+
+    Evidence evidence{.mode = mode};
+    for (std::size_t steps = 0; steps < kMaxSteps; ++steps) {
+        const auto before = registers(child);
+        if (!before.has_value()) return std::nullopt;
+        // Never resume even a single host instruction once guest RIP
+        // escapes the *exact* reviewed code-byte range.
+        if (before->rip < kGuestBase ||
+            before->rip >= kGuestBase + probe.length) {
+            if (mode != Mode::escape ||
+                before->rip != kHostSentinelBase ||
+                evidence.executed != 2U)
+                return std::nullopt;
+            evidence.terminal_rip = before->rip;
+            evidence.host_escape_denied = true;
+            evidence.host_canary_unchanged = canary_untouched(child);
+            evidence.stopped = evidence.host_canary_unchanged;
+            evidence.only_tracer_observations = true;
+            ::alarm(0U);
+            return evidence.stopped ? std::optional{evidence} : std::nullopt;
+        }
+
+        if (::ptrace(PTRACE_SYSEMU_SINGLESTEP, child, nullptr, nullptr) != 0 ||
+            !wait_stop(child, signal))
+            return std::nullopt;
+        const auto after = registers(child);
+        if (!after.has_value()) return std::nullopt;
+
+        // A syscall-stop occurs *before* host-kernel side effects. Never
+        // issue a second resume at this syscall entry. Checking orig_rax
+        // makes a fake ordinary SIGTRAP insufficient for this proof.
+        if (mode == Mode::syscall &&
+            before->rip == probe.terminal_rip &&
+            signal == (SIGTRAP | 0x80) &&
+            after->orig_rax == static_cast<std::uint64_t>(SYS_exit) &&
+            (after->rip == before->rip ||
+             after->rip == before->rip + 2U)) {
+            evidence.terminal_rip = before->rip;
+            evidence.syscall_prevented = true;
+            evidence.host_canary_unchanged = canary_untouched(child);
+            evidence.stopped = evidence.host_canary_unchanged;
+            evidence.only_tracer_observations = true;
+            ::alarm(0U);
+            return evidence.stopped ? std::optional{evidence} : std::nullopt;
+        }
+
+        if (mode == Mode::fault &&
+            before->rip == probe.terminal_rip &&
+            signal == SIGILL && after->rip == before->rip &&
+            after->rax == 42U && evidence.executed == 1U) {
+            evidence.terminal_rip = after->rip;
+            evidence.stopped = true;
+            evidence.host_canary_unchanged = canary_untouched(child);
+            evidence.only_tracer_observations = true;
+            ::alarm(0U);
+            return evidence.host_canary_unchanged
+                ? std::optional{evidence} : std::nullopt;
+        }
+
+        // All other steps must be ordinary instruction single-step traps
+        // with an expected next RIP; no signal handler or worker message
+        // is trusted to describe the transition.
+        if (signal != SIGTRAP) return std::nullopt;
+        ++evidence.executed;
+        if (mode == Mode::fault) {
+            if (evidence.executed != 1U ||
+                after->rip != kGuestBase + 5U || after->rax != 42U)
+                return std::nullopt;
+        } else if (mode == Mode::syscall) {
+            if (evidence.executed == 1U &&
+                after->rip != kGuestBase + 5U)
+                return std::nullopt;
+            if (evidence.executed == 2U &&
+                after->rip != kGuestBase + 7U)
+                return std::nullopt;
+            if (evidence.executed > 2U) return std::nullopt;
+        } else {
+            if (evidence.executed == 1U &&
+                after->rip != kGuestBase + 10U)
+                return std::nullopt;
+            if (evidence.executed == 2U &&
+                after->rip != kHostSentinelBase)
+                return std::nullopt;
+            if (evidence.executed > 2U) return std::nullopt;
+        }
+    }
+    return std::nullopt;
+}
+
+[[nodiscard]] bool equal_evidence(const Evidence& a, const Evidence& b) {
+    return a.mode == b.mode && a.executed == b.executed &&
+        a.terminal_rip == b.terminal_rip && a.stopped == b.stopped &&
+        a.syscall_prevented == b.syscall_prevented &&
+        a.host_escape_denied == b.host_escape_denied &&
+        a.host_canary_unchanged == b.host_canary_unchanged &&
+        a.only_tracer_observations == b.only_tracer_observations;
+}
+} // namespace
+
+int main(int argc, char** argv) {
+    if (argc == 3 && std::string_view(argv[1]) == "--leaf") {
+        const auto mode = parse_mode(argv[2]);
+        return mode.has_value() ? leaf(mode.value()) : 100;
+    }
+    if (argc != 1) return 2;
+
+    constexpr std::array<Mode, 3U> cases{
+        Mode::fault, Mode::syscall, Mode::escape,
+    };
+    for (const Mode mode : cases) {
+        const auto first = run_once(mode);
+        const auto second = run_once(mode);
+        if (!first.has_value() || !second.has_value() ||
+            !equal_evidence(first.value(), second.value()) ||
+            !first->stopped || !first->only_tracer_observations ||
+            !first->host_canary_unchanged) {
+            std::fprintf(stderr, "ptrace_step_refused=%s\n", mode_name(mode));
+            return 3;
+        }
+        if ((mode == Mode::fault &&
+             (first->executed != 1U ||
+              first->terminal_rip != kGuestBase + 5U)) ||
+            (mode == Mode::syscall &&
+             (first->executed != 2U || !first->syscall_prevented)) ||
+            (mode == Mode::escape &&
+             (first->executed != 2U || !first->host_escape_denied))) {
+            std::fprintf(stderr, "ptrace_evidence_mismatch=%s\n", mode_name(mode));
+            return 4;
+        }
+    }
+    std::puts("C1 OWNED PTRACE SYSEMU STEP BOUNDARY PASS");
+    std::puts("owned_fault_repeated=2");
+    std::puts("owned_syscall_exit_prevented_repeated=2");
+    std::puts("owned_host_ip_escape_denied_repeated=2");
+    std::puts("host_sentinel_canary=unchanged");
+    std::puts("observations=tracer_ptrace_registers_only");
+    std::puts("tracee_external_files_and_controller_ipc=none");
+    std::puts("external_elf_guest_instructions=0");
+    std::puts("hostile_guest_sandbox=not_established");
+    return 0;
+}
