@@ -24,9 +24,9 @@ Sony Interactive Entertainment.
 | --- | --- |
 | Graphics V0-V3 | **Complete for bounded owned workloads** — AGC/RDNA2 input through typed guest GPU state to deterministic Vulkan execution/readback |
 | Retail C0 | **Complete on Linux x86-64** — supervised sealed-artifact diagnostic with typed first-boundary reporting |
-| Retail C1 | **Active, commercial entry blocked** — supervised generic two-ELF `JUMP_SLOT` execution and an exact source-built PS5-format `UD2` first-instruction fault after eight checked `RELATIVE` relocations; synthetic entry only |
-| Public homebrew Breakout | **Read-only ELF; CPU-only host reference** — 5 library names, 20 dynamic symbols, 1 RELATIVE + 19 GLOB_DAT; source NIDs verified 19/19; host-compiled CPU canvas reference #413 is **not** guest rendering |
-| Execution security gate | **Open (#410)** — bounded research-only worker, proven guest-to-host capability escape (#414); #415 forked-leaf test is a draft prototype, not production confinement |
+| Retail C1 | **Active, commercial entry blocked** — controlled linked-ELF execution, and source-owned PS5-format `GuestImage` native research through one retired `mov eax,42` followed by real `UD2` fault (#447–#448); synthetic entry only |
+| Public homebrew Breakout | **Static profile + bounded non-native CPU interpretation** — 5 needed names, 20 dynamic symbols, 1 RELATIVE + 19 GLOB_DAT, 19/19 source NIDs; 13 source-backed instructions interpreted through first unresolved CALL without retiring it (#440); the host-compiled #413 canvas is **not** guest rendering |
+| Execution security gate | **Open (#410)** — bounded source-owned exec-separated research and Linux tracer tests (#419–#448), including syscall and page-permission controls; general hostile native guest memory/control-flow containment is **not established** |
 | Verification S0 | **Established** — multi-platform CI, ASan/UBSan, fuzz smoke, traces, probes, typed unsupported behavior, ADR/provenance discipline |
 | Commercial game boot/playability | **Not claimed** |
 
@@ -63,7 +63,7 @@ records). These are intentional **production** pre-entry boundaries. An
 **opt-in Linux-only research runner** separately maps the exact source-built
 minimal image, applies all eight relocations and twice reaches its authored
 `UD2` fault under a synthetic entry profile ([PR #403](https://github.com/astraea-emu/astraea/pull/403)).
-That does not admit any commercial PS5 title.
+Separately, [#447](https://github.com/astraea-emu/astraea/pull/447) built a second exact source-owned PS5-format ELF and [#448](https://github.com/astraea-emu/astraea/pull/448) independently traced its `mov eax,42` retirement (`RAX=42`, `RIP=entry+5`), followed by real `SIGILL` at its authored `UD2`, twice with negative controls. Neither research path admits independent Breakout native execution or any commercial PS5 title.
 
 ### Independent game-like corpus
 
@@ -79,9 +79,7 @@ validates bounded GNU-hash symbol counts and a frozen external report
 of five needed libraries, 20 dynamic symbols and 20 relocations
 (1 `RELATIVE`, 19 `GLOB_DAT`). Merged [PR #409](https://github.com/astraea-emu/astraea/pull/409)
 separately verifies 19/19 imported NIDs against the independent author's pinned
-source declarations. Neither finding is a successful library binding,
-PS5 runtime service, guest instruction or gameplay. Production
-`diagnose` remains deliberately strict. See [current status](docs/STATUS.md).
+source declarations. Neither static finding is a successful library binding or PS5 service. Subsequent [#440](https://github.com/astraea-emu/astraea/pull/440) interpreted 13 source-backed Breakout instructions in one checked **non-native** synthetic-context run, stopping before the first unresolved imported CALL (`RIP=0x23c`, bare NID `Vo5V8KAwCmk`). No independent guest instruction has been executed **natively** and no game frame has been produced by Astraea guest execution. Production `diagnose` remains deliberately strict. See [current status](docs/STATUS.md).
 
 ### Graphics
 
@@ -135,10 +133,7 @@ and from the CPU-only Breakout framebuffer reference ([#413](https://github.com/
 Neither has established genuine runtime service binding or commercial-title
 execution.
 
-Security is a **measured prerequisite**: [#410](https://github.com/astraea-emu/astraea/issues/410)
-tracks the demonstrated host-capability escape; [draft #414](https://github.com/astraea-emu/astraea/pull/414)
-reproduces it, and [stacked draft #415](https://github.com/astraea-emu/astraea/pull/415)
-explores test-only process confinement. Neither proves a production sandbox.
+Security is a **measured prerequisite**: [#410](https://github.com/astraea-emu/astraea/issues/410) remains open. Merged source-owned process separation, post-bootstrap syscall filtering and external tracer/page audits (#419–#448) narrow selected hazards, but have **not** demonstrated containment of arbitrary native guest memory writes, host-code control-flow escape or all descendant capabilities. The non-native Breakout interpretation does not authorize unsafe native execution.
 Concurrently, a legitimately held retail executable may undergo **read-only
 C0 preflight** without enabling native guest entry. The actual PS5 startup
 observation [#334](https://github.com/astraea-emu/astraea/issues/334)
