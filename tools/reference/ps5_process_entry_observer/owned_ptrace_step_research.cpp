@@ -4,6 +4,7 @@
 // This is not a hostile-code sandbox or a PS5 ABI implementation.
 #include "owned_pair_sha256.hpp"
 
+#include <astraea/execution/memory_plan.hpp>
 #include <astraea/execution/owned_relative_patch.hpp>
 #include <astraea/loader/dynamic_relocations.hpp>
 #include <astraea/loader/guest_image.hpp>
@@ -14,6 +15,7 @@
 #include <fstream>
 #include <string>
 #include <vector>
+#include <utility>
 #include <linux/memfd.h>
 #include <array>
 #include <span>
@@ -596,6 +598,142 @@ read_exact_owned_source(std::string_view name) {
         ::fcntl(artifact.fd, F_GET_SEALS) == seals;
 }
 
+// Independently inspect the Linux kernel's VMAs for the exact source-owned
+// GuestImage ranges. No tracee-produced mapping manifest or host pointer is
+// trusted. A VMA can cover several planned regions or a planned region can
+// be split into VMAs; every byte of the expected page-rounded span must
+// have compatible private permissions. This is only a source-owned research
+// admission check, not arbitrary executable memory containment.
+struct KernelVma {
+    std::uint64_t first = 0U;
+    std::uint64_t limit = 0U;
+    std::array<char, 5U> protection{};
+};
+
+[[nodiscard]] std::optional<std::vector<KernelVma>>
+read_tracee_kernel_vmas(pid_t pid) {
+    if (pid <= 1) return std::nullopt;
+    std::ifstream maps{"/proc/" + std::to_string(pid) + "/maps"};
+    if (!maps) return std::nullopt;
+    std::vector<KernelVma> ranges;
+    std::string line;
+    while (std::getline(maps, line)) {
+        if (ranges.size() >= 8192U || line.size() > 4096U)
+            return std::nullopt;
+        unsigned long long first = 0U;
+        unsigned long long limit = 0U;
+        std::array<char, 5U> protection{};
+        if (std::sscanf(line.c_str(), "%llx-%llx %4s", &first,
+                        &limit, protection.data()) != 3 ||
+            first >= limit ||
+            (protection[0] != 'r' && protection[0] != '-') ||
+            (protection[1] != 'w' && protection[1] != '-') ||
+            (protection[2] != 'x' && protection[2] != '-') ||
+            (protection[3] != 'p' && protection[3] != 's'))
+            return std::nullopt;
+        const auto low = static_cast<std::uint64_t>(first);
+        const auto high = static_cast<std::uint64_t>(limit);
+        if (!ranges.empty() && ranges.back().limit > low)
+            return std::nullopt;
+        ranges.push_back(KernelVma{
+            .first = low,
+            .limit = high,
+            .protection = protection,
+        });
+    }
+    return !maps.bad() && !ranges.empty()
+        ? std::optional{std::move(ranges)}
+        : std::nullopt;
+}
+
+[[nodiscard]] bool kernel_plan_matches(
+    const astraea::execution::ExecutionMemoryPlan& plan,
+    const std::vector<KernelVma>& vmas) {
+    namespace m = astraea::memory;
+    if (plan.host_page_size != kPage || plan.regions.empty() ||
+        vmas.empty()) return false;
+    for (const auto& region : plan.regions) {
+        const auto first = region.range.base().value();
+        const auto span = region.range.size().value();
+        if (span == 0U ||
+            first > std::numeric_limits<std::uint64_t>::max() - span)
+            return false;
+        const auto last = first + span;
+        const bool expected_write =
+            region.permissions.has(m::GuestPermission::write);
+        const bool expected_execute =
+            region.permissions.has(m::GuestPermission::execute);
+        const bool expected_read =
+            region.permissions.has(m::GuestPermission::read);
+        if (expected_write && expected_execute) return false;
+        auto cursor = first;
+        for (const auto& vma : vmas) {
+            if (vma.limit <= cursor) continue;
+            if (vma.first > cursor) break;
+            const bool actual_read = vma.protection[0] == 'r';
+            const bool actual_write = vma.protection[1] == 'w';
+            const bool actual_execute = vma.protection[2] == 'x';
+            if (vma.protection[3] != 'p' ||
+                actual_write != expected_write ||
+                actual_execute != expected_execute ||
+                (expected_read && !actual_read) ||
+                // Some x86 kernels report READ with WRITE or EXEC. It
+                // cannot silently appear on a wholly inaccessible page.
+                (!expected_read && actual_read &&
+                 !expected_write && !expected_execute))
+                return false;
+            cursor = std::min(vma.limit, last);
+            if (cursor == last) break;
+        }
+        if (cursor != last) return false;
+    }
+    return true;
+}
+
+[[nodiscard]] bool inspect_pinned_kernel_guest_page_plan(
+    pid_t pid, const astraea::loader::GuestImage& image) {
+    namespace e = astraea::execution;
+    namespace m = astraea::memory;
+    std::vector<m::MappingIntent> shifted = image.mappings;
+    for (auto& mapping : shifted) {
+        const auto start = mapping.range.base().value();
+        const auto size = mapping.range.size().value();
+        if (start >= kMaxPinnedSize || size > kMaxPinnedSize - start)
+            return false;
+        const auto range = m::GuestRange::create(
+            m::GuestAddress{kGuestBase + start}, mapping.range.size());
+        if (!range.has_value()) return false;
+        mapping.range = range.value();
+    }
+    auto plan = e::build_execution_memory_plan(
+        e::ExecutionMemoryPlanRequest{
+            .mappings = shifted,
+            .stack_storage = image.initial_stack.storage,
+            .entry_point = m::GuestAddress{kPinnedEntry},
+            .stack_pointer = image.initial_stack.rsp,
+            .host_page_size = kPage,
+        });
+    const auto observed = read_tracee_kernel_vmas(pid);
+    if (!plan.has_value() || !observed.has_value() ||
+        !kernel_plan_matches(plan.value(), observed.value()))
+        return false;
+
+    // A negative checks that the matching logic would reject an
+    // unexpectedly writable/nonexecutable entry mapping. No actual
+    // tracee VMA is modified or remapped for this research control.
+    auto altered = plan.value();
+    bool altered_entry = false;
+    for (auto& region : altered.regions) {
+        if (!region.range.contains(m::GuestAddress{kPinnedEntry}))
+            continue;
+        const auto rw = m::GuestPermissions::checked_from_bits(3U);
+        if (!rw.has_value()) return false;
+        region.permissions = rw.value();
+        altered_entry = true;
+    }
+    return altered_entry && !kernel_plan_matches(altered, observed.value());
+}
+
 // This check is independently performed by the tracer using the original
 // immutable source, production loader and relocation planner, and real
 // PTRACE_PEEKDATA into the stopped child (NOT its reported result).
@@ -623,6 +761,8 @@ read_exact_owned_source(std::string_view name) {
         !original->general_relocations.rela.has_value() ||
         original->general_relocations.rela->count != 8U ||
         !original->dynamic_symbols.has_value())
+        return false;
+    if (!inspect_pinned_kernel_guest_page_plan(pid, original.value()))
         return false;
     const auto view = original->initialized_image_view();
     if (!view.has_value()) return false;
@@ -776,6 +916,8 @@ read_exact_owned_source(std::string_view name) {
     std::puts("C1 PINNED OWNED GUESTIMAGE PTRACE PASS");
     std::puts("source_sha256=45920de847b2d33896c186654bbf22a728f1910fad84accb15204aa2da50c678");
     std::puts("owned_guestimage_real_relocations_verified_per_run=8");
+    std::puts("owned_guestimage_kernel_page_permissions_verified_runs=2");
+    std::puts("owned_guestimage_wrong_entry_permissions=refused");
     std::puts("ptrace_pinned_postbootstrap_seccomp_filter_verified_runs=2");
     std::puts("ptrace_pinned_postbootstrap_no_new_privs_verified_runs=2");
     std::puts("ptrace_pinned_postbootstrap_denials=write_mmap_mprotect_ptrace");
