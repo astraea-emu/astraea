@@ -71,6 +71,8 @@ constexpr std::uint64_t kStackOffset = 24U * 1024U * 1024U;
 constexpr std::uint64_t kMaxOriginalAddress = 16U * 1024U * 1024U;
 constexpr std::string_view kTitleSha256 =
     "45920de847b2d33896c186654bbf22a728f1910fad84accb15204aa2da50c678";
+constexpr std::string_view kTwoInstructionTitleSha256 =
+    "cdeab7a242aa88a90a01494ff85ac68f44b15e7a2e588498927e3aa6aae5a947";
 constexpr e::GuestWorkerId kWorkerId{1U};
 constexpr e::GuestThreadId kThreadId{1U};
 
@@ -105,6 +107,16 @@ static_assert(kLeafStopBytes == 64U);
 [[nodiscard]] bool exact_pinned_title(std::span<const std::byte> bytes) {
     return !bytes.empty() && bytes.size() <= kMaxTitleBytes &&
         astraea::test::owned_pair_sha256_hex(bytes) == kTitleSha256;
+}
+
+// This second *source-owned* variant is admitted only to the independent
+// test-only tracer and only by its separate explicit entry CLI mode.
+// It never widens the sealed worker, isolated leaf or default title admission.
+[[nodiscard]] bool exact_two_instruction_title(
+    std::span<const std::byte> bytes) {
+    return bytes.size() == 66600U &&
+        astraea::test::owned_pair_sha256_hex(bytes) ==
+            kTwoInstructionTitleSha256;
 }
 
 [[nodiscard]] bool read_exact(std::span<std::byte> bytes) {
@@ -539,10 +551,14 @@ struct Terminal {
     std::span<const std::byte> source,
     std::uint64_t& stage,
     bool restricted_leaf = false,
-    bool ptrace_source_owned_leaf = false) {
+    bool ptrace_source_owned_leaf = false,
+    bool ptrace_two_instruction_variant = false) {
     stage = 1U;
-    if (!exact_pinned_title(source) ||
-        !e::linux_guest_syscall_seccomp_available()) return std::nullopt;
+    if ((ptrace_two_instruction_variant &&
+         (!ptrace_source_owned_leaf || !exact_two_instruction_title(source))) ||
+        (!ptrace_two_instruction_variant && !exact_pinned_title(source)) ||
+        !e::linux_guest_syscall_seccomp_available())
+        return std::nullopt;
     stage = 2U;
     // Only the externally supervised fixed-UD2 experiment uses an exact
     // deterministic page-aligned VA; MAP_FIXED_NOREPLACE still fails closed.
@@ -585,13 +601,31 @@ struct Terminal {
     if (!initial_view.has_value()) return std::nullopt;
     // Verify the exact first instruction through the source-backed image
     // view, which does not imply the eventual guest RX mapping grants READ.
+    constexpr std::array<std::byte, 7U> kTwoInstructionEntry{
+        std::byte{0xb8}, std::byte{0x2a}, std::byte{0x00},
+        std::byte{0x00}, std::byte{0x00}, std::byte{0x0f},
+        std::byte{0x0b},
+    };
+    constexpr std::array<std::byte, 2U> kFirstUd2{
+        std::byte{0x0f}, std::byte{0x0b},
+    };
+    const std::size_t verified_size =
+        ptrace_two_instruction_variant ? kTwoInstructionEntry.size()
+                                       : kFirstUd2.size();
     const auto first_range = m::GuestRange::create(
-        m::GuestAddress{original->elf.header.entry}, m::GuestSize{2U});
-    std::array<std::byte, 2U> verified_entry{};
+        m::GuestAddress{original->elf.header.entry},
+        m::GuestSize{verified_size});
+    std::array<std::byte, 7U> verified_entry{};
     if (!first_range.has_value() ||
-        !initial_view->copy_bytes(first_range.value(), verified_entry).has_value() ||
-        verified_entry != std::array<std::byte, 2U>{
-            std::byte{0x0f}, std::byte{0x0b}})
+        !initial_view->copy_bytes(
+            first_range.value(),
+            std::span<std::byte>{verified_entry.data(), verified_size})
+             .has_value() ||
+        (ptrace_two_instruction_variant
+             ? !std::equal(kTwoInstructionEntry.begin(),
+                           kTwoInstructionEntry.end(), verified_entry.begin())
+             : !std::equal(kFirstUd2.begin(), kFirstUd2.end(),
+                           verified_entry.begin())))
         return std::nullopt;
     std::vector<e::OwnedRelativePatch> patches;
     patches.reserve(8U);
@@ -738,7 +772,7 @@ struct Terminal {
 // Ptrace child: consumes the SAME immutable fd3 source used by the isolated
 // native research leaf, and the SAME production GuestImage/memory/RELATIVE
 // path. No shared observation record or effectful controller channel exists.
-[[nodiscard]] int ptrace_owned_leaf_main() {
+[[nodiscard]] int ptrace_owned_leaf_main(bool two_instructions = false) {
     if (!bind_controller()) return 70;
     const rlimit no_core{0U, 0U};
     const rlimit limit_as{4ULL * 1024ULL * 1024ULL * 1024ULL,
@@ -747,10 +781,15 @@ struct Terminal {
         ::setrlimit(RLIMIT_FSIZE, &no_core) != 0 ||
         ::setrlimit(RLIMIT_AS, &limit_as) != 0) return 71;
     auto source = e::read_linux_sealed_worker_artifact(kMaxTitleBytes);
-    if (!source.has_value() || !exact_pinned_title(source.value())) return 72;
+    if (!source.has_value() ||
+        (two_instructions
+             ? !exact_two_instruction_title(source.value())
+             : !exact_pinned_title(source.value())))
+        return 72;
     if (::syscall(SYS_close_range, 3U, ~0U, 0U) != 0) return 73;
     std::uint64_t stage = 0U;
-    (void)execute_pinned_owned_title(source.value(), stage, false, true);
+    (void)execute_pinned_owned_title(
+        source.value(), stage, false, true, two_instructions);
     // A legitimate trace remains stopped in the parent until terminated.
     // Any return (including a failed prepare) is an unsuccessful leaf.
     return 74;
@@ -1237,6 +1276,9 @@ int main(int argc, char** argv) {
             return source_owned_descendant_negative_main();
         if (argc == 2 && std::string_view{argv[1]} == "--ptrace-owned-leaf")
             return ptrace_owned_leaf_main();
+        if (argc == 2 && std::string_view{argv[1]} ==
+                "--ptrace-owned-two-step-leaf")
+            return ptrace_owned_leaf_main(true);
         if (argc == 3 && std::string_view{argv[1]} == "--isolated")
             return isolated_controller_main(argv[2]);
         if (argc != 2) return 1;
