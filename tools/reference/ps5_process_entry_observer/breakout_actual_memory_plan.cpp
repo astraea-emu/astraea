@@ -873,7 +873,8 @@ prepare_temporary_breakout_guest_memory(
                   << static_cast<unsigned>(callee.error()) << '\n';
         return 32;
     }
-    if (callee->retired_instructions != 11U ||
+    if (callee->entry_retired_instructions != 2U ||
+        callee->retired_instructions != 11U ||
         callee->guest_stack_writes != 9U ||
         callee->stopped_call_rip != 0x23cU ||
         callee->context.rip != callee->stopped_call_rip ||
@@ -1204,6 +1205,9 @@ prepare_temporary_breakout_guest_memory(
               << "source_x86_decoder_invalid_requests=3_refused\n"
               << "source_x86_callee_decoded_instructions=12\n"
               << "breakout_owned_callee_fetch=original_guestimage_virtual_mappings\n"
+              << "breakout_unified_entry_callee=13_source_backed_steps\n"
+              << "breakout_generic_entry_retired_instructions="
+              << callee->entry_retired_instructions << '\n'
               << "breakout_owned_callee_retired_instructions="
               << callee->retired_instructions << '\n'
               << "breakout_owned_callee_guest_stack_writes="
