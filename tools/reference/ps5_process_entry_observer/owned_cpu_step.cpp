@@ -79,6 +79,17 @@ constexpr std::uint64_t kArithmeticFlags = kCF | kPF | kAF | kZF | kSF | kOF;
              kOF : 0U);
 }
 
+[[nodiscard]] std::uint64_t logic_and_flags(
+    std::uint64_t value) noexcept {
+    // AND defines CF/OF=0 and PF/SF/ZF from result; AF is undefined.
+    // Preserve the prior AF bit without asserting an architectural value.
+    const bool parity = (std::popcount(
+        static_cast<unsigned>(value & 0xffU)) % 2) == 0;
+    return (parity ? kPF : 0U) |
+           (value == 0U ? kZF : 0U) |
+           ((value & (1ULL << 63U)) != 0U ? kSF : 0U);
+}
+
 [[nodiscard]] std::array<std::byte, 8U> word_bytes(
     std::uint64_t value) noexcept {
     std::array<std::byte, 8U> bytes{};
@@ -160,19 +171,40 @@ OwnedCpuStepResult step_owned_x86_64(
     const auto next = record.rip + insn.length;
     const auto visible = insn.operand_count_visible;
 
-    // No generic indirect/control-flow semantics are admitted here.
-    // Import metadata and typed NID identity are a caller-level boundary.
-    if (insn.mnemonic == ZYDIS_MNEMONIC_CALL ||
-        insn.mnemonic == ZYDIS_MNEMONIC_JMP ||
+    // Indirect CALL, JMP, RET and SYSCALL never transfer control here.
+    // Only the explicitly checked direct rel32 CALL below may retire.
+    if (insn.mnemonic == ZYDIS_MNEMONIC_JMP ||
         insn.mnemonic == ZYDIS_MNEMONIC_RET ||
-        insn.mnemonic == ZYDIS_MNEMONIC_SYSCALL)
+        insn.mnemonic == ZYDIS_MNEMONIC_SYSCALL ||
+        (insn.mnemonic == ZYDIS_MNEMONIC_CALL &&
+         (visible != 1U ||
+          ops[0].type != ZYDIS_OPERAND_TYPE_IMMEDIATE ||
+          !ops[0].imm.is_relative ||
+          record.length != 5U || record.bytes[0] != std::byte{0xe8})))
         return refuse(Stop::unresolved_control_transfer, cpu.rip);
 
     auto pending = cpu;
+    auto committed_rip = next;
     std::optional<std::uint64_t> guest_write_address;
     std::uint64_t guest_write_value = 0U;
 
-    if (insn.mnemonic == ZYDIS_MNEMONIC_PUSH &&
+    if (insn.mnemonic == ZYDIS_MNEMONIC_CALL &&
+        visible == 1U && ops[0].type == ZYDIS_OPERAND_TYPE_IMMEDIATE &&
+        ops[0].imm.is_relative && record.length == 5U &&
+        record.bytes[0] == std::byte{0xe8}) {
+        std::uint64_t target = 0U;
+        if (!add_signed(next, ops[0].imm.value.s, target))
+            return refuse(Stop::address_overflow, cpu.rip);
+        // Preflight the branch's target execute permission and the return
+        // slot before any CPU/guest-memory state becomes committed.
+        std::array<std::byte, 1U> first{};
+        if (!memory.fetch(target, first).has_value() || cpu.rsp < 8U)
+            return refuse(Stop::unresolved_control_transfer, cpu.rip);
+        guest_write_address = cpu.rsp - 8U;
+        guest_write_value = next;
+        pending.rsp = guest_write_address.value();
+        committed_rip = target;
+    } else if (insn.mnemonic == ZYDIS_MNEMONIC_PUSH &&
         visible == 1U && ops[0].type == ZYDIS_OPERAND_TYPE_REGISTER &&
         ops[0].size == 64U) {
         const auto* src = register_slot(cpu, ops[0].reg.value);
@@ -191,6 +223,22 @@ OwnedCpuStepResult step_owned_x86_64(
         if (dst == nullptr || src == nullptr)
             return refuse(Stop::unsupported_operand, cpu.rip);
         *dst = *src;
+    } else if (insn.mnemonic == ZYDIS_MNEMONIC_AND &&
+               visible == 2U &&
+               ops[0].type == ZYDIS_OPERAND_TYPE_REGISTER &&
+               ops[0].size == 64U &&
+               ops[1].type == ZYDIS_OPERAND_TYPE_IMMEDIATE) {
+        auto* dst = register_slot(pending, ops[0].reg.value);
+        const auto* src = register_slot(cpu, ops[0].reg.value);
+        if (dst == nullptr || src == nullptr)
+            return refuse(Stop::unsupported_operand, cpu.rip);
+        const auto result = *src &
+            static_cast<std::uint64_t>(ops[1].imm.value.s);
+        *dst = result;
+        constexpr std::uint64_t kDefinedLogicFlags =
+            kCF | kPF | kZF | kSF | kOF;
+        pending.rflags = (cpu.rflags & ~kDefinedLogicFlags) |
+            logic_and_flags(result);
     } else if (insn.mnemonic == ZYDIS_MNEMONIC_SUB &&
                visible == 2U &&
                ops[0].type == ZYDIS_OPERAND_TYPE_REGISTER &&
@@ -234,7 +282,7 @@ OwnedCpuStepResult step_owned_x86_64(
             return memory_refusal(cpu.rip, write.error());
         guest_writes = 1U;
     }
-    pending.rip = next;
+    pending.rip = committed_rip;
     cpu = pending;
     return OwnedCpuStepResult::success(OwnedCpuStepCommit{
         .next_rip = next,
