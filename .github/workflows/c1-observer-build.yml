@@ -4,6 +4,11 @@ on:
   workflow_dispatch:
   pull_request:
     paths:
+      # Evidence-bearing claims in the live project frontier must be
+      # validated against the exact PR head, even on documentation-only PRs.
+      - 'README.md'
+      - 'docs/STATUS.md'
+      - 'docs/research/c1_sourceowned_two_instruction_entry_2026-10-12.md'
       - '.github/workflows/c1-observer-build.yml'
       - 'tools/reference/ps5_process_entry_observer/**'
       - 'CMakeLists.txt'
