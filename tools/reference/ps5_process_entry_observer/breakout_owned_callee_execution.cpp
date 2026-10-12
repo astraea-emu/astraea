@@ -3,6 +3,7 @@
 #include "owned_guest_address_space.hpp"
 #include "source_x86_64_decoder.hpp"
 
+#include <algorithm>
 #include <array>
 #include <bit>
 #include <cstddef>
@@ -11,6 +12,7 @@
 #include <optional>
 #include <span>
 #include <utility>
+#include <vector>
 
 #include <Zydis/Zydis.h>
 #include <astraea/loader/dynamic_relocations.hpp>
@@ -112,11 +114,6 @@ OwnedCalleeResult run_owned_breakout_callee(
         image.initial_stack.storage.size().value() != 4096U)
         return fail(OwnedCalleeError::unexpected_context);
 
-    const auto decoded = decode_source_x86_64(
-        image, entry.context.rip, kC1MaxDecodedInstructions);
-    if (!decoded.has_value() || decoded->count != kC1MaxDecodedInstructions)
-        return fail(OwnedCalleeError::decode_refused);
-
     OwnedCalleeEvidence state{};
     state.context = entry.context;
     state.initial_callee_rsp = entry.context.rsp;
@@ -139,36 +136,93 @@ OwnedCalleeResult run_owned_breakout_callee(
             entry.guest_stack_return_word).has_value())
         return fail(OwnedCalleeError::stack_out_of_bounds);
 
-    for (const auto& record : decoded->instructions) {
-        const auto result = step_owned_x86_64(
-            record, state.context, memory);
-        if (result.has_value()) {
-            ++state.retired_instructions;
-            state.guest_stack_writes += result->guest_writes;
-            continue;
-        }
-        const auto& stop = result.error();
-        if (stop.code == OwnedCpuStepStopCode::unresolved_control_transfer) {
-            // A CPU step cannot infer a Sony provider. Breakout-specific
-            // import metadata is checked *after* a no-retirement stop.
-            ZydisDecodedInstruction insn{};
-            std::array<ZydisDecodedOperand, ZYDIS_MAX_OPERAND_COUNT> ops{};
-            if (!decode_call_operand(record, insn, ops) ||
-                insn.mnemonic != ZYDIS_MNEMONIC_CALL)
-                return fail(OwnedCalleeError::unsupported_instruction);
-            if (!import_stop(image, insn, ops[0], record.rip, state))
-                return fail(OwnedCalleeError::missing_import_metadata);
-            return OwnedCalleeResult::success(std::move(state));
-        }
-        if (stop.code == OwnedCpuStepStopCode::decode_refused)
-            return fail(OwnedCalleeError::decode_refused);
-        if (stop.code == OwnedCpuStepStopCode::guest_memory_refused)
-            return fail(OwnedCalleeError::stack_out_of_bounds);
-        if (stop.code == OwnedCpuStepStopCode::unsupported_operand ||
-            stop.code == OwnedCpuStepStopCode::address_overflow)
-            return fail(OwnedCalleeError::unsupported_operand);
-        return fail(OwnedCalleeError::unsupported_instruction);
+    // Stage ORIGINAL GuestImage mapping fragments into ordinary, separately
+    // owned host buffers. Preserve the exact guest virtual ranges and source
+    // permissions, including virtual W+X, without making host pages executable.
+    // Caller-owned buffers must remain alive for the entire fetch/step run.
+    constexpr std::uint64_t kMaxOwnedSourceBytes = 16U * 1024U * 1024U;
+    const auto source = image.initialized_image_view();
+    if (!source.has_value() ||
+        image.mappings.size() >= OwnedGuestAddressSpace::kMaxRegions)
+        return fail(OwnedCalleeError::guest_source_unavailable);
+    std::array<std::vector<std::byte>,
+               OwnedGuestAddressSpace::kMaxRegions> source_buffers{};
+    std::uint64_t source_bytes = 0U;
+    for (std::size_t i = 0U; i < image.mappings.size(); ++i) {
+        const auto& mapping = image.mappings[i];
+        const auto length = mapping.range.size().value();
+        if (length == 0U || length > kMaxOwnedSourceBytes - source_bytes)
+            return fail(OwnedCalleeError::guest_source_unavailable);
+        auto& backing = source_buffers[i];
+        backing.resize(static_cast<std::size_t>(length));
+        if (!source->copy_bytes(mapping.range, backing).has_value() ||
+            !memory.map(mapping.range.base().value(), backing,
+                        mapping.permissions).has_value())
+            return fail(OwnedCalleeError::guest_source_unavailable);
+        source_bytes += length;
     }
+
+    // Decode and step one fresh instruction at a time from the actual
+    // source-backed virtual mappings. The entry CALL was already modeled
+    // by interpret_pinned_breakout_entry; no new Sony startup is assumed.
+    const auto run = run_owned_x86_64(
+        state.context, memory, kC1MaxDecodedInstructions);
+    state.retired_instructions = run.retired_instructions;
+    state.guest_stack_writes = run.guest_writes;
+    if (run.stop == OwnedCpuRunStopCode::fetch_refused ||
+        run.stop == OwnedCpuRunStopCode::invalid_encoding)
+        return fail(OwnedCalleeError::decode_refused);
+    if (run.stop != OwnedCpuRunStopCode::step_refused ||
+        !run.step_stop.has_value())
+        return fail(OwnedCalleeError::unsupported_instruction);
+
+    const auto& stop = run.step_stop.value();
+    if (stop.code == OwnedCpuStepStopCode::unresolved_control_transfer) {
+        // Recheck that the stopped instruction's *actual staged virtual
+        // bytes* agree with the current immutable GuestImage source. An
+        // unresolved control transfer must not follow a GOT pointer.
+        const auto decoded = decode_source_x86_64(
+            image, state.context.rip, 1U);
+        if (!decoded.has_value() || decoded->count != 1U)
+            return fail(OwnedCalleeError::decode_refused);
+        const auto& record = decoded->instructions[0];
+        std::array<std::byte, kX86MaximumInstructionBytes> staged{};
+        if (!memory.fetch(record.rip,
+                          std::span<std::byte>{staged.data(),
+                                               record.length}).has_value() ||
+            !std::equal(record.bytes.begin(),
+                        record.bytes.begin() + record.length,
+                        staged.begin()))
+            return fail(OwnedCalleeError::decode_refused);
+        ZydisDecodedInstruction insn{};
+        std::array<ZydisDecodedOperand, ZYDIS_MAX_OPERAND_COUNT> ops{};
+        if (!decode_call_operand(record, insn, ops) ||
+            insn.mnemonic != ZYDIS_MNEMONIC_CALL)
+            return fail(OwnedCalleeError::unsupported_instruction);
+        if (!import_stop(image, insn, ops[0], record.rip, state))
+            return fail(OwnedCalleeError::missing_import_metadata);
+
+        // No GLOB_DAT import has been resolved. The original GOT bytes
+        // must still be identical to their source-backed initialized view.
+        const auto target_range = m::GuestRange::create(
+            m::GuestAddress{state.unresolved_got_slot}, m::GuestSize{8U});
+        std::array<std::byte, 8U> guest_word{};
+        std::array<std::byte, 8U> source_word{};
+        if (!target_range.has_value() ||
+            !memory.read(state.unresolved_got_slot, guest_word).has_value() ||
+            !source->copy_bytes(target_range.value(),
+                                source_word).has_value() ||
+            guest_word != source_word)
+            return fail(OwnedCalleeError::missing_import_metadata);
+        return OwnedCalleeResult::success(std::move(state));
+    }
+    if (stop.code == OwnedCpuStepStopCode::decode_refused)
+        return fail(OwnedCalleeError::decode_refused);
+    if (stop.code == OwnedCpuStepStopCode::guest_memory_refused)
+        return fail(OwnedCalleeError::stack_out_of_bounds);
+    if (stop.code == OwnedCpuStepStopCode::unsupported_operand ||
+        stop.code == OwnedCpuStepStopCode::address_overflow)
+        return fail(OwnedCalleeError::unsupported_operand);
     return fail(OwnedCalleeError::unsupported_instruction);
 }
 } // namespace astraea::research

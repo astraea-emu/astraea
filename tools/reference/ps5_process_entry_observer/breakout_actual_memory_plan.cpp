@@ -937,6 +937,30 @@ prepare_temporary_breakout_guest_memory(
             return 39;
     }
     {
+        // Preserve initialized bytes but strip execute permission from the
+        // source mapping containing the callee. Virtual fetch must refuse
+        // before retiring an instruction, despite readable code bytes.
+        auto changed = image.value();
+        const auto nonexec = m::GuestPermissions::checked_from_bits(3U);
+        if (!nonexec.has_value()) return 49;
+        bool removed = false;
+        for (auto& mapping : changed.mappings) {
+            if (mapping.range.contains(
+                    m::GuestAddress{interpreted->branch_target}) &&
+                mapping.permissions.has(m::GuestPermission::execute)) {
+                mapping.permissions = nonexec.value();
+                removed = true;
+            }
+        }
+        if (!removed) return 50;
+        const auto denied = astraea::research::run_owned_breakout_callee(
+            changed, interpreted.value());
+        if (denied.has_value() ||
+            denied.error() != astraea::research::
+                OwnedCalleeError::decode_refused)
+            return 51;
+    }
+    {
         auto changed = image.value();
         changed.dynamic_symbols.reset();
         const auto missing = astraea::research::run_owned_breakout_callee(
@@ -1137,6 +1161,7 @@ prepare_temporary_breakout_guest_memory(
               << callee_decode->next_rip << std::dec << '\n'
               << "source_x86_decoder_invalid_requests=3_refused\n"
               << "source_x86_callee_decoded_instructions=12\n"
+              << "breakout_owned_callee_fetch=original_guestimage_virtual_mappings\n"
               << "breakout_owned_callee_retired_instructions="
               << callee->retired_instructions << '\n'
               << "breakout_owned_callee_guest_stack_writes="
@@ -1151,7 +1176,7 @@ prepare_temporary_breakout_guest_memory(
               << "breakout_owned_callee_bare_nid="
               << callee->unresolved_bare_nid << '\n'
               << "breakout_owned_callee_stack_retaddr=preserved\n"
-              << "breakout_owned_callee_negative_cases=3_refused\n"
+              << "breakout_owned_callee_negative_cases=4_refused\n"
               << "breakout_owned_callee_native_guest_execution=0\n"
               << "breakout_owned_callee_sony_provider_calls=0\n";
     constexpr char hex_digits[] = "0123456789abcdef";

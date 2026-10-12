@@ -128,10 +128,17 @@ using Code = r::OwnedGuestMemoryError;
             other, read_write.value()), Code::address_overflow) ||
         overlap.region_count() != 1U)
         return false;
-    std::array<std::byte, 4U> extra{};
-    if (!is_error(model.map(0x9000U, extra, read_write.value()),
+    // Four guest-image fragments plus a stack require five regions.
+    // Exercise all eight independent slots and reject a ninth mapping.
+    std::array<std::array<std::byte, 4U>, 5U> extra{};
+    for (std::size_t i = 0U; i < 4U; ++i) {
+        if (!model.map(0x9000U + i * 8U, extra[i],
+                       read_write.value()).has_value())
+            return false;
+    }
+    if (!is_error(model.map(0xa000U, extra[4], read_write.value()),
                   Code::region_limit) ||
-        model.region_count() != 4U)
+        model.region_count() != 8U)
         return false;
     return true;
 }
@@ -140,7 +147,7 @@ using Code = r::OwnedGuestMemoryError;
 int main() {
     if (!verify()) return 1;
     std::cout << "C1 OWNED VIRTUAL GUEST MEMORY PASS\n"
-              << "checked_regions=4\n"
+              << "checked_regions=8\n"
               << "checked_guest_rw_stack=pass\n"
               << "write_readonly=refused\n"
               << "execute_nonexec=refused\n"

@@ -49,7 +49,7 @@ jobs:
           "$probe" | tee "$RUNNER_TEMP/astraea-owned-guest-memory.txt"
           for expected in \
             "C1 OWNED VIRTUAL GUEST MEMORY PASS" \
-            "checked_regions=4" \
+            "checked_regions=8" \
             "checked_guest_rw_stack=pass" \
             "write_readonly=refused" \
             "execute_nonexec=refused" \
@@ -505,6 +505,8 @@ jobs:
             "$RUNNER_TEMP/actual-breakout-plan.txt"
           grep -Fx "source_x86_callee_decoded_instructions=12" \
             "$RUNNER_TEMP/actual-breakout-plan.txt"
+          grep -Fx "breakout_owned_callee_fetch=original_guestimage_virtual_mappings" \
+            "$RUNNER_TEMP/actual-breakout-plan.txt"
           grep -Fx "breakout_owned_callee_retired_instructions=11" \
             "$RUNNER_TEMP/actual-breakout-plan.txt"
           grep -Fx "breakout_owned_callee_guest_stack_writes=9" \
@@ -521,7 +523,7 @@ jobs:
             "$RUNNER_TEMP/actual-breakout-plan.txt"
           grep -Fx "breakout_owned_callee_stack_retaddr=preserved" \
             "$RUNNER_TEMP/actual-breakout-plan.txt"
-          grep -Fx "breakout_owned_callee_negative_cases=3_refused" \
+          grep -Fx "breakout_owned_callee_negative_cases=4_refused" \
             "$RUNNER_TEMP/actual-breakout-plan.txt"
           grep -Fx "breakout_owned_callee_native_guest_execution=0" \
             "$RUNNER_TEMP/actual-breakout-plan.txt"
