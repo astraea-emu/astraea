@@ -33,6 +33,8 @@ struct OwnedCalleeEvidence {
     std::uint64_t initial_callee_rsp = 0U;
     std::uint64_t guest_stack_base = 0U;
     std::array<std::byte, 4096U> guest_stack_bytes{};
+    // Source-backed AND RSP and direct CALL, run by the generic CPU.
+    std::size_t entry_retired_instructions = 0U;
     std::size_t retired_instructions = 0U;
     std::size_t guest_stack_writes = 0U;
     std::uint64_t stopped_call_rip = 0U;

@@ -9,8 +9,8 @@ guest instructions nor assert a real Sony process-entry ABI.
   `GuestImage` and returns a bounded source-backed instruction record.
 - `step_owned_x86_64` re-decodes one supplied record with pinned Zydis,
   verifies current guest RIP, and handles a small generic subset:
-  `PUSH r64`, `MOV r64,r64`, `SUB r64,imm`, and
-  `MOV qword [base+disp],imm`.
+  `PUSH r64`, `MOV r64,r64`, `SUB r64,imm`, `AND r64,imm`,
+  `MOV qword [base+disp],imm` and a checked direct `CALL rel32`.
 - `OwnedGuestAddressSpace` validates read/write/fetch permissions on
   caller-owned buffers and refuses unmapped or cross-boundary accesses.
 - `run_owned_x86_64` fetches current bytes through that virtual memory,
@@ -40,6 +40,17 @@ On a supported instruction, register state and RIP commit only after operand
 validation and any single memory write succeed. A denied write, decode mismatch,
 RIP mismatch, unknown instruction or control transfer leaves CPU state intact.
 The CPU executor does not claim multi-instruction transactional rollback.
+The generic direct CALL model preflights the destination's virtual execute
+permission and return-address stack write; only then can it commit guest RIP,
+RSP and one owned return word. Indirect CALL/unknown control flow remain
+unretired. For AND, CF/OF clear, PF/SF/ZF update, and architecturally
+undefined AF remains outside the claimed flag mask.
+
+The exact Breakout entry plus callee can now be fetched/interpreted in one
+bounded generic CPU run: two genuine source-backed entry instructions and
+eleven callee instructions, terminating at the same unretired import CALL.
+The independently authored two-instruction interpreter remains a comparison
+oracle, not an alternative Sony ABI. The synthetic entry context is unchanged.
 The research memory model cannot prevent external host aliases or protect
 against arbitrary native machine code in the same host address space.
 
