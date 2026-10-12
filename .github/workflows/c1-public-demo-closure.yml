@@ -11,6 +11,7 @@ on:
       - 'src/loader/**'
       - 'include/astraea/loader/**'
       - 'src/execution/linux_retail_diagnostic.cpp'
+      - 'tools/reference/ps5_process_entry_observer/**'
       - 'CMakeLists.txt'
       - 'cmake/**'
 
@@ -76,6 +77,10 @@ jobs:
             "failed_guest_write=cpu_and_bytes_unchanged" \
             "guest_register_flags=sub_zero_case_verified" \
             "malformed_record_and_unknown_opcode=refused" \
+            "owned_guest_fetch_step=bounded_and_typed" \
+            "owned_fetch_uses_execute_permission=verified" \
+            "source_mutation_and_partial_faults=refused" \
+            "failed_later_instruction=prior_retirements_only" \
             "breakout_elf_execution=not_part_of_this_test" \
             "native_hostile_code_containment=not_established"; do
             grep -Fx "$expected" "$RUNNER_TEMP/astraea-owned-cpu-step.txt"
