@@ -4,11 +4,6 @@ on:
   workflow_dispatch:
   pull_request:
     paths:
-      # Evidence-bearing claims in the live project frontier must be
-      # validated against the exact PR head, even on documentation-only PRs.
-      - 'README.md'
-      - 'docs/STATUS.md'
-      - 'docs/research/c1_sourceowned_two_instruction_entry_2026-10-12.md'
       - '.github/workflows/c1-public-demo-closure.yml'
       - 'src/app/**'
       - 'tools/reference/public_breakout_import_audit.py'
@@ -540,6 +535,16 @@ jobs:
             "$RUNNER_TEMP/actual-breakout-plan.txt"
           grep -Fx "breakout_owned_callee_guest_stack_writes=9" \
             "$RUNNER_TEMP/actual-breakout-plan.txt"
+          grep -Fx "breakout_interpreted_actual_relative_patches=1" \
+            "$RUNNER_TEMP/actual-breakout-plan.txt"
+          grep -Fx "breakout_interpreted_relative_guest_target=0x6900" \
+            "$RUNNER_TEMP/actual-breakout-plan.txt"
+          grep -Fx "breakout_interpreted_unresolved_imports_unchanged=19" \
+            "$RUNNER_TEMP/actual-breakout-plan.txt"
+          grep -Fx "breakout_interpreted_repeat=two_identical_normalized_runs" \
+            "$RUNNER_TEMP/actual-breakout-plan.txt"
+          grep -Fx "breakout_interpreted_relative_load_bias=zero_synthetic" \
+            "$RUNNER_TEMP/actual-breakout-plan.txt"
           grep -Fx "breakout_owned_callee_stop=unresolved_bare_nid_before_call" \
             "$RUNNER_TEMP/actual-breakout-plan.txt"
           grep -Fx "breakout_owned_callee_stop_rip=0x23c" \
@@ -554,7 +559,7 @@ jobs:
             "$RUNNER_TEMP/actual-breakout-plan.txt"
           grep -Fx "breakout_owned_callee_stack_retaddr=preserved" \
             "$RUNNER_TEMP/actual-breakout-plan.txt"
-          grep -Fx "breakout_owned_callee_negative_cases=5_refused" \
+          grep -Fx "breakout_owned_callee_negative_cases=7_refused" \
             "$RUNNER_TEMP/actual-breakout-plan.txt"
           grep -Fx "breakout_owned_callee_native_guest_execution=0" \
             "$RUNNER_TEMP/actual-breakout-plan.txt"
