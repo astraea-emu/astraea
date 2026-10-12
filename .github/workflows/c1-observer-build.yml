@@ -927,6 +927,10 @@ jobs:
             "$RUNNER_TEMP/astraea-c1-isolated-real-image.txt"
           grep -Fx "restricted_mmap_wx=denied" \
             "$RUNNER_TEMP/astraea-c1-isolated-real-image.txt"
+          grep -Fx "restricted_mmap_fixed_replace=denied" \
+            "$RUNNER_TEMP/astraea-c1-isolated-real-image.txt"
+          grep -Fx "restricted_mmap_noreplace_collision=EEXIST" \
+            "$RUNNER_TEMP/astraea-c1-isolated-real-image.txt"
           grep -Fx "restricted_mprotect_wx=denied" \
             "$RUNNER_TEMP/astraea-c1-isolated-real-image.txt"
           grep -Fx "restricted_staging_rw_to_rx=accepted" \

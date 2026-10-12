@@ -200,11 +200,13 @@ static_assert(kLeafStopBytes == 64U);
     constexpr auto kArg0 = static_cast<std::uint32_t>(
         offsetof(seccomp_data, args));
     constexpr auto kArg2 = kArg0 + 2U * sizeof(std::uint64_t);
+    constexpr auto kArg3 = kArg0 + 3U * sizeof(std::uint64_t);
 
     // Common checks (6), 18 allowlisted syscalls (36), clone3 fallback (2),
-    // clone/thread-only flag validation (9), mmap and mprotect (6 each),
-    // final deny (1). Keep the BPF program bounded and exact.
-    std::array<sock_filter, 66U> rules{};
+    // clone/thread-only flag validation (9), mmap (10, including a
+    // MAP_FIXED replacement denial), mprotect (6), final deny (1).
+    // Keep the BPF program bounded and exact.
+    std::array<sock_filter, 70U> rules{};
     std::size_t i = 0U;
     const auto statement = [&](std::uint16_t code, std::uint32_t value) {
         rules[i++] = sock_filter{.code = code, .jt = 0U, .jf = 0U, .k = value};
@@ -244,10 +246,17 @@ static_assert(kLeafStopBytes == 64U);
 
     // Neither syscall may request writable and executable mappings.
     // This check applies even when the syscall instruction is in host code.
-    jump(kEq, SYS_mmap, 0U, 5U);
+    // Disallow destructive MAP_FIXED replacement of existing host VMAs.
+    // Existing owned backend uses MAP_FIXED_NOREPLACE, which fails if an
+    // address is occupied; the two flags are distinct.
+    jump(kEq, SYS_mmap, 0U, 9U);
     statement(kLoad, kArg2);
     statement(kAnd, static_cast<std::uint32_t>(kWriteExec));
     jump(kEq, static_cast<std::uint32_t>(kWriteExec), 0U, 1U);
+    statement(kReturn, kDenied);
+    statement(kLoad, kArg3);
+    statement(kAnd, static_cast<std::uint32_t>(MAP_FIXED));
+    jump(kEq, static_cast<std::uint32_t>(MAP_FIXED), 0U, 1U);
     statement(kReturn, kDenied);
     statement(kReturn, kAllowed);
 
@@ -296,16 +305,39 @@ static_assert(kLeafStopBytes == 64U);
     void* scratch = ::mmap(nullptr, 4096U, PROT_READ | PROT_WRITE,
                             MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
     if (scratch == MAP_FAILED) return false;
+    auto* scratch_byte = static_cast<unsigned char*>(scratch);
+    scratch_byte[0] = 0xa5U;
+    // A runtime kernel may not understand MAP_FIXED_NOREPLACE, even if
+    // headers define it. Prove an occupied address is *never replaced*.
+    errno = 0;
+    const auto collision = ::syscall(
+        SYS_mmap, scratch, 4096U, PROT_READ,
+        MAP_PRIVATE | MAP_ANONYMOUS | MAP_FIXED_NOREPLACE, -1, 0);
+    const bool collision_refused = collision == -1 &&
+        errno == EEXIST && scratch_byte[0] == 0xa5U;
+    if (collision >= 0 &&
+        collision != reinterpret_cast<long>(scratch))
+        (void)::munmap(reinterpret_cast<void*>(collision), 4096U);
     errno = 0;
     const bool denied_wx =
         ::syscall(SYS_mprotect, scratch, 4096U,
                   PROT_READ | PROT_WRITE | PROT_EXEC) == -1 &&
         errno == EPERM;
-    // A legal staging transition must be preserved.
-    const bool frozen_rx = denied_wx &&
+
+    // Attempt to replace ONLY this disposable scratch page. The expected
+    // EPERM must arrive before MAP_FIXED could overwrite its contents.
+    errno = 0;
+    const auto replacement = ::syscall(
+        SYS_mmap, scratch, 4096U, PROT_READ,
+        MAP_PRIVATE | MAP_ANONYMOUS | MAP_FIXED, -1, 0);
+    const bool denied_fixed = replacement == -1 && errno == EPERM;
+    // Both denial and the required legal RW -> RX transition are checked.
+    const bool frozen_rx = denied_wx && denied_fixed &&
+        collision_refused &&
         ::mprotect(scratch, 4096U, PROT_READ | PROT_EXEC) == 0;
     const bool unmapped = ::munmap(scratch, 4096U) == 0;
-    return denied_wx && frozen_rx && unmapped;
+    return denied_wx && denied_fixed && collision_refused &&
+        frozen_rx && unmapped;
 }
 
 // Fixed, Astraea-authored adversarial GuestImage. Unlike the #417 toy RX
@@ -944,6 +976,8 @@ struct SourceFd {
               << "restricted_clone_process=denied\n"
               << "restricted_clone3=fallback_enosys\n"
               << "restricted_mmap_wx=denied\n"
+              << "restricted_mmap_fixed_replace=denied\n"
+              << "restricted_mmap_noreplace_collision=EEXIST\n"
               << "restricted_mprotect_wx=denied\n"
               << "restricted_staging_rw_to_rx=accepted\n"
               << "real_guestimage_host_ip_write_denied_runs=2\n"
