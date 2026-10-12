@@ -1084,7 +1084,7 @@ jobs:
             "owned_guestimage_wrong_entry_permissions=refused" \
             "ptrace_pinned_postbootstrap_seccomp_filter_verified_runs=2" \
             "ptrace_pinned_postbootstrap_no_new_privs_verified_runs=2" \
-            "ptrace_pinned_postbootstrap_denials=write_mmap_mprotect_ptrace" \
+            "ptrace_pinned_postbootstrap_denials=write_mmap_mprotect_ptrace_invalid_tgkill" \
             "owned_guestimage_entry_ud2_fault_runs=2" \
             "owned_guestimage_tampered_source=refused_before_trace" \
             "observations=independent_parent_ptrace_only" \

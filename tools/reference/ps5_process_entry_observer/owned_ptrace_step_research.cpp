@@ -970,7 +970,7 @@ read_tracee_kernel_vmas(pid_t pid) {
     std::puts("owned_guestimage_wrong_entry_permissions=refused");
     std::puts("ptrace_pinned_postbootstrap_seccomp_filter_verified_runs=2");
     std::puts("ptrace_pinned_postbootstrap_no_new_privs_verified_runs=2");
-    std::puts("ptrace_pinned_postbootstrap_denials=write_mmap_mprotect_ptrace");
+    std::puts("ptrace_pinned_postbootstrap_denials=write_mmap_mprotect_ptrace_invalid_tgkill");
     std::puts("owned_guestimage_entry_ud2_fault_runs=2");
     std::puts("owned_guestimage_tampered_source=refused_before_trace");
     std::puts("observations=independent_parent_ptrace_only");
