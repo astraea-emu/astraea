@@ -47,6 +47,10 @@ public:
     // refuse before copying any bytes; no partial writes on failure.
     [[nodiscard]] Result read(
         std::uint64_t guest_address, std::span<std::byte> output) const noexcept;
+    // Validate an entire would-be relocation write without mutating guest
+    // bytes. No host memory is made executable or writable by this API.
+    [[nodiscard]] Result preflight_write(
+        std::uint64_t guest_address, std::size_t byte_count) const noexcept;
     [[nodiscard]] Result write(
         std::uint64_t guest_address,
         std::span<const std::byte> source) noexcept;
