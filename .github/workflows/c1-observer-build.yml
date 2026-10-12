@@ -153,6 +153,8 @@ jobs:
             "owned_write_none_sigsegv_repeated=2" \
             "owned_write_rw_non_guest_side_effect_repeated=2" \
             "writable_host_canary_modified_in_positive_control=1" \
+            "owned_write_rw_guarded_refused_before_retirement_repeated=2" \
+            "writable_host_canary_unchanged_when_guarded=1" \
             "observations=tracer_ptrace_registers_only" \
             "tracee_external_files_and_controller_ipc=none" \
             "external_elf_guest_instructions=0" \

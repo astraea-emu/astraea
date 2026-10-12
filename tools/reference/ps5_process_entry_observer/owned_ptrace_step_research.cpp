@@ -45,17 +45,18 @@ constexpr std::uint64_t kNoAccessBase = 0x0000000100030000ULL;
 constexpr std::size_t kPage = 4096U;
 constexpr std::size_t kMaxSteps = 8U;
 
-enum class Mode { fault, syscall, escape, write_rx, write_none, write_rw };
+enum class Mode { fault, syscall, escape, write_rx, write_none, write_rw, write_rw_guarded };
 
 [[nodiscard]] bool is_write_mode(Mode mode) noexcept {
     return mode == Mode::write_rx || mode == Mode::write_none ||
-        mode == Mode::write_rw;
+        mode == Mode::write_rw || mode == Mode::write_rw_guarded;
 }
 [[nodiscard]] std::uint64_t write_target_for(Mode mode) noexcept {
     switch (mode) {
     case Mode::write_rx: return kHostSentinelBase;
     case Mode::write_none: return kNoAccessBase;
-    case Mode::write_rw: return kCanaryBase;
+    case Mode::write_rw:
+    case Mode::write_rw_guarded: return kCanaryBase;
     default: return 0U;
     }
 }
@@ -67,6 +68,7 @@ enum class Mode { fault, syscall, escape, write_rx, write_none, write_rw };
     if (name == "write-rx") return Mode::write_rx;
     if (name == "write-none") return Mode::write_none;
     if (name == "write-rw") return Mode::write_rw;
+    if (name == "write-rw-guarded") return Mode::write_rw_guarded;
     return std::nullopt;
 }
 [[nodiscard]] const char* mode_name(Mode mode) {
@@ -77,6 +79,7 @@ enum class Mode { fault, syscall, escape, write_rx, write_none, write_rw };
     case Mode::write_rx: return "write-rx";
     case Mode::write_none: return "write-none";
     case Mode::write_rw: return "write-rw";
+    case Mode::write_rw_guarded: return "write-rw-guarded";
     }
     return "invalid";
 }
@@ -257,6 +260,7 @@ struct Evidence {
     bool only_tracer_observations = false;
     bool memory_protection_fault = false;
     bool writable_non_guest_memory_modified = false;
+    bool non_guest_write_denied_before_step = false;
 };
 
 [[nodiscard]] std::optional<Evidence> run_once(Mode mode) {
@@ -319,6 +323,30 @@ struct Evidence {
             return evidence.stopped ? std::optional{evidence} : std::nullopt;
         }
 
+        // Positive control (write_rw) demonstrates that ptrace single-
+        // stepping alone DOES NOT isolate guest writes. This separate,
+        // source-owned guarded case refuses the exact reviewed store before
+        // asking the kernel to retire it. The canary is ordinary writable
+        // host memory, so the absence of a write is a tracer decision,
+        // not a hardware page-permission accident.
+        if (mode == Mode::write_rw_guarded &&
+            before->rip == kGuestBase + 10U) {
+            constexpr std::array<unsigned char, 3U> store{
+                0xc6U, 0x00U, 0x7fU,
+            };
+            if (evidence.executed != 1U ||
+                before->rax != kCanaryBase ||
+                !inspect_bytes(child, kGuestBase + 10U, store) ||
+                !canary_untouched(child))
+                return std::nullopt;
+            evidence.terminal_rip = before->rip;
+            evidence.non_guest_write_denied_before_step = true;
+            evidence.host_canary_unchanged = true;
+            evidence.stopped = true;
+            evidence.only_tracer_observations = true;
+            ::alarm(0U);
+            return evidence;
+        }
         if (::ptrace(PTRACE_SYSEMU_SINGLESTEP, child, nullptr, nullptr) != 0 ||
             !wait_stop(child, signal))
             return std::nullopt;
@@ -441,7 +469,9 @@ struct Evidence {
         a.only_tracer_observations == b.only_tracer_observations &&
         a.memory_protection_fault == b.memory_protection_fault &&
         a.writable_non_guest_memory_modified ==
-            b.writable_non_guest_memory_modified;
+            b.writable_non_guest_memory_modified &&
+        a.non_guest_write_denied_before_step ==
+            b.non_guest_write_denied_before_step;
 }
 
 // The actual pinned minimal PS5-format SCE ELF from the separate native
@@ -673,9 +703,10 @@ int main(int argc, char** argv) {
     }
     if (argc != 1) return 2;
 
-    constexpr std::array<Mode, 6U> cases{
+    constexpr std::array<Mode, 7U> cases{
         Mode::fault, Mode::syscall, Mode::escape,
         Mode::write_rx, Mode::write_none, Mode::write_rw,
+        Mode::write_rw_guarded,
     };
     for (const Mode mode : cases) {
         const auto first = run_once(mode);
@@ -701,6 +732,12 @@ int main(int argc, char** argv) {
              (first->executed != 2U ||
               !first->writable_non_guest_memory_modified ||
               first->host_canary_unchanged ||
+              first->terminal_rip != kGuestBase + 10U)) ||
+            (mode == Mode::write_rw_guarded &&
+             (first->executed != 1U ||
+              !first->non_guest_write_denied_before_step ||
+              first->writable_non_guest_memory_modified ||
+              !first->host_canary_unchanged ||
               first->terminal_rip != kGuestBase + 10U))) {
             std::fprintf(stderr, "ptrace_evidence_mismatch=%s\n", mode_name(mode));
             return 4;
@@ -715,6 +752,8 @@ int main(int argc, char** argv) {
     std::puts("owned_write_none_sigsegv_repeated=2");
     std::puts("owned_write_rw_non_guest_side_effect_repeated=2");
     std::puts("writable_host_canary_modified_in_positive_control=1");
+    std::puts("owned_write_rw_guarded_refused_before_retirement_repeated=2");
+    std::puts("writable_host_canary_unchanged_when_guarded=1");
     std::puts("observations=tracer_ptrace_registers_only");
     std::puts("tracee_external_files_and_controller_ipc=none");
     std::puts("external_elf_guest_instructions=0");
