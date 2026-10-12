@@ -33,6 +33,13 @@ struct DecodedSourceInstruction {
     std::array<std::byte, kX86MaximumInstructionBytes> bytes{};
     // Stable Zydis mnemonic ID for typed inspection. Not an execute action.
     std::uint32_t mnemonic = 0U;
+    // Conservative *static* dependency metadata for a fallthrough audit.
+    // Include implicit registers and memory-address operands. A 32/64-bit
+    // unconditional RAX-family write kills a prior RAX return value.
+    // These fields do not execute instructions or validate Sony services.
+    bool reads_rax = false;
+    bool overwrites_full_rax = false;
+    bool control_flow_boundary = false;
 };
 
 struct SourceDecodeReport {
