@@ -919,6 +919,8 @@ jobs:
             "$RUNNER_TEMP/astraea-c1-isolated-real-image.txt"
           grep -Fx "repeat_normalized_reports=identical" \
             "$RUNNER_TEMP/astraea-c1-isolated-real-image.txt"
+          grep -Fx "same_group_descendant=refused_before_report_read" \
+            "$RUNNER_TEMP/astraea-c1-isolated-real-image.txt"
           grep -Fx "real_guestimage_host_ip_write_denied_runs=2" \
             "$RUNNER_TEMP/astraea-c1-isolated-real-image.txt"
           grep -Fx "restricted_clone_process=denied" \
