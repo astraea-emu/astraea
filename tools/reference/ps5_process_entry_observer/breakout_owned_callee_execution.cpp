@@ -201,6 +201,8 @@ OwnedCalleeResult run_owned_breakout_callee(
         !source->copy_bytes(source_relative_range.value(),
                             original_relative).has_value() ||
         !memory.read(relative_target, initial_relative).has_value() ||
+        !memory.preflight_write(relative_target, relative->bytes.size())
+             .has_value() ||
         initial_relative != original_relative)
         return fail(OwnedCalleeError::relocation_refused);
 
@@ -216,8 +218,10 @@ OwnedCalleeResult run_owned_breakout_callee(
         std::array<std::byte, 8U> original{}, staged{};
         if (overlaps || !range.has_value() ||
             !source->copy_bytes(range.value(), original).has_value() ||
-            !memory.read(slot, staged).has_value() || staged != original)
+            !memory.read(slot, staged).has_value() || staged != original ||
+            !memory.preflight_write(slot, 8U).has_value())
             return fail(OwnedCalleeError::relocation_refused);
+        ++state.preflighted_unresolved_imports;
     }
     std::array<std::byte, 8U> applied_relative{};
     if (!memory.write(relative_target, relative->bytes).has_value() ||

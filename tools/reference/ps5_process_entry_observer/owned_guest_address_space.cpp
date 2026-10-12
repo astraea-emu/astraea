@@ -101,19 +101,32 @@ OwnedGuestAddressSpace::Result OwnedGuestAddressSpace::fetch(
         address, output, astraea::memory::GuestPermission::execute);
 }
 
+OwnedGuestAddressSpace::Result OwnedGuestAddressSpace::preflight_write(
+    std::uint64_t address, std::size_t byte_count) const noexcept {
+    if (byte_count == 0U) return fail(Error::zero_length, address);
+    if (byte_count > std::numeric_limits<std::uint64_t>::max() - address)
+        return fail(Error::address_overflow, address);
+    for (std::size_t i = 0U; i < count_; ++i) {
+        const auto& region = regions_[i];
+        if (within(region.base, region.backing.size(),
+                   address, byte_count)) {
+            if (!region.perms.has(
+                    astraea::memory::GuestPermission::write))
+                return fail(Error::permission_denied, address);
+            return Result::success(byte_count);
+        }
+    }
+    return fail(Error::unmapped, address);
+}
+
 OwnedGuestAddressSpace::Result OwnedGuestAddressSpace::write(
     std::uint64_t address, std::span<const std::byte> source) noexcept {
-    if (source.empty()) return fail(Error::zero_length, address);
-    if (source.size() >
-        std::numeric_limits<std::uint64_t>::max() - address)
-        return fail(Error::address_overflow, address);
+    const auto checked = preflight_write(address, source.size());
+    if (!checked.has_value()) return checked;
     for (std::size_t i = 0U; i < count_; ++i) {
         auto& region = regions_[i];
         if (within(region.base, region.backing.size(),
                    address, source.size())) {
-            if (!region.perms.has(
-                    astraea::memory::GuestPermission::write))
-                return fail(Error::permission_denied, address);
             const auto offset = static_cast<std::size_t>(
                 address - region.base);
             std::memmove(region.backing.data() + offset, source.data(),
