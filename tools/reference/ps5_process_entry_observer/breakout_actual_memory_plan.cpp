@@ -834,7 +834,10 @@ prepare_temporary_breakout_guest_memory(
         entry_decode->instructions[1].length != 5U ||
         entry_decode->instructions[1].rip != interpreted->entry_rip + 4U ||
         entry_decode->instructions[0].mnemonic != ZYDIS_MNEMONIC_AND ||
-        entry_decode->instructions[1].mnemonic != ZYDIS_MNEMONIC_CALL)
+        entry_decode->instructions[0].reads_rax ||
+        entry_decode->instructions[0].control_flow_boundary ||
+        entry_decode->instructions[1].mnemonic != ZYDIS_MNEMONIC_CALL ||
+        !entry_decode->instructions[1].control_flow_boundary)
         return 29;
     const auto callee_decode =
         astraea::research::decode_source_x86_64(
@@ -843,7 +846,8 @@ prepare_temporary_breakout_guest_memory(
     if (!callee_decode.has_value() ||
         callee_decode->count != astraea::research::kC1MaxDecodedInstructions ||
         callee_decode->instructions[0].rip != interpreted->branch_target ||
-        callee_decode->next_rip <= interpreted->branch_target)
+        callee_decode->next_rip <= interpreted->branch_target ||
+        !callee_decode->instructions[11U].control_flow_boundary)
         return 30;
     // Decoder misuse and a source address without an executable mapping
     // must be typed refusals, not partial or synthetic instruction records.
