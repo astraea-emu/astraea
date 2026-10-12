@@ -835,15 +835,38 @@ jobs:
               text=True, check=False, timeout=30)
           if result.returncode or result.stderr.strip():
               raise SystemExit("source-built variant failed read-only dependency check")
+          fields = {}
+          for record in result.stdout.splitlines()[1:]:
+              if "=" not in record:
+                  continue
+              key, value = record.split("=", 1)
+              if key in fields:
+                  raise SystemExit("repeated read-only dependency key")
+              fields[key] = value
           for field in ("generic_needed_records", "sce_needed_module_records",
                         "sce_import_library_records"):
-              if f"{field}=0" not in result.stdout.splitlines():
+              if fields.get(field) != "0":
                   raise SystemExit(f"unexpected import or dependency: {field}")
+          if fields.get("relocation_records") != "8" or fields.get(
+                  "resolution") != "not_attempted" or fields.get(
+                  "guest_instructions") != "0":
+              raise SystemExit("two-instruction source dependency/entry scope drifted")
+          for ix in range(8):
+              prefix = f"relocation[{ix}]"
+              if (fields.get(prefix + ".type") != "8" or
+                      fields.get(prefix + ".symbol_index") != "0" or
+                      fields.get(prefix + ".has_addend") != "1"):
+                  raise SystemExit("non-RELATIVE or imported relocation introduced")
+          actual_sha = hashlib.sha256(raw).hexdigest()
+          expected_sha = "cdeab7a242aa88a90a01494ff85ac68f44b15e7a2e588498927e3aa6aae5a947"
+          if actual_sha != expected_sha or len(raw) != 66600:
+              raise SystemExit("source-built two-instruction PS5 ELF identity drifted")
           print("C1 SOURCE-OWNED TWO-INSTRUCTION PS5-FORMAT BUILD PASS")
           print("two_instruction_guest_execution=not_attempted")
           print("two_instruction_sony_entry_abi=not_established")
-          print("two_instruction_native_elf_sha256=" + hashlib.sha256(raw).hexdigest())
+          print("two_instruction_native_elf_sha256=" + actual_sha)
           print("two_instruction_native_elf_size=" + str(len(raw)))
+          print("two_instruction_relative_relocations=8")
           PY
 
       - name: Require exact minimal PS5-format entry and pre-entry refusal
