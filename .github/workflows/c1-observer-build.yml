@@ -781,6 +781,94 @@ jobs:
           make --directory="$RUNNER_TEMP/astraea-minimal-native-title" \
             USE_CCACHE=0 APP_SOURCE_DIR=astraea_minimal APP_ASSETS= app
 
+      - name: Build source-owned two-instruction PS5-format variant without guest entry
+        env:
+          PINNED_BLACKBEAR: 2f672d1c2f508e26f82ce6e27cef289a0861413c
+        run: |
+          set -euo pipefail
+          git -C "$RUNNER_TEMP/ps5-native-app-boilerplate" worktree add --detach \
+            "$RUNNER_TEMP/astraea-two-instruction-native-title" "$PINNED_BLACKBEAR"
+          python3 tools/reference/ps5_process_entry_observer/prepare_minimal_public_title.py \
+            --checkout "$RUNNER_TEMP/astraea-two-instruction-native-title" \
+            --entry-mode mov42-ud2 \
+            | tee "$RUNNER_TEMP/astraea-two-instruction-source.json"
+          ln -s "$RUNNER_TEMP/ps5-native-app-boilerplate/.deps" \
+            "$RUNNER_TEMP/astraea-two-instruction-native-title/.deps"
+          make --directory="$RUNNER_TEMP/astraea-two-instruction-native-title" \
+            USE_CCACHE=0 APP_SOURCE_DIR=astraea_minimal APP_ASSETS= app
+          python3 - <<'PY'
+          import hashlib
+          import json
+          import os
+          from pathlib import Path
+          import struct
+          import subprocess
+
+          root = Path(os.environ["RUNNER_TEMP"])
+          source = json.loads((root / "astraea-two-instruction-source.json").read_text())
+          if source.get("entry_mode") != "mov42-ud2" or source.get("execution") != "none":
+              raise SystemExit("source provenance did not retain build-only mode")
+          title = root / "astraea-two-instruction-native-title/build/eboot.elf"
+          raw = title.read_bytes()
+          if len(raw) < 64 or raw[:6] != b"\x7fELF\x02\x01":
+              raise SystemExit("not a little-endian ELF64")
+          typ, machine = struct.unpack_from("<HH", raw, 16)
+          entry, phoff = struct.unpack_from("<QQ", raw, 24)
+          entsize, count = struct.unpack_from("<HH", raw, 54)
+          if (typ, machine, entry, entsize) != (0xfe10, 62, 0x10, 56):
+              raise SystemExit("unexpected PS5-format header or entry")
+          if not 1 <= count <= 32 or phoff > len(raw) or count * 56 > len(raw) - phoff:
+              raise SystemExit("invalid ELF program header table")
+          offsets = []
+          for ix in range(count):
+              typ, flags, offset, vaddr, _paddr, length, _memsz, _align = (
+                  struct.unpack_from("<IIQQQQQQ", raw, phoff + 56 * ix))
+              if typ == 1 and flags & 1 and entry >= vaddr:
+                  delta = entry - vaddr
+                  if delta < length and offset <= len(raw) and delta <= len(raw) - offset:
+                      offsets.append(offset + delta)
+          if len(offsets) != 1 or raw[offsets[0]:offsets[0]+7] != b"\xb8\x2a\x00\x00\x00\x0f\x0b":
+              raise SystemExit("entry does not begin with exactly mov eax,42; UD2")
+          cli = root / "astraea-native-title-smoke/astraea"
+          result = subprocess.run(
+              [str(cli), "dependencies", str(title)], capture_output=True,
+              text=True, check=False, timeout=30)
+          if result.returncode or result.stderr.strip():
+              raise SystemExit("source-built variant failed read-only dependency check")
+          fields = {}
+          for record in result.stdout.splitlines()[1:]:
+              if "=" not in record:
+                  continue
+              key, value = record.split("=", 1)
+              if key in fields:
+                  raise SystemExit("repeated read-only dependency key")
+              fields[key] = value
+          for field in ("generic_needed_records", "sce_needed_module_records",
+                        "sce_import_library_records"):
+              if fields.get(field) != "0":
+                  raise SystemExit(f"unexpected import or dependency: {field}")
+          if fields.get("relocation_records") != "8" or fields.get(
+                  "resolution") != "not_attempted" or fields.get(
+                  "guest_instructions") != "0":
+              raise SystemExit("two-instruction source dependency/entry scope drifted")
+          for ix in range(8):
+              prefix = f"relocation[{ix}]"
+              if (fields.get(prefix + ".type") != "8" or
+                      fields.get(prefix + ".symbol_index") != "0" or
+                      fields.get(prefix + ".has_addend") != "1"):
+                  raise SystemExit("non-RELATIVE or imported relocation introduced")
+          actual_sha = hashlib.sha256(raw).hexdigest()
+          expected_sha = "cdeab7a242aa88a90a01494ff85ac68f44b15e7a2e588498927e3aa6aae5a947"
+          if actual_sha != expected_sha or len(raw) != 66600:
+              raise SystemExit("source-built two-instruction PS5 ELF identity drifted")
+          print("C1 SOURCE-OWNED TWO-INSTRUCTION PS5-FORMAT BUILD PASS")
+          print("two_instruction_guest_execution=not_attempted")
+          print("two_instruction_sony_entry_abi=not_established")
+          print("two_instruction_native_elf_sha256=" + actual_sha)
+          print("two_instruction_native_elf_size=" + str(len(raw)))
+          print("two_instruction_relative_relocations=8")
+          PY
+
       - name: Require exact minimal PS5-format entry and pre-entry refusal
         run: |
           python3 - <<'PY'
