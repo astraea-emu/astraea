@@ -51,6 +51,7 @@ jobs:
             "C1 OWNED VIRTUAL GUEST MEMORY PASS" \
             "checked_regions=8" \
             "checked_guest_rw_stack=pass" \
+            "preflight_write=nonmutating_checked_full_range" \
             "write_readonly=refused" \
             "execute_nonexec=refused" \
             "read_no_read_permission=refused" \
@@ -538,6 +539,8 @@ jobs:
           grep -Fx "breakout_interpreted_actual_relative_patches=1" \
             "$RUNNER_TEMP/actual-breakout-plan.txt"
           grep -Fx "breakout_interpreted_relative_guest_target=0x6900" \
+            "$RUNNER_TEMP/actual-breakout-plan.txt"
+          grep -Fx "breakout_interpreted_import_write_preflighted=19" \
             "$RUNNER_TEMP/actual-breakout-plan.txt"
           grep -Fx "breakout_interpreted_unresolved_imports_unchanged=19" \
             "$RUNNER_TEMP/actual-breakout-plan.txt"
