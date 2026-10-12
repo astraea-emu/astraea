@@ -77,6 +77,8 @@ jobs:
             "failed_guest_write=cpu_and_bytes_unchanged" \
             "guest_register_flags=sub_zero_case_verified" \
             "malformed_record_and_unknown_opcode=refused" \
+            "owned_direct_entry_and_call=checked_two_instructions" \
+            "direct_call_target_and_stack_denials=pre_retirement" \
             "owned_guest_fetch_step=bounded_and_typed" \
             "owned_fetch_uses_execute_permission=verified" \
             "source_mutation_and_partial_faults=refused" \
@@ -524,6 +526,10 @@ jobs:
           grep -Fx "source_x86_callee_decoded_instructions=12" \
             "$RUNNER_TEMP/actual-breakout-plan.txt"
           grep -Fx "breakout_owned_callee_fetch=original_guestimage_virtual_mappings" \
+            "$RUNNER_TEMP/actual-breakout-plan.txt"
+          grep -Fx "breakout_unified_entry_callee=13_source_backed_steps" \
+            "$RUNNER_TEMP/actual-breakout-plan.txt"
+          grep -Fx "breakout_generic_entry_retired_instructions=2" \
             "$RUNNER_TEMP/actual-breakout-plan.txt"
           grep -Fx "breakout_owned_callee_retired_instructions=11" \
             "$RUNNER_TEMP/actual-breakout-plan.txt"
