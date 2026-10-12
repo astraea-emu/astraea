@@ -30,7 +30,7 @@ struct OwnedGuestMemoryFault {
 
 class OwnedGuestAddressSpace {
 public:
-    static constexpr std::size_t kMaxRegions = 4U;
+    static constexpr std::size_t kMaxRegions = 8U;
     using Result = astraea::core::Result<std::size_t, OwnedGuestMemoryFault>;
 
     // A mapping's virtual permissions are distinct from host page
