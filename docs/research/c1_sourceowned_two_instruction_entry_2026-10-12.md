@@ -1,6 +1,6 @@
-# C1 second source-owned PS5-format entry — build and identity checkpoint
+# C1 second source-owned PS5-format entry — build and native trace checkpoint
 
-**Status:** build-only research candidate; native execution **not attempted**  
+**Status:** source build accepted in merged #447; bounded native execution accepted in merged #448. Independent homebrew and arbitrary native guest execution **not established**.  
 **Date:** 2026-10-12  
 **Scope:** a second Astraea-authored fixture, **not** independent homebrew, retail, a process-ABI observation, a Sony module or a game.
 
@@ -20,14 +20,17 @@ A separate generic Astraea-owned x86 assembly probe already shows `mov eax, 42; 
 - Candidate ELF file size: **66,600 bytes**.
 - Candidate ELF SHA-256: `cdeab7a242aa88a90a01494ff85ac68f44b15e7a2e588498927e3aa6aae5a947`.
 
-The candidate digest appeared in two distinct GitHub Actions source builds (first build `38287259418`, despite a subsequently corrected Python escaped-literal verifier, and second passing build `38287635928`). **The PR final-head CI must reproduce the same hash, bytes and import/relocation conditions before this candidate becomes accepted evidence.** No binary or copyrighted public dependency is committed to Astraea.
+The candidate digest appeared in two distinct GitHub Actions source builds (first build `38287259418`, despite a subsequently corrected Python escaped-literal verifier, and second passing build `38287635928`). **Merged #447 and #448 exact-head CI reproduced the hash, entry bytes and relocation/import conditions and passed all seven required checks.** No binary or copyrighted public dependency is committed to Astraea.
 
-## Next measured execution gate (not part of the build PR)
+## Measured execution gate — complete in #448
 
-1. Separate hash-specific admission for this **one reviewed fixture** under the existing externally supervising ptrace research setup; do not silently broaden production `diagnose` or the original pinned UD2 experiment.
-2. Independently validate the entire source identity, ELF mapping plan, relocation target/readback, executable page permissions, blocked host syscalls and absence of controller side effects.
-3. Under a synthetic, explicitly non-Sony context, retire exactly the one guest `mov eax,42` instruction. The independent tracer must observe `RAX=42`, `RIP=entry+5`, followed by real `SIGILL` on the original `UD2` at `entry+5` with no further instruction retirement.
-4. Reproduce twice from identical bytes and require pre-entry tampered source, mismatched branch/mapping, and unsupported identity negatives. Retain finite budgets and external termination.
-5. Preserve all seven exact-head CI checks and do not infer compatibility with any independent Breakout ELF or commercial PS5 title.
+The second ELF was admitted only through its separate pinned SHA-256 research profile, not through production `diagnose`, the original pinned `UD2` profile, or a general outside-authored ELF loader. Using the existing `GuestImage`/checked relocation path, an independently supervising Linux ptrace parent verified kernel page permissions, eight relative relocation results and source-backed entry bytes. In each of two reproducible executions:
 
-**Unsupported remains unsupported:** #410 arbitrary native guest containment, Breakout mixed W/X page and ambiguous imported Sony service #378, and authentic commercial process-entry ABI #334/#348.
+1. An explicitly synthetic non-Sony context entered the original two-instruction code.
+2. The source-built `mov eax,42` retired; the parent observed `RAX=42` and `RIP=entry+5`.
+3. The original following `UD2` raised real `SIGILL` at `entry+5`; no additional ordinary guest instruction retired.
+4. Tampered ELF bytes were refused before entry, a direct unbound leaf did not succeed, and the original and new pinned admission modes rejected each other's artifacts.
+
+The pinned observer, independent Breakout static closure and five standard CI jobs all passed on exact head `79e9ce984022dea8d2bd326584feb6a24c33f47b`. [PR #448](https://github.com/astraea-emu/astraea/pull/448) was squash-merged as `9c38ab75d6a65f0bef3d2a41e50494894b3ab849`.
+
+**Boundaries:** this is source-owned, exact-hash, Linux x86-64 native research, **not** native Breakout or retail PS5 execution; no genuine Sony entry ABI, arbitrary guest containment or title-generated frame was established. The next measured work belongs to #410 native containment and #378 Breakout's guest/host mixed W/X memory mapping plus unresolved imported service, not another isolated instruction-count proof.
