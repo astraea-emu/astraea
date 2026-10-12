@@ -247,7 +247,8 @@ OwnedCpuRunReport run_owned_x86_64(
     std::size_t instruction_budget) {
     OwnedCpuRunReport report{};
     report.stop_rip = cpu.rip;
-    if (instruction_budget == 0U)
+    if (instruction_budget == 0U ||
+        instruction_budget > kC1MaxOwnedRunInstructions)
         return report;
 
     ZydisDecoder decoder{};
