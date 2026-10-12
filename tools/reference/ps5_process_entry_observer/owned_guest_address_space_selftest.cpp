@@ -54,7 +54,11 @@ using Code = r::OwnedGuestMemoryError;
         std::byte{1}, std::byte{2}, std::byte{3}, std::byte{4},
         std::byte{5}, std::byte{6}, std::byte{7}, std::byte{8},
     };
-    if (!model.write(0x2010U, payload).has_value() ||
+    // A preflight cannot modify source bytes, even when writable.
+    const auto stack_unmodified = stack;
+    if (!model.preflight_write(0x2010U, payload.size()).has_value() ||
+        stack != stack_unmodified ||
+        !model.write(0x2010U, payload).has_value() ||
         stack[16U] != payload[0] || stack[23U] != payload[7])
         return false;
     std::array<std::byte, 8U> copied_stack{};
@@ -81,6 +85,26 @@ using Code = r::OwnedGuestMemoryError;
         if (stack[i + 6U] != snapshot[i])
             return false;
 
+    // Identical write/preflight refusal classification, with no preflight
+    // mutation even on write-only memory. Invalid ranges cannot partially
+    // mutate a valid prefix or overflow guest arithmetic.
+    const auto stack_before_preflight = stack;
+    const auto source_before_preflight = source;
+    if (!model.preflight_write(0x3000U, 4U).has_value() ||
+        !is_error(model.preflight_write(0x201cU, payload.size()),
+                  Code::unmapped) ||
+        !is_error(model.preflight_write(0x1008U, payload.size()),
+                  Code::permission_denied) ||
+        !is_error(model.preflight_write(0x5000U, payload.size()),
+                  Code::unmapped) ||
+        !is_error(model.preflight_write(
+            std::numeric_limits<std::uint64_t>::max() - 3U,
+            payload.size()), Code::address_overflow) ||
+        !is_error(model.preflight_write(0x2010U, 0U),
+                  Code::zero_length) ||
+        stack != stack_before_preflight ||
+        source != source_before_preflight)
+        return false;
     // Rejecting a cross-boundary access must not write its valid prefix.
     const auto stack_before = stack;
     if (!is_error(model.write(0x201cU, payload), Code::unmapped) ||
@@ -149,6 +173,7 @@ int main() {
     std::cout << "C1 OWNED VIRTUAL GUEST MEMORY PASS\n"
               << "checked_regions=8\n"
               << "checked_guest_rw_stack=pass\n"
+              << "preflight_write=nonmutating_checked_full_range\n"
               << "write_readonly=refused\n"
               << "execute_nonexec=refused\n"
               << "read_no_read_permission=refused\n"
