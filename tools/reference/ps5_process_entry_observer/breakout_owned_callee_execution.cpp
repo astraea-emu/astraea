@@ -1,6 +1,7 @@
 #include "breakout_owned_callee_execution.hpp"
 #include "owned_cpu_step.hpp"
 #include "owned_guest_address_space.hpp"
+#include "owned_indirect_call_observation.hpp"
 #include "source_x86_64_decoder.hpp"
 
 #include <algorithm>
@@ -14,7 +15,6 @@
 #include <utility>
 #include <vector>
 
-#include <Zydis/Zydis.h>
 #include <astraea/loader/dynamic_relocations.hpp>
 #include <astraea/loader/sce_dynamic_symbol.hpp>
 #include <astraea/memory/guest_address.hpp>
@@ -25,48 +25,23 @@ namespace l = astraea::loader;
 namespace m = astraea::memory;
 namespace e = astraea::execution;
 
-// Only a non-retired indirect CALL needs its explicit operand decoded
-// here; general instruction semantics belong to step_owned_x86_64.
-[[nodiscard]] bool decode_call_operand(
-    const DecodedSourceInstruction& record,
-    ZydisDecodedInstruction& insn,
-    std::array<ZydisDecodedOperand, ZYDIS_MAX_OPERAND_COUNT>& operands) {
-    ZydisDecoder decoder{};
-    if (ZYAN_FAILED(ZydisDecoderInit(
-            &decoder, ZYDIS_MACHINE_MODE_LONG_64,
-            ZYDIS_STACK_WIDTH_64)) ||
-        ZYAN_FAILED(ZydisDecoderDecodeFull(
-            &decoder, record.bytes.data(), record.length,
-            &insn, operands.data())))
-        return false;
-    return insn.length == record.length &&
-        insn.mnemonic == static_cast<ZydisMnemonic>(record.mnemonic);
-}
-
+// Source-authenticated, checked virtual observation is performed by the
+// reusable non-retiring indirect-CALL observer. Import identity remains a
+// separate Breakout/source-backed relocation check, never a Sony binding.
 [[nodiscard]] bool import_stop(
-    const l::GuestImage& image, const ZydisDecodedInstruction& instruction,
-    const ZydisDecodedOperand& mem,
-    std::uint64_t call_rip, OwnedCalleeEvidence& state) {
-    if (instruction.mnemonic != ZYDIS_MNEMONIC_CALL ||
-        instruction.operand_count_visible != 1U ||
-        mem.type != ZYDIS_OPERAND_TYPE_MEMORY || mem.size != 64U ||
-        mem.mem.base != ZYDIS_REGISTER_RIP ||
-        mem.mem.index != ZYDIS_REGISTER_NONE ||
-        !mem.mem.disp.has_displacement ||
+    const l::GuestImage& image,
+    const OwnedIndirectCallObservation& observation,
+    OwnedCalleeEvidence& state) {
+    if (observation.call_rip != state.context.rip ||
         !image.general_relocations.rela.has_value() ||
         !image.dynamic_symbols.has_value() ||
         !image.dynamic_strings.has_value() ||
         !image.dynamic_strings->string_table.has_value())
         return false;
 
-    std::uint64_t slot = 0U;
-    if (call_rip > std::numeric_limits<std::uint64_t>::max() -
-                       instruction.length)
-        return false;
-    const auto address = owned_cpu_memory_address(
-        state.context, mem, call_rip + instruction.length);
-    if (!address.has_value()) return false;
-    slot = address.value();
+    const auto slot = observation.pointer_guest_address;
+    const auto view = image.initialized_image_view();
+    if (!view.has_value()) return false;
     // Demand a unique verified external import relocation for the actual
     // RIP-relative GOT operand; do NOT load a GOT pointer or follow it.
     const auto view = image.initialized_image_view();
@@ -95,7 +70,8 @@ namespace e = astraea::execution;
         symbol->name.raw.size() != 11U ||
         symbol->name.identity.has_value())
         return false;
-    state.stopped_call_rip = call_rip;
+    state.stopped_call_rip = observation.call_rip;
+    state.unresolved_got_raw_word = observation.pointer_word_le;
     state.unresolved_got_slot = slot;
     state.unresolved_symbol_index = symbol_index;
     state.unresolved_bare_nid = symbol->name.raw;
@@ -194,25 +170,33 @@ OwnedCalleeResult run_owned_breakout_callee(
                         record.bytes.begin() + record.length,
                         staged.begin()))
             return fail(OwnedCalleeError::decode_refused);
-        ZydisDecodedInstruction insn{};
-        std::array<ZydisDecodedOperand, ZYDIS_MAX_OPERAND_COUNT> ops{};
-        if (!decode_call_operand(record, insn, ops) ||
-            insn.mnemonic != ZYDIS_MNEMONIC_CALL)
+        const auto observation = observe_owned_indirect_call(
+            record, state.context, memory);
+        if (!observation.has_value()) {
+            if (observation.error().code ==
+                    OwnedIndirectCallErrorCode::source_fetch_refused ||
+                observation.error().code ==
+                    OwnedIndirectCallErrorCode::source_bytes_mismatch ||
+                observation.error().code ==
+                    OwnedIndirectCallErrorCode::invalid_encoding)
+                return fail(OwnedCalleeError::decode_refused);
+            if (observation.error().code ==
+                    OwnedIndirectCallErrorCode::operand_read_refused)
+                return fail(OwnedCalleeError::missing_import_metadata);
             return fail(OwnedCalleeError::unsupported_instruction);
-        if (!import_stop(image, insn, ops[0], record.rip, state))
+        }
+        if (!import_stop(image, observation.value(), state))
             return fail(OwnedCalleeError::missing_import_metadata);
 
         // No GLOB_DAT import has been resolved. The original GOT bytes
         // must still be identical to their source-backed initialized view.
         const auto target_range = m::GuestRange::create(
             m::GuestAddress{state.unresolved_got_slot}, m::GuestSize{8U});
-        std::array<std::byte, 8U> guest_word{};
         std::array<std::byte, 8U> source_word{};
         if (!target_range.has_value() ||
-            !memory.read(state.unresolved_got_slot, guest_word).has_value() ||
             !source->copy_bytes(target_range.value(),
                                 source_word).has_value() ||
-            guest_word != source_word)
+            observation->pointer_word_bytes != source_word)
             return fail(OwnedCalleeError::missing_import_metadata);
         return OwnedCalleeResult::success(std::move(state));
     }
