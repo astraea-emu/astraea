@@ -801,6 +801,26 @@ read_local_exact_title(std::string_view path);
     return 0;
 }
 
+// The source-owned negative mode intentionally leaves a harmless sleeping
+// descendant in the same isolated process group after its leader exits.
+// No guest instruction is entered, no Sony ABI or native title is admitted.
+// This mode is reachable only through the exact controller-bound research
+// executable; it proves why successful leader exit alone is insufficient.
+[[nodiscard]] int source_owned_descendant_negative_main() {
+    if (!bind_controller()) return 70;
+    const auto bytes = e::read_linux_sealed_worker_artifact(kMaxTitleBytes);
+    if (!bytes.has_value() || !exact_pinned_title(bytes.value()))
+        return 72;
+    const pid_t descendant = ::fork();
+    if (descendant < 0) return 76;
+    if (descendant == 0) {
+        // No I/O, exec, guest code or system-service request. The supervising
+        // controller must kill this process group and reject the report.
+        for (;;) (void)::pause();
+    }
+    return 0;
+}
+
 struct SourceFd {
     int fd = -1;
     ~SourceFd() noexcept { if (fd >= 0) (void)::close(fd); }
@@ -835,7 +855,8 @@ struct SourceFd {
 [[nodiscard]] std::optional<int> run_isolated_leaf(
     const std::string& executable,
     std::span<const std::byte> source_bytes,
-    LeafStopRecord* observation_out = nullptr) {
+    LeafStopRecord* observation_out = nullptr,
+    bool negative_descendant_fixture = false) {
     SourceFd artifact;
     if (!prepare_sealed_source(source_bytes, artifact)) return std::nullopt;
     // Reserve fd3 for immutable source and fd4 for the strictly fixed-size
@@ -891,8 +912,10 @@ struct SourceFd {
         std::to_string(::getpid());
     char locale[] = "LC_ALL=C";
     char* envp[]{expected_pid.data(), locale, nullptr};
+    const char* mode = negative_descendant_fixture
+        ? "--isolated-leaf-descendant-negative" : "--isolated-leaf";
     char* argv[]{const_cast<char*>(executable.c_str()),
-                 const_cast<char*>("--isolated-leaf"), nullptr};
+                 const_cast<char*>(mode), nullptr};
     pid_t pid = -1;
     if (::posix_spawn(&pid, executable.c_str(), &actions, &attributes,
                       argv, envp) != 0 || pid <= 0) return std::nullopt;
@@ -911,13 +934,26 @@ struct SourceFd {
         (void)::waitpid(pid, &status, 0);
         return std::nullopt;
     }
-    if (!WIFEXITED(status)) return std::nullopt;
+    if (!WIFEXITED(status)) {
+        (void)::kill(-pid, SIGKILL);
+        return std::nullopt;
+    }
+    // Before consuming *any* shared record, independently query the
+    // isolated leader's process group. A surviving group means descendants
+    // may still alter inherited shared memory after the parent exits.
+    // Never promote that observation or treat leader exit as completion.
+    errno = 0;
+    const int group_alive = ::kill(-pid, 0);
+    const int group_probe_errno = errno;
+    if (group_alive == 0 || group_probe_errno != ESRCH) {
+        (void)::kill(-pid, SIGKILL);
+        return 86; // Refused: descendant/group lifetime not closed.
+    }
     LeafStopRecord observed{};
-    // The directly supervised child has exited. This source-reviewed UD2
-    // fixture starts no descendants; arbitrary hostile native guest code
-    // might leave shared-memory-capable descendants, so this snapshot is
-    // untrusted and cannot authenticate an event. No controller callbacks
-    // or host service side effects follow from any record contents.
+    // No group member was visible at this post-exit checkpoint for the
+    // pinned source-owned fixture. This is NOT a hostile-code guarantee:
+    // descendants could leave the group/session, and the child's record
+    // is still untrusted data rather than independently attested execution.
     const auto bytes_read = ::pread(
         report.fd, observed.data(), kLeafStopBytes, 0);
     if (bytes_read != static_cast<ssize_t>(kLeafStopBytes))
@@ -953,6 +989,19 @@ struct SourceFd {
         forged[field] ^= 1U;
         if (valid_leaf_stop(forged)) return 5;
     }
+    // An intentionally permitted *source-owned bootstrap* fork creates
+    // a harmless same-group sleeper, then the leader exits cleanly.
+    // An incomplete controller would accept the leader's zero exit and
+    // proceed to the shared record. Require a typed group-lifetime refusal
+    // and a zero/unchanged observation instead.
+    LeafStopRecord descendant_report{};
+    const auto descendant = run_isolated_leaf(
+        executable, input.value(), &descendant_report, true);
+    if (!descendant.has_value() || descendant.value() != 86 ||
+        descendant_report != LeafStopRecord{}) {
+        std::cerr << "Surviving source-owned descendant was admitted\n";
+        return 6;
+    }
     // Check actual leaf admission, not only controller-side byte hashing.
     auto tampered = input.value();
     tampered[0] ^= std::byte{1U};
@@ -973,6 +1022,7 @@ struct SourceFd {
               << "normalized_guest_rip=0x10\n"
               << "malformed_report_fields=8_refused\n"
               << "repeat_normalized_reports=identical\n"
+              << "same_group_descendant=refused_before_report_read\n"
               << "restricted_clone_process=denied\n"
               << "restricted_clone3=fallback_enosys\n"
               << "restricted_mmap_wx=denied\n"
@@ -1099,6 +1149,9 @@ int main(int argc, char** argv) {
             return worker_main();
         if (std::string_view{argv[1]} == "--isolated-leaf")
             return pinned_leaf_main();
+        if (argc == 2 && std::string_view{argv[1]} ==
+                "--isolated-leaf-descendant-negative")
+            return source_owned_descendant_negative_main();
         if (argc == 2 && std::string_view{argv[1]} == "--ptrace-owned-leaf")
             return ptrace_owned_leaf_main();
         if (argc == 3 && std::string_view{argv[1]} == "--isolated")
