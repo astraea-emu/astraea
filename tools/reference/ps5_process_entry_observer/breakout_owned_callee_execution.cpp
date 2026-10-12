@@ -155,6 +155,9 @@ OwnedCalleeResult run_owned_breakout_callee(
     const auto run = run_owned_x86_64(
         state.context, memory, kC1MaxDecodedInstructions +
                                kExpectedEntryRetirements);
+    if (run.stop == OwnedCpuRunStopCode::fetch_refused ||
+        run.stop == OwnedCpuRunStopCode::invalid_encoding)
+        return fail(OwnedCalleeError::decode_refused);
     if (run.retired_instructions !=
             kExpectedEntryRetirements + kExpectedCalleeRetirements ||
         run.guest_writes == 0U)
