@@ -937,6 +937,30 @@ prepare_temporary_breakout_guest_memory(
             return 39;
     }
     {
+        // Preserve initialized bytes but strip execute permission from the
+        // source mapping containing the callee. Virtual fetch must refuse
+        // before retiring an instruction, despite readable code bytes.
+        auto changed = image.value();
+        const auto nonexec = m::GuestPermissions::checked_from_bits(3U);
+        if (!nonexec.has_value()) return 49;
+        bool removed = false;
+        for (auto& mapping : changed.mappings) {
+            if (mapping.range.contains(
+                    m::GuestAddress{interpreted->branch_target}) &&
+                mapping.permissions.has(m::GuestPermission::execute)) {
+                mapping.permissions = nonexec.value();
+                removed = true;
+            }
+        }
+        if (!removed) return 50;
+        const auto denied = astraea::research::run_owned_breakout_callee(
+            changed, interpreted.value());
+        if (denied.has_value() ||
+            denied.error() != astraea::research::
+                OwnedCalleeError::decode_refused)
+            return 51;
+    }
+    {
         auto changed = image.value();
         changed.dynamic_symbols.reset();
         const auto missing = astraea::research::run_owned_breakout_callee(
