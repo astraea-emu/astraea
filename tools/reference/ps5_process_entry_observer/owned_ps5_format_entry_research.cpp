@@ -298,9 +298,21 @@ static_assert(kLeafStopBytes == 64U);
 // of the guest RIP. It is NOT general host-memory isolation or arbitrary
 // guest admission. In particular only this exact pre-verified UD2 ELF runs.
 [[nodiscard]] bool install_postbootstrap_traced_guest_policy() noexcept {
-    constexpr std::array<int, 6U> kStopSyscalls{
+    // Source-owned post-bootstrap stop syscalls. An unrestricted tgkill is
+    // NOT a harmless stop facility: native guest control of its arguments
+    // could signal another same-UID host process (including the controller).
+    // Admit only this leaf's current process/thread and SIGSTOP.
+    const long process_id = ::syscall(SYS_getpid);
+    const long thread_id = ::syscall(SYS_gettid);
+    if (process_id <= 1 || thread_id <= 0 ||
+        static_cast<std::uint64_t>(process_id) >
+            std::numeric_limits<std::uint32_t>::max() ||
+        static_cast<std::uint64_t>(thread_id) >
+            std::numeric_limits<std::uint32_t>::max())
+        return false;
+    constexpr std::array<int, 5U> kStopSyscalls{
         SYS_exit, SYS_exit_group, SYS_getpid,
-        SYS_gettid, SYS_tgkill, SYS_rt_sigreturn,
+        SYS_gettid, SYS_rt_sigreturn,
     };
     constexpr auto kLoad = static_cast<std::uint16_t>(BPF_LD | BPF_W | BPF_ABS);
     constexpr auto kEq = static_cast<std::uint16_t>(BPF_JMP | BPF_JEQ | BPF_K);
@@ -308,8 +320,9 @@ static_assert(kLeafStopBytes == 64U);
     constexpr auto kRet = static_cast<std::uint16_t>(BPF_RET | BPF_K);
     constexpr std::uint32_t kDenied = SECCOMP_RET_ERRNO |
         static_cast<std::uint32_t>(EPERM);
-    // Arch/x32 checks (6), six exact syscall pairs (12), deny (1).
-    std::array<sock_filter, 19U> code{};
+    // Arch/x32 (6), five simple syscall pairs (10), tgkill dispatch (2),
+    // six argument-word comparisons (18), then one narrow ALLOW (1).
+    std::array<sock_filter, 37U> code{};
     std::size_t at = 0U;
     const auto emit = [&](std::uint16_t kind, std::uint32_t key) {
         code[at++] = sock_filter{
@@ -332,7 +345,27 @@ static_assert(kLeafStopBytes == 64U);
         jump(kEq, static_cast<std::uint32_t>(nr), 0U, 1U);
         emit(kRet, SECCOMP_RET_ALLOW);
     }
+    // No general tgkill ALLOW. Kernel BPF reads the full 64-bit argument
+    // words through their low/high 32-bit halves on Linux x86-64.
+    // Each failed comparison immediately returns EPERM.
+    jump(kEq, static_cast<std::uint32_t>(SYS_tgkill), 1U, 0U);
     emit(kRet, kDenied);
+    const auto require_arg_word = [&](std::size_t arg_index,
+                                      bool upper, std::uint32_t value) {
+        const auto offset = offsetof(seccomp_data, args) +
+            arg_index * sizeof(std::uint64_t) +
+            (upper ? sizeof(std::uint32_t) : 0U);
+        emit(kLoad, static_cast<std::uint32_t>(offset));
+        jump(kEq, value, 1U, 0U);
+        emit(kRet, kDenied);
+    };
+    require_arg_word(0U, false, static_cast<std::uint32_t>(process_id));
+    require_arg_word(0U, true, 0U);
+    require_arg_word(1U, false, static_cast<std::uint32_t>(thread_id));
+    require_arg_word(1U, true, 0U);
+    require_arg_word(2U, false, static_cast<std::uint32_t>(SIGSTOP));
+    require_arg_word(2U, true, 0U);
+    emit(kRet, SECCOMP_RET_ALLOW);
     if (at != code.size() ||
         ::prctl(PR_SET_NO_NEW_PRIVS, 1UL, 0UL, 0UL, 0UL) != 0)
         return false;
@@ -359,6 +392,23 @@ static_assert(kLeafStopBytes == 64U);
         errno != EPERM) return false;
     errno = 0;
     if (::syscall(SYS_ptrace, PTRACE_PEEKDATA, 0, 0, 0) != -1 ||
+        errno != EPERM) return false;
+    // Wrong signal to the correct thread would otherwise succeed and
+    // expose a guest-controlled host signal capability.
+    const long tgid = ::syscall(SYS_getpid);
+    const long tid = ::syscall(SYS_gettid);
+    if (tgid <= 1 || tid <= 0) return false;
+    errno = 0;
+    if (::syscall(SYS_tgkill, tgid, tid, SIGCONT) != -1 ||
+        errno != EPERM) return false;
+    // Invalid zero process/thread identifiers cannot target any process,
+    // even if the filter regresses. The kernel would return EINVAL instead
+    // of the required pre-kernel EPERM.
+    errno = 0;
+    if (::syscall(SYS_tgkill, 0L, tid, SIGSTOP) != -1 ||
+        errno != EPERM) return false;
+    errno = 0;
+    if (::syscall(SYS_tgkill, tgid, 0L, SIGSTOP) != -1 ||
         errno != EPERM) return false;
     return true;
 }
