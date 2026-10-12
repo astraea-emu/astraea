@@ -903,6 +903,28 @@ prepare_temporary_breakout_guest_memory(
         if (callee->unresolved_got_raw_word != expected_word)
             return 56;
     }
+    // The original Breakout ELF contributes one RELATIVE relocation at
+    // guest VA 0x6900 and nineteen unresolved imports. Re-run the exact
+    // same source and compare normalized checked CPU/relocation evidence.
+    if (callee->applied_relative_patches != 1U ||
+        callee->relative_patch_target != 0x6900U ||
+        callee->untouched_unresolved_imports != 19U)
+        return 57;
+    const auto repeated = astraea::research::run_owned_breakout_callee(
+        image.value(), interpreted.value());
+    if (!repeated.has_value() ||
+        repeated->context != callee->context ||
+        repeated->guest_stack_bytes != callee->guest_stack_bytes ||
+        repeated->applied_relative_patches !=
+            callee->applied_relative_patches ||
+        repeated->relative_patch_target != callee->relative_patch_target ||
+        repeated->relative_patch_value != callee->relative_patch_value ||
+        repeated->untouched_unresolved_imports !=
+            callee->untouched_unresolved_imports ||
+        repeated->stopped_call_rip != callee->stopped_call_rip ||
+        repeated->unresolved_got_slot != callee->unresolved_got_slot ||
+        repeated->unresolved_bare_nid != callee->unresolved_bare_nid)
+        return 58;
     // Ensure the entry CALL's return address is still present in the
     // owned stack buffer following all eleven real callee prologue steps.
     const auto return_index = callee->initial_callee_rsp -
@@ -1000,7 +1022,7 @@ prepare_temporary_breakout_guest_memory(
             changed, interpreted.value());
         if (refused.has_value() ||
             refused.error() != astraea::research::
-                OwnedCalleeError::missing_import_metadata)
+                OwnedCalleeError::relocation_refused)
             return 54;
     }
     {
@@ -1010,8 +1032,41 @@ prepare_temporary_breakout_guest_memory(
             changed, interpreted.value());
         if (missing.has_value() ||
             missing.error() != astraea::research::
-                OwnedCalleeError::missing_import_metadata)
+                OwnedCalleeError::relocation_refused)
             return 40;
+    }
+    {
+        // Missing RELA record must refuse before any simulated CPU step.
+        auto changed = image.value();
+        if (!changed.general_relocations.rela.has_value()) return 59;
+        changed.general_relocations.rela->count = 19U;
+        const auto rejected = astraea::research::run_owned_breakout_callee(
+            changed, interpreted.value());
+        if (rejected.has_value() ||
+            rejected.error() != astraea::research::
+                OwnedCalleeError::relocation_refused)
+            return 60;
+    }
+    {
+        // Original RELATIVE destination loses virtual write permission.
+        auto changed = image.value();
+        const auto read_only = m::GuestPermissions::checked_from_bits(1U);
+        if (!read_only.has_value()) return 61;
+        bool restricted = false;
+        for (auto& mapping : changed.mappings) {
+            if (mapping.range.contains(m::GuestAddress{0x6900U}) &&
+                mapping.permissions.has(m::GuestPermission::write)) {
+                mapping.permissions = read_only.value();
+                restricted = true;
+            }
+        }
+        if (!restricted) return 62;
+        const auto rejected = astraea::research::run_owned_breakout_callee(
+            changed, interpreted.value());
+        if (rejected.has_value() ||
+            rejected.error() != astraea::research::
+                OwnedCalleeError::relocation_refused)
+            return 63;
     }
 
     // Adversarial decoder and memory negatives operate on owned copies of
@@ -1212,6 +1267,14 @@ prepare_temporary_breakout_guest_memory(
               << callee->retired_instructions << '\n'
               << "breakout_owned_callee_guest_stack_writes="
               << callee->guest_stack_writes << '\n'
+              << "breakout_interpreted_actual_relative_patches="
+              << callee->applied_relative_patches << '\n'
+              << "breakout_interpreted_relative_guest_target=0x"
+              << std::hex << callee->relative_patch_target << std::dec << '\n'
+              << "breakout_interpreted_unresolved_imports_unchanged="
+              << callee->untouched_unresolved_imports << '\n'
+              << "breakout_interpreted_repeat=two_identical_normalized_runs\n"
+              << "breakout_interpreted_relative_load_bias=zero_synthetic\n"
               << "breakout_owned_callee_stop=unresolved_bare_nid_before_call\n"
               << "breakout_owned_callee_stop_rip=0x" << std::hex
               << callee->stopped_call_rip << std::dec << '\n'
@@ -1223,7 +1286,7 @@ prepare_temporary_breakout_guest_memory(
               << "breakout_owned_callee_bare_nid="
               << callee->unresolved_bare_nid << '\n'
               << "breakout_owned_callee_stack_retaddr=preserved\n"
-              << "breakout_owned_callee_negative_cases=5_refused\n"
+              << "breakout_owned_callee_negative_cases=7_refused\n"
               << "breakout_owned_callee_native_guest_execution=0\n"
               << "breakout_owned_callee_sony_provider_calls=0\n";
     constexpr char hex_digits[] = "0123456789abcdef";

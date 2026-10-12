@@ -24,6 +24,7 @@ enum class OwnedCalleeError {
     stack_out_of_bounds,
     address_overflow,
     guest_source_unavailable,
+    relocation_refused,
     missing_import_metadata,
     unresolved_import_identity_invalid,
 };
@@ -37,6 +38,12 @@ struct OwnedCalleeEvidence {
     std::size_t entry_retired_instructions = 0U;
     std::size_t retired_instructions = 0U;
     std::size_t guest_stack_writes = 0U;
+    // One source-backed, checked R_X86_64_RELATIVE, with explicit zero
+    // synthetic load bias in ORIGINAL ELF guest-VA coordinates.
+    std::size_t applied_relative_patches = 0U;
+    std::uint64_t relative_patch_target = 0U;
+    std::uint64_t relative_patch_value = 0U;
+    std::size_t untouched_unresolved_imports = 0U;
     std::uint64_t stopped_call_rip = 0U;
     std::uint64_t unresolved_got_slot = 0U;
     // Observed raw little-endian GOT word; NEVER an authenticated target.
@@ -50,8 +57,9 @@ struct OwnedCalleeEvidence {
 using OwnedCalleeResult = astraea::core::Result<
     OwnedCalleeEvidence, OwnedCalleeError>;
 
-// Executes supported decoded, *general* PUSH/MOV/SUB register/stack operand
-// forms through a checked, 4-KiB owned guest stack buffer. Requires an actual
+// Interprets the source-backed entry/callee with checked guest memory,
+// staging the one source RELATIVE while preserving 19 unbound import words.
+// Executes supported general CPU operations on a 4-KiB owned guest stack. Requires an actual
 // source-backed decoded CALL [RIP+disp] associated with precisely one ELF
 // GLOB_DAT bare-NID relocation; stops BEFORE following the unbound GOT.
 // Only entry/callee bytes from the caller-pinned GuestImage are admitted.

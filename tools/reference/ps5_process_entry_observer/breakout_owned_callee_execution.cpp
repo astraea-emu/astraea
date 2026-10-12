@@ -15,6 +15,7 @@
 #include <utility>
 #include <vector>
 
+#include <astraea/execution/owned_relative_patch.hpp>
 #include <astraea/loader/dynamic_relocations.hpp>
 #include <astraea/loader/sce_dynamic_symbol.hpp>
 #include <astraea/memory/guest_address.hpp>
@@ -147,6 +148,86 @@ OwnedCalleeResult run_owned_breakout_callee(
         source_bytes += length;
     }
 
+    // Complete the ONE genuine source-backed RELATIVE relocation inside
+    // virtual guest memory before interpretation. The guest VA layout here
+    // uses the original ELF coordinates: explicit synthetic load bias zero,
+    // NOT an observed Sony ASLR/process-entry contract. All nineteen
+    // unresolved GLOB_DAT words must remain byte-identical to source.
+    if (!image.general_relocations.rela.has_value() ||
+        !image.dynamic_symbols.has_value() ||
+        image.general_relocations.rela->count != 20U)
+        return fail(OwnedCalleeError::relocation_refused);
+    std::optional<e::OwnedRelativePatch> relative;
+    std::array<std::uint64_t, 19U> unresolved_slots{};
+    std::size_t imports = 0U;
+    for (std::uint64_t i = 0U;
+         i < image.general_relocations.rela->count; ++i) {
+        const auto record = l::parse_dynamic_relocation(
+            image.general_relocations.rela.value(), i,
+            image.dynamic_symbols.value(), source.value());
+        if (!record.has_value())
+            return fail(OwnedCalleeError::relocation_refused);
+        if (record->relocation_type == e::kOwnedX86_64RelativeType &&
+            record->symbol_index == 0U) {
+            if (relative.has_value())
+                return fail(OwnedCalleeError::relocation_refused);
+            auto patch = e::build_owned_x86_64_relative_patch(
+                record.value(), m::GuestAddress{0U});
+            if (!patch.has_value())
+                return fail(OwnedCalleeError::relocation_refused);
+            relative = patch.value();
+        } else if (record->relocation_type == 6U &&
+                   record->symbol_index != 0U &&
+                   imports < unresolved_slots.size()) {
+            const auto slot = record->target.value();
+            if (std::find(unresolved_slots.begin(),
+                          unresolved_slots.begin() + imports, slot) !=
+                unresolved_slots.begin() + imports)
+                return fail(OwnedCalleeError::relocation_refused);
+            unresolved_slots[imports++] = slot;
+        } else {
+            return fail(OwnedCalleeError::relocation_refused);
+        }
+    }
+    if (!relative.has_value() || imports != unresolved_slots.size())
+        return fail(OwnedCalleeError::relocation_refused);
+
+    const auto relative_target = relative->target.value();
+    const auto source_relative_range = m::GuestRange::create(
+        relative->target, m::GuestSize{relative->bytes.size()});
+    std::array<std::byte, 8U> original_relative{};
+    std::array<std::byte, 8U> initial_relative{};
+    if (!source_relative_range.has_value() ||
+        !source->copy_bytes(source_relative_range.value(),
+                            original_relative).has_value() ||
+        !memory.read(relative_target, initial_relative).has_value() ||
+        initial_relative != original_relative)
+        return fail(OwnedCalleeError::relocation_refused);
+
+    // Preflight every unbound import's source and guest-visible bytes
+    // before committing the single relocation. Reject overlapping patch
+    // destinations and refuse to manufacture provider addresses.
+    for (const auto slot : unresolved_slots) {
+        const bool overlaps =
+            (relative_target <= slot && slot - relative_target < 8U) ||
+            (slot < relative_target && relative_target - slot < 8U);
+        const auto range = m::GuestRange::create(
+            m::GuestAddress{slot}, m::GuestSize{8U});
+        std::array<std::byte, 8U> original{}, staged{};
+        if (overlaps || !range.has_value() ||
+            !source->copy_bytes(range.value(), original).has_value() ||
+            !memory.read(slot, staged).has_value() || staged != original)
+            return fail(OwnedCalleeError::relocation_refused);
+    }
+    std::array<std::byte, 8U> applied_relative{};
+    if (!memory.write(relative_target, relative->bytes).has_value() ||
+        !memory.read(relative_target, applied_relative).has_value() ||
+        applied_relative != relative->bytes)
+        return fail(OwnedCalleeError::relocation_refused);
+    state.relative_patch_target = relative_target;
+    state.relative_patch_value = relative->relocated_value.value();
+    state.applied_relative_patches = 1U;
+
     // Run from the actual ELF entry in one bounded invocation: checked
     // AND RSP,imm; checked CALL rel32; eleven callee instructions; then
     // refuse the unresolved indirect Sony import before retirement.
@@ -216,6 +297,26 @@ OwnedCalleeResult run_owned_breakout_callee(
         }
         if (!import_stop(image, observation.value(), state))
             return fail(OwnedCalleeError::missing_import_metadata);
+        // The single real source relocation must still hold after all
+        // interpreted guest instructions; this is guest-memory readback,
+        // not a trusted leaf report or a native guest effect.
+        std::array<std::byte, 8U> post_step_relative{};
+        if (!memory.read(relative_target, post_step_relative).has_value() ||
+            post_step_relative != relative->bytes)
+            return fail(OwnedCalleeError::relocation_refused);
+        // No guest instruction or synthetic service is allowed to modify
+        // any of the nineteen unresolved import slots before this stop.
+        for (const auto slot : unresolved_slots) {
+            const auto range = m::GuestRange::create(
+                m::GuestAddress{slot}, m::GuestSize{8U});
+            std::array<std::byte, 8U> original{}, import_readback{};
+            if (!range.has_value() ||
+                !source->copy_bytes(range.value(), original).has_value() ||
+                !memory.read(slot, import_readback).has_value() ||
+                import_readback != original)
+                return fail(OwnedCalleeError::missing_import_metadata);
+            ++state.untouched_unresolved_imports;
+        }
 
         // No GLOB_DAT import has been resolved. The original GOT bytes
         // must still be identical to their source-backed initialized view.
