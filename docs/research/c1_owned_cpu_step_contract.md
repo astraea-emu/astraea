@@ -16,6 +16,14 @@ guest instructions nor assert a real Sony process-entry ABI.
 - `run_owned_x86_64` fetches current bytes through that virtual memory,
   decodes and steps under a strict 4,096-instruction maximum; stops retain
   guest RIP, typed fault or unsupported step, and already committed work.
+- `observe_owned_indirect_call` validates the current guest-executable
+  bytes of a stopped `CALL qword ptr [RIP+disp]`, computes the RIP-relative
+  operand address and reads the eight-byte word under guest read permission.
+  The returned raw word is **opaque**: the API does not follow it, validate
+  executable ownership of its value, assign a Sony provider, change CPU
+  registers/stack or retire the CALL. Independent owned tests refuse
+  unexecutable instructions, altered bytes, non-RIP-relative calls,
+  inaccessible/truncated operands and mismatched CPU state.
 - The pinned Breakout integration stages each original `GuestImage` mapping
   fragment into disjoint caller-owned buffers, keeping source virtual
   permissions (including **virtual** W+X) and a separate synthetic RW stack.
