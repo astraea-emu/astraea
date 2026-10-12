@@ -78,11 +78,54 @@ SourceDecodeResult decode_source_x86_64(
                       instruction.length)
             return fail(SourceDecodeError::guest_rip_overflow);
 
+        // Conservative source-only dependency facts. Do not treat a zero
+        // idiom or a partial/conditional write as killing unknown RAX.
+        // Implicit register operands and address-generation reads count.
+        const auto aliases_rax = [](ZydisRegister reg) {
+            return ZydisRegisterGetLargestEnclosing(
+                ZYDIS_MACHINE_MODE_LONG_64, reg) == ZYDIS_REGISTER_RAX;
+        };
+        bool reads_rax = false;
+        bool overwrites_full_rax = false;
+        for (std::size_t n = 0U;
+             n < static_cast<std::size_t>(instruction.operand_count); ++n) {
+            const auto& operand = operands[n];
+            if (operand.type == ZYDIS_OPERAND_TYPE_MEMORY) {
+                reads_rax |= aliases_rax(operand.mem.base) ||
+                             aliases_rax(operand.mem.index);
+            }
+            if (operand.type != ZYDIS_OPERAND_TYPE_REGISTER ||
+                !aliases_rax(operand.reg.value))
+                continue;
+            reads_rax |= (operand.actions &
+                          ZYDIS_OPERAND_ACTION_MASK_READ) != 0U;
+            const bool unconditional_write =
+                (operand.actions & ZYDIS_OPERAND_ACTION_WRITE) != 0U &&
+                (operand.actions & ZYDIS_OPERAND_ACTION_CONDWRITE) == 0U;
+            overwrites_full_rax |= unconditional_write &&
+                ZydisRegisterGetWidth(
+                    ZYDIS_MACHINE_MODE_LONG_64,
+                    operand.reg.value) >= 32U;
+        }
+        const auto category = instruction.meta.category;
+        const bool control_flow_boundary =
+            category == ZYDIS_CATEGORY_CALL ||
+            category == ZYDIS_CATEGORY_COND_BR ||
+            category == ZYDIS_CATEGORY_UNCOND_BR ||
+            category == ZYDIS_CATEGORY_RET ||
+            instruction.mnemonic == ZYDIS_MNEMONIC_SYSCALL ||
+            instruction.mnemonic == ZYDIS_MNEMONIC_SYSENTER ||
+            instruction.mnemonic == ZYDIS_MNEMONIC_INT ||
+            instruction.mnemonic == ZYDIS_MNEMONIC_UD2;
+
         report.instructions[i] = DecodedSourceInstruction{
             .rip = rip,
             .length = instruction.length,
             .bytes = bytes,
             .mnemonic = static_cast<std::uint32_t>(instruction.mnemonic),
+            .reads_rax = reads_rax,
+            .overwrites_full_rax = overwrites_full_rax,
+            .control_flow_boundary = control_flow_boundary,
         };
         ++report.count;
         rip += instruction.length;
