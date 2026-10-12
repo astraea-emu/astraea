@@ -49,7 +49,7 @@ jobs:
           "$probe" | tee "$RUNNER_TEMP/astraea-owned-guest-memory.txt"
           for expected in \
             "C1 OWNED VIRTUAL GUEST MEMORY PASS" \
-            "checked_regions=4" \
+            "checked_regions=8" \
             "checked_guest_rw_stack=pass" \
             "write_readonly=refused" \
             "execute_nonexec=refused" \
