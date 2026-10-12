@@ -203,6 +203,11 @@ namespace m = astraea::memory;
     const auto invalid_budget = r::run_owned_x86_64(cpu, memory, 0U);
     if (invalid_budget.stop != r::OwnedCpuRunStopCode::invalid_budget ||
         cpu.rip != 0x200U) return false;
+    const auto excessive = r::run_owned_x86_64(
+        cpu, memory, r::kC1MaxOwnedRunInstructions + 1U);
+    if (excessive.stop != r::OwnedCpuRunStopCode::invalid_budget ||
+        excessive.retired_instructions != 0U ||
+        cpu.rip != 0x200U) return false;
 
     const auto prefix = r::run_owned_x86_64(cpu, memory, 4U);
     if (prefix.stop != r::OwnedCpuRunStopCode::budget_exhausted ||
