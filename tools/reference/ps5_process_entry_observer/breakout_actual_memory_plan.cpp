@@ -1161,6 +1161,7 @@ prepare_temporary_breakout_guest_memory(
               << callee_decode->next_rip << std::dec << '\n'
               << "source_x86_decoder_invalid_requests=3_refused\n"
               << "source_x86_callee_decoded_instructions=12\n"
+              << "breakout_owned_callee_fetch=original_guestimage_virtual_mappings\n"
               << "breakout_owned_callee_retired_instructions="
               << callee->retired_instructions << '\n'
               << "breakout_owned_callee_guest_stack_writes="
@@ -1175,7 +1176,7 @@ prepare_temporary_breakout_guest_memory(
               << "breakout_owned_callee_bare_nid="
               << callee->unresolved_bare_nid << '\n'
               << "breakout_owned_callee_stack_retaddr=preserved\n"
-              << "breakout_owned_callee_negative_cases=3_refused\n"
+              << "breakout_owned_callee_negative_cases=4_refused\n"
               << "breakout_owned_callee_native_guest_execution=0\n"
               << "breakout_owned_callee_sony_provider_calls=0\n";
     constexpr char hex_digits[] = "0123456789abcdef";
