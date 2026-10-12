@@ -48,11 +48,13 @@ using OwnedCpuStepResult = astraea::core::Result<
     const ZydisDecodedOperand& operand,
     std::uint64_t next_rip) noexcept;
 
-// Supported forms are generic PUSH r64, MOV r64,r64, SUB r64,imm,
-// MOV qword [base+disp],imm. CALL and other control transfers are
-// *not* executed; an unresolved_control_transfer stop leaves CPU and
-// guest memory untouched. Every error leaves CPU unchanged; each retired
-// instruction has at most one checked guest-memory write.
+// Supported research forms are PUSH r64, MOV r64,r64, SUB r64,imm,
+// AND r64,imm and MOV qword [base+disp],imm, plus direct CALL rel32
+// after executable-target and writable-return-slot preflight. Indirect
+// CALL and other unsupported control transfers stop before retirement.
+// This is ONLY non-native modeled guest state, not executable host memory.
+// Every error leaves CPU unchanged; each retired instruction has at most
+// one checked guest-memory write.
 [[nodiscard]] OwnedCpuStepResult step_owned_x86_64(
     const DecodedSourceInstruction& record,
     astraea::execution::GuestCpuContext& context,
