@@ -662,6 +662,31 @@ read_exact_owned_source(std::string_view name) {
     return true;
 }
 
+// Independently read kernel-owned procfs state while the exact source-owned
+// GuestImage tracee is stopped, before requesting ANY guest instruction.
+// This proves the leaf is in seccomp filter mode, NOT that the tracer has
+// authenticated the precise BPF program or provided general containment.
+[[nodiscard]] bool inspected_tracee_postbootstrap_policy(pid_t child) {
+    std::ifstream status{"/proc/" + std::to_string(child) + "/status"};
+    if (!status) return false;
+    bool restricted = false;
+    bool no_new_privs = false;
+    bool has_filter = false;
+    std::string line;
+    while (std::getline(status, line)) {
+        unsigned value = 0U;
+        if (std::sscanf(line.c_str(), "Seccomp: %u", &value) == 1)
+            restricted = value == 2U;
+        else if (std::sscanf(line.c_str(), "Seccomp_filters: %u",
+                             &value) == 1)
+            has_filter = value >= 1U;
+        else if (std::sscanf(line.c_str(), "NoNewPrivs: %u",
+                             &value) == 1)
+            no_new_privs = value == 1U;
+    }
+    return restricted && has_filter && no_new_privs;
+}
+
 [[nodiscard]] bool pinned_source_leaf_launch(
     std::string_view executable, const SourceFd& source) {
     char pid_text[32]{};
@@ -717,6 +742,7 @@ read_exact_owned_source(std::string_view name) {
                  PTRACE_O_TRACESYSGOOD | PTRACE_O_EXITKILL |
                  PTRACE_O_TRACEFORK | PTRACE_O_TRACEVFORK |
                  PTRACE_O_TRACECLONE | PTRACE_O_TRACEEXEC) != 0 ||
+        !inspected_tracee_postbootstrap_policy(child) ||
         !inspect_pinned_guestimage(child, original))
         return false;
     auto before = registers(child);
@@ -750,6 +776,9 @@ read_exact_owned_source(std::string_view name) {
     std::puts("C1 PINNED OWNED GUESTIMAGE PTRACE PASS");
     std::puts("source_sha256=45920de847b2d33896c186654bbf22a728f1910fad84accb15204aa2da50c678");
     std::puts("owned_guestimage_real_relocations_verified_per_run=8");
+    std::puts("ptrace_pinned_postbootstrap_seccomp_filter_verified_runs=2");
+    std::puts("ptrace_pinned_postbootstrap_no_new_privs_verified_runs=2");
+    std::puts("ptrace_pinned_postbootstrap_denials=write_mmap_mprotect_ptrace");
     std::puts("owned_guestimage_entry_ud2_fault_runs=2");
     std::puts("owned_guestimage_tampered_source=refused_before_trace");
     std::puts("observations=independent_parent_ptrace_only");

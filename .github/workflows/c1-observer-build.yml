@@ -987,6 +987,9 @@ jobs:
             "C1 PINNED OWNED GUESTIMAGE PTRACE PASS" \
             "source_sha256=45920de847b2d33896c186654bbf22a728f1910fad84accb15204aa2da50c678" \
             "owned_guestimage_real_relocations_verified_per_run=8" \
+            "ptrace_pinned_postbootstrap_seccomp_filter_verified_runs=2" \
+            "ptrace_pinned_postbootstrap_no_new_privs_verified_runs=2" \
+            "ptrace_pinned_postbootstrap_denials=write_mmap_mprotect_ptrace" \
             "owned_guestimage_entry_ud2_fault_runs=2" \
             "owned_guestimage_tampered_source=refused_before_trace" \
             "observations=independent_parent_ptrace_only" \
