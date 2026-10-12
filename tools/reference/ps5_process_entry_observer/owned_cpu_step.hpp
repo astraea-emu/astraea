@@ -59,6 +59,9 @@ using OwnedCpuStepResult = astraea::core::Result<
     OwnedGuestAddressSpace& memory);
 
 
+// Hard cap for deterministic research runs even when callers supply size_t max.
+inline constexpr std::size_t kC1MaxOwnedRunInstructions = 4096U;
+
 enum class OwnedCpuRunStopCode {
     invalid_budget,
     budget_exhausted,
