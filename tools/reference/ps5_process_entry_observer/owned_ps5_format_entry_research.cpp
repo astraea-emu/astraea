@@ -278,6 +278,79 @@ static_assert(kLeafStopBytes == 64U);
     return ::syscall(SYS_seccomp, SECCOMP_SET_MODE_FILTER, 0U, &program) == 0;
 }
 
+// Final, source-owned ptrace-leaf phase: the production GuestImage loader
+// has ALREADY completed mapping and all eight RELATIVE writes, and a trusted
+// external tracer was registered by PTRACE_TRACEME. No file, mmap, mprotect,
+// ptrace, fork/clone or controller IPC syscall is needed during native guest
+// stepping. This tiny filter is inherited by the tracee and is independent
+// of the guest RIP. It is NOT general host-memory isolation or arbitrary
+// guest admission. In particular only this exact pre-verified UD2 ELF runs.
+[[nodiscard]] bool install_postbootstrap_traced_guest_policy() noexcept {
+    constexpr std::array<int, 6U> kStopSyscalls{
+        SYS_exit, SYS_exit_group, SYS_getpid,
+        SYS_gettid, SYS_tgkill, SYS_rt_sigreturn,
+    };
+    constexpr auto kLoad = static_cast<std::uint16_t>(BPF_LD | BPF_W | BPF_ABS);
+    constexpr auto kEq = static_cast<std::uint16_t>(BPF_JMP | BPF_JEQ | BPF_K);
+    constexpr auto kGe = static_cast<std::uint16_t>(BPF_JMP | BPF_JGE | BPF_K);
+    constexpr auto kRet = static_cast<std::uint16_t>(BPF_RET | BPF_K);
+    constexpr std::uint32_t kDenied = SECCOMP_RET_ERRNO |
+        static_cast<std::uint32_t>(EPERM);
+    // Arch/x32 checks (6), six exact syscall pairs (12), deny (1).
+    std::array<sock_filter, 19U> code{};
+    std::size_t at = 0U;
+    const auto emit = [&](std::uint16_t kind, std::uint32_t key) {
+        code[at++] = sock_filter{
+            .code = kind, .jt = 0U, .jf = 0U, .k = key,
+        };
+    };
+    const auto jump = [&](std::uint16_t kind, std::uint32_t key,
+                          std::uint8_t yes, std::uint8_t no) {
+        code[at++] = sock_filter{
+            .code = kind, .jt = yes, .jf = no, .k = key,
+        };
+    };
+    emit(kLoad, static_cast<std::uint32_t>(offsetof(seccomp_data, arch)));
+    jump(kEq, AUDIT_ARCH_X86_64, 1U, 0U);
+    emit(kRet, SECCOMP_RET_KILL_PROCESS);
+    emit(kLoad, static_cast<std::uint32_t>(offsetof(seccomp_data, nr)));
+    jump(kGe, 0x40000000U, 0U, 1U);
+    emit(kRet, kDenied);
+    for (const int nr : kStopSyscalls) {
+        jump(kEq, static_cast<std::uint32_t>(nr), 0U, 1U);
+        emit(kRet, SECCOMP_RET_ALLOW);
+    }
+    emit(kRet, kDenied);
+    if (at != code.size() ||
+        ::prctl(PR_SET_NO_NEW_PRIVS, 1UL, 0UL, 0UL, 0UL) != 0)
+        return false;
+    sock_fprog filter{
+        .len = static_cast<unsigned short>(code.size()),
+        .filter = code.data(),
+    };
+    return ::syscall(SYS_seccomp, SECCOMP_SET_MODE_FILTER,
+                     0U, &filter) == 0;
+}
+
+[[nodiscard]] bool prove_postbootstrap_traced_guest_denials() noexcept {
+    // Outside guest entry and after the filter is active. Every request
+    // would have a distinguishable non-EPERM result without this policy.
+    errno = 0;
+    if (::syscall(SYS_write, STDOUT_FILENO, "!", 1U) != -1 ||
+        errno != EPERM) return false;
+    errno = 0;
+    if (::syscall(SYS_mmap, nullptr, 4096U, PROT_NONE,
+                  MAP_PRIVATE | MAP_ANONYMOUS, -1, 0) != -1 ||
+        errno != EPERM) return false;
+    errno = 0;
+    if (::syscall(SYS_mprotect, nullptr, 4096U, PROT_READ) != -1 ||
+        errno != EPERM) return false;
+    errno = 0;
+    if (::syscall(SYS_ptrace, PTRACE_PEEKDATA, 0, 0, 0) != -1 ||
+        errno != EPERM) return false;
+    return true;
+}
+
 // All probes occur after policy install and before any guest entry.
 // The prospective child of an erroneously allowed fork-like clone exits
 // immediately; normal success is an EPERM return, with no descendant.
@@ -595,7 +668,17 @@ struct Terminal {
         // the actual RIP/stop observation. Do not call the legacy guest
         // transition, send a leaf report, or resume host C++ after SIGSTOP.
         if (::ptrace(PTRACE_TRACEME, 0, nullptr, nullptr) != 0 ||
-            ::raise(SIGSTOP) != 0) return std::nullopt;
+            !install_postbootstrap_traced_guest_policy() ||
+            !prove_postbootstrap_traced_guest_denials())
+            return std::nullopt;
+        // Only the current source-owned thread's self-directed stop remains
+        // admitted. The parent reads the kernel's seccomp mode and real
+        // guest image before it resumes exactly one UD2 instruction.
+        const long tgid = ::syscall(SYS_getpid);
+        const long tid = ::syscall(SYS_gettid);
+        if (tgid <= 1 || tid <= 0 ||
+            ::syscall(SYS_tgkill, tgid, tid, SIGSTOP) != 0)
+            return std::nullopt;
         return std::nullopt; // unexpected host continuation is failure
     }
 

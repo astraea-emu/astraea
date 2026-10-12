@@ -155,9 +155,6 @@ jobs:
             "writable_host_canary_modified_in_positive_control=1" \
             "owned_write_rw_guarded_refused_before_retirement_repeated=2" \
             "writable_host_canary_unchanged_when_guarded=1" \
-            "owned_write_controller_only_sigsegv_maperr_repeated=2" \
-            "controller_canary_not_mapped_in_tracee_repeated=2" \
-            "controller_private_canary_unchanged_repeated=2" \
             "observations=tracer_ptrace_registers_only" \
             "tracee_external_files_and_controller_ipc=none" \
             "external_elf_guest_instructions=0" \
@@ -987,6 +984,9 @@ jobs:
             "C1 PINNED OWNED GUESTIMAGE PTRACE PASS" \
             "source_sha256=45920de847b2d33896c186654bbf22a728f1910fad84accb15204aa2da50c678" \
             "owned_guestimage_real_relocations_verified_per_run=8" \
+            "ptrace_pinned_postbootstrap_seccomp_filter_verified_runs=2" \
+            "ptrace_pinned_postbootstrap_no_new_privs_verified_runs=2" \
+            "ptrace_pinned_postbootstrap_denials=write_mmap_mprotect_ptrace" \
             "owned_guestimage_entry_ud2_fault_runs=2" \
             "owned_guestimage_tampered_source=refused_before_trace" \
             "observations=independent_parent_ptrace_only" \

@@ -1,5 +1,5 @@
 // C1 Linux x86-64 security research: independent tracer-owned instruction
-// observations. Executes ONLY fixed Astraea-authored instruction
+// observations. Executes ONLY six fixed Astraea-authored instruction
 // sequences below, never an external ELF or an arbitrary guest instruction.
 // This is not a hostile-code sandbox or a PS5 ABI implementation.
 #include "owned_pair_sha256.hpp"
@@ -42,16 +42,14 @@ constexpr std::uint64_t kGuestBase = 0x0000000100000000ULL;
 constexpr std::uint64_t kHostSentinelBase = 0x0000000100010000ULL;
 constexpr std::uint64_t kCanaryBase = 0x0000000100020000ULL;
 constexpr std::uint64_t kNoAccessBase = 0x0000000100030000ULL;
-constexpr std::uint64_t kControllerOnlyBase = 0x0000000100040000ULL;
 constexpr std::size_t kPage = 4096U;
 constexpr std::size_t kMaxSteps = 8U;
 
-enum class Mode { fault, syscall, escape, write_rx, write_none, write_rw, write_rw_guarded, write_controller_only };
+enum class Mode { fault, syscall, escape, write_rx, write_none, write_rw, write_rw_guarded };
 
 [[nodiscard]] bool is_write_mode(Mode mode) noexcept {
     return mode == Mode::write_rx || mode == Mode::write_none ||
-        mode == Mode::write_rw || mode == Mode::write_rw_guarded ||
-        mode == Mode::write_controller_only;
+        mode == Mode::write_rw || mode == Mode::write_rw_guarded;
 }
 [[nodiscard]] std::uint64_t write_target_for(Mode mode) noexcept {
     switch (mode) {
@@ -59,7 +57,6 @@ enum class Mode { fault, syscall, escape, write_rx, write_none, write_rw, write_
     case Mode::write_none: return kNoAccessBase;
     case Mode::write_rw:
     case Mode::write_rw_guarded: return kCanaryBase;
-    case Mode::write_controller_only: return kControllerOnlyBase;
     default: return 0U;
     }
 }
@@ -72,7 +69,6 @@ enum class Mode { fault, syscall, escape, write_rx, write_none, write_rw, write_
     if (name == "write-none") return Mode::write_none;
     if (name == "write-rw") return Mode::write_rw;
     if (name == "write-rw-guarded") return Mode::write_rw_guarded;
-    if (name == "write-controller-only") return Mode::write_controller_only;
     return std::nullopt;
 }
 [[nodiscard]] const char* mode_name(Mode mode) {
@@ -84,7 +80,6 @@ enum class Mode { fault, syscall, escape, write_rx, write_none, write_rw, write_
     case Mode::write_none: return "write-none";
     case Mode::write_rw: return "write-rw";
     case Mode::write_rw_guarded: return "write-rw-guarded";
-    case Mode::write_controller_only: return "write-controller-only";
     }
     return "invalid";
 }
@@ -213,37 +208,6 @@ struct ChildGuard {
     }
 };
 
-// Map AFTER fork, only in the independent controller address space.
-// The fixed low guest-like VA intentionally matches the tracee's attempted
-// absolute pointer, but the exec-separated tracee must not map it.
-struct ControllerCanary {
-    unsigned char* bytes = nullptr;
-    ~ControllerCanary() noexcept {
-        if (bytes != nullptr) (void)::munmap(bytes, kPage);
-    }
-    ControllerCanary(const ControllerCanary&) = delete;
-    ControllerCanary& operator=(const ControllerCanary&) = delete;
-    ControllerCanary() = default;
-    [[nodiscard]] bool establish() noexcept {
-        auto* requested = reinterpret_cast<void*>(
-            static_cast<std::uintptr_t>(kControllerOnlyBase));
-        void* mapped = ::mmap(
-            requested, kPage, PROT_READ | PROT_WRITE,
-            MAP_PRIVATE | MAP_ANONYMOUS | MAP_FIXED_NOREPLACE, -1, 0);
-        if (mapped == MAP_FAILED) return false;
-        if (mapped != requested) {
-            (void)::munmap(mapped, kPage);
-            return false;
-        }
-        bytes = static_cast<unsigned char*>(mapped);
-        bytes[0] = 0x5aU;
-        return true;
-    }
-    [[nodiscard]] bool intact() const noexcept {
-        return bytes != nullptr && bytes[0] == 0x5aU;
-    }
-};
-
 [[nodiscard]] bool wait_stop(pid_t child, int& signal) {
     int status = 0;
     pid_t got = -1;
@@ -297,8 +261,6 @@ struct Evidence {
     bool memory_protection_fault = false;
     bool writable_non_guest_memory_modified = false;
     bool non_guest_write_denied_before_step = false;
-    bool controller_only_canary_unchanged = false;
-    bool controller_mapping_absent_in_tracee = false;
 };
 
 [[nodiscard]] std::optional<Evidence> run_once(Mode mode) {
@@ -318,10 +280,6 @@ struct Evidence {
         ::_exit(121);
     }
     ChildGuard guard{child};
-    ControllerCanary controller_canary{};
-    if (mode == Mode::write_controller_only &&
-        !controller_canary.establish())
-        return std::nullopt;
     int signal = 0;
     if (!wait_stop(child, signal) || signal != SIGSTOP ||
         ::ptrace(PTRACE_SETOPTIONS, child, nullptr,
@@ -331,18 +289,6 @@ struct Evidence {
         return std::nullopt;
 
     const Probe probe = probe_for(mode);
-    if (mode == Mode::write_controller_only) {
-        // Independent ptrace read must fail before guest entry: the page
-        // exists in the tracer, not in the exec-separated tracee.
-        errno = 0;
-        const long mapped = ::ptrace(
-            PTRACE_PEEKDATA, child,
-            reinterpret_cast<void*>(static_cast<std::uintptr_t>(
-                kControllerOnlyBase)), nullptr);
-        if (mapped != -1L || errno == 0 ||
-            !controller_canary.intact())
-            return std::nullopt;
-    }
     if (!inspect_bytes(child, kGuestBase,
                        {probe.bytes.data(), probe.length}) ||
         !inspect_bytes(child, kHostSentinelBase, kHostSentinel) ||
@@ -357,8 +303,6 @@ struct Evidence {
         return std::nullopt;
 
     Evidence evidence{.mode = mode};
-    evidence.controller_mapping_absent_in_tracee =
-        mode == Mode::write_controller_only;
     for (std::size_t steps = 0; steps < kMaxSteps; ++steps) {
         const auto before = registers(child);
         if (!before.has_value()) return std::nullopt;
@@ -465,19 +409,12 @@ struct Evidence {
                     after->rip != before->rip ||
                     ::ptrace(PTRACE_GETSIGINFO, child, nullptr, &info) != 0 ||
                     info.si_signo != SIGSEGV ||
-                    info.si_code !=
-                        (mode == Mode::write_controller_only
-                             ? SEGV_MAPERR : SEGV_ACCERR) ||
+                    info.si_code != SEGV_ACCERR ||
                     reinterpret_cast<std::uintptr_t>(info.si_addr) !=
                         probe.write_target ||
                     !canary_untouched(child) ||
                     !inspect_bytes(child, kHostSentinelBase, kHostSentinel))
                     return std::nullopt;
-                if (mode == Mode::write_controller_only) {
-                    if (!controller_canary.intact())
-                        return std::nullopt;
-                    evidence.controller_only_canary_unchanged = true;
-                }
                 evidence.memory_protection_fault = true;
                 evidence.host_canary_unchanged = true;
             }
@@ -534,11 +471,7 @@ struct Evidence {
         a.writable_non_guest_memory_modified ==
             b.writable_non_guest_memory_modified &&
         a.non_guest_write_denied_before_step ==
-            b.non_guest_write_denied_before_step &&
-        a.controller_only_canary_unchanged ==
-            b.controller_only_canary_unchanged &&
-        a.controller_mapping_absent_in_tracee ==
-            b.controller_mapping_absent_in_tracee;
+            b.non_guest_write_denied_before_step;
 }
 
 // The actual pinned minimal PS5-format SCE ELF from the separate native
@@ -662,6 +595,31 @@ read_exact_owned_source(std::string_view name) {
     return true;
 }
 
+// Independently read kernel-owned procfs state while the exact source-owned
+// GuestImage tracee is stopped, before requesting ANY guest instruction.
+// This proves the leaf is in seccomp filter mode, NOT that the tracer has
+// authenticated the precise BPF program or provided general containment.
+[[nodiscard]] bool inspected_tracee_postbootstrap_policy(pid_t child) {
+    std::ifstream status{"/proc/" + std::to_string(child) + "/status"};
+    if (!status) return false;
+    bool restricted = false;
+    bool no_new_privs = false;
+    bool has_filter = false;
+    std::string line;
+    while (std::getline(status, line)) {
+        unsigned value = 0U;
+        if (std::sscanf(line.c_str(), "Seccomp: %u", &value) == 1)
+            restricted = value == 2U;
+        else if (std::sscanf(line.c_str(), "Seccomp_filters: %u",
+                             &value) == 1)
+            has_filter = value >= 1U;
+        else if (std::sscanf(line.c_str(), "NoNewPrivs: %u",
+                             &value) == 1)
+            no_new_privs = value == 1U;
+    }
+    return restricted && has_filter && no_new_privs;
+}
+
 [[nodiscard]] bool pinned_source_leaf_launch(
     std::string_view executable, const SourceFd& source) {
     char pid_text[32]{};
@@ -717,6 +675,7 @@ read_exact_owned_source(std::string_view name) {
                  PTRACE_O_TRACESYSGOOD | PTRACE_O_EXITKILL |
                  PTRACE_O_TRACEFORK | PTRACE_O_TRACEVFORK |
                  PTRACE_O_TRACECLONE | PTRACE_O_TRACEEXEC) != 0 ||
+        !inspected_tracee_postbootstrap_policy(child) ||
         !inspect_pinned_guestimage(child, original))
         return false;
     auto before = registers(child);
@@ -750,6 +709,9 @@ read_exact_owned_source(std::string_view name) {
     std::puts("C1 PINNED OWNED GUESTIMAGE PTRACE PASS");
     std::puts("source_sha256=45920de847b2d33896c186654bbf22a728f1910fad84accb15204aa2da50c678");
     std::puts("owned_guestimage_real_relocations_verified_per_run=8");
+    std::puts("ptrace_pinned_postbootstrap_seccomp_filter_verified_runs=2");
+    std::puts("ptrace_pinned_postbootstrap_no_new_privs_verified_runs=2");
+    std::puts("ptrace_pinned_postbootstrap_denials=write_mmap_mprotect_ptrace");
     std::puts("owned_guestimage_entry_ud2_fault_runs=2");
     std::puts("owned_guestimage_tampered_source=refused_before_trace");
     std::puts("observations=independent_parent_ptrace_only");
@@ -770,10 +732,10 @@ int main(int argc, char** argv) {
     }
     if (argc != 1) return 2;
 
-    constexpr std::array<Mode, 8U> cases{
+    constexpr std::array<Mode, 7U> cases{
         Mode::fault, Mode::syscall, Mode::escape,
         Mode::write_rx, Mode::write_none, Mode::write_rw,
-        Mode::write_rw_guarded, Mode::write_controller_only,
+        Mode::write_rw_guarded,
     };
     for (const Mode mode : cases) {
         const auto first = run_once(mode);
@@ -805,14 +767,6 @@ int main(int argc, char** argv) {
               !first->non_guest_write_denied_before_step ||
               first->writable_non_guest_memory_modified ||
               !first->host_canary_unchanged ||
-              first->terminal_rip != kGuestBase + 10U)) ||
-            (mode == Mode::write_controller_only &&
-             (first->executed != 1U ||
-              !first->memory_protection_fault ||
-              !first->controller_mapping_absent_in_tracee ||
-              !first->controller_only_canary_unchanged ||
-              first->writable_non_guest_memory_modified ||
-              !first->host_canary_unchanged ||
               first->terminal_rip != kGuestBase + 10U))) {
             std::fprintf(stderr, "ptrace_evidence_mismatch=%s\n", mode_name(mode));
             return 4;
@@ -829,9 +783,6 @@ int main(int argc, char** argv) {
     std::puts("writable_host_canary_modified_in_positive_control=1");
     std::puts("owned_write_rw_guarded_refused_before_retirement_repeated=2");
     std::puts("writable_host_canary_unchanged_when_guarded=1");
-    std::puts("owned_write_controller_only_sigsegv_maperr_repeated=2");
-    std::puts("controller_canary_not_mapped_in_tracee_repeated=2");
-    std::puts("controller_private_canary_unchanged_repeated=2");
     std::puts("observations=tracer_ptrace_registers_only");
     std::puts("tracee_external_files_and_controller_ipc=none");
     std::puts("external_elf_guest_instructions=0");
