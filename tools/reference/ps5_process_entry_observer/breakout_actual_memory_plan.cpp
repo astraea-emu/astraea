@@ -883,6 +883,25 @@ prepare_temporary_breakout_guest_memory(
         callee->context.rbp != callee->initial_callee_rsp - 8U ||
         callee->context.rsp != callee->initial_callee_rsp - 280U)
         return 33;
+    {
+        // Compare the observed raw word with the original initialized
+        // source bytes. This is data provenance, NOT provider resolution.
+        const auto original_view = image->initialized_image_view();
+        const auto range = m::GuestRange::create(
+            m::GuestAddress{callee->unresolved_got_slot},
+            m::GuestSize{8U});
+        std::array<std::byte, 8U> source_word{};
+        if (!original_view.has_value() || !range.has_value() ||
+            !original_view->copy_bytes(range.value(),
+                                       source_word).has_value())
+            return 55;
+        std::uint64_t expected_word = 0U;
+        for (std::size_t i = 0U; i < source_word.size(); ++i)
+            expected_word |= std::to_integer<std::uint64_t>(
+                source_word[i]) << (i * 8U);
+        if (callee->unresolved_got_raw_word != expected_word)
+            return 56;
+    }
     // Ensure the entry CALL's return address is still present in the
     // owned stack buffer following all eleven real callee prologue steps.
     const auto return_index = callee->initial_callee_rsp -
@@ -959,6 +978,29 @@ prepare_temporary_breakout_guest_memory(
             denied.error() != astraea::research::
                 OwnedCalleeError::decode_refused)
             return 51;
+    }
+    {
+        // Original source-backed GOT bytes exist, but the CALL operand
+        // is inaccessible without guest READ permission. No pointer is
+        // followed and no CALL state is committed.
+        auto changed = image.value();
+        const auto write_only = m::GuestPermissions::checked_from_bits(2U);
+        if (!write_only.has_value()) return 52;
+        bool changed_owner = false;
+        for (auto& mapping : changed.mappings) {
+            if (mapping.range.contains(m::GuestAddress{0x68c8U}) &&
+                mapping.permissions.has(m::GuestPermission::write)) {
+                mapping.permissions = write_only.value();
+                changed_owner = true;
+            }
+        }
+        if (!changed_owner) return 53;
+        const auto refused = astraea::research::run_owned_breakout_callee(
+            changed, interpreted.value());
+        if (refused.has_value() ||
+            refused.error() != astraea::research::
+                OwnedCalleeError::missing_import_metadata)
+            return 54;
     }
     {
         auto changed = image.value();
@@ -1171,12 +1213,13 @@ prepare_temporary_breakout_guest_memory(
               << callee->stopped_call_rip << std::dec << '\n'
               << "breakout_owned_callee_got_slot=0x" << std::hex
               << callee->unresolved_got_slot << std::dec << '\n'
+              << "breakout_owned_callee_got_word=observed_read_only_no_transfer\n"
               << "breakout_owned_callee_symbol_index="
               << callee->unresolved_symbol_index << '\n'
               << "breakout_owned_callee_bare_nid="
               << callee->unresolved_bare_nid << '\n'
               << "breakout_owned_callee_stack_retaddr=preserved\n"
-              << "breakout_owned_callee_negative_cases=4_refused\n"
+              << "breakout_owned_callee_negative_cases=5_refused\n"
               << "breakout_owned_callee_native_guest_execution=0\n"
               << "breakout_owned_callee_sony_provider_calls=0\n";
     constexpr char hex_digits[] = "0123456789abcdef";

@@ -37,6 +37,8 @@ struct OwnedCalleeEvidence {
     std::size_t guest_stack_writes = 0U;
     std::uint64_t stopped_call_rip = 0U;
     std::uint64_t unresolved_got_slot = 0U;
+    // Observed raw little-endian GOT word; NEVER an authenticated target.
+    std::uint64_t unresolved_got_raw_word = 0U;
     std::uint32_t unresolved_symbol_index = 0U;
     std::string unresolved_bare_nid;
     // This is a typed stop BEFORE CALL; no register, stack or RIP

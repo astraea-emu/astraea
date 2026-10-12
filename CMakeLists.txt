@@ -295,6 +295,7 @@ if(ASTRAEA_BUILD_C1_RESEARCH)
         tools/reference/ps5_process_entry_observer/breakout_owned_callee_execution.cpp
         tools/reference/ps5_process_entry_observer/owned_guest_address_space.cpp
         tools/reference/ps5_process_entry_observer/owned_cpu_step.cpp
+        tools/reference/ps5_process_entry_observer/owned_indirect_call_observation.cpp
     )
     target_link_libraries(astraea_c1_breakout_memory_plan_research
         PRIVATE Astraea::core Zydis)
@@ -326,6 +327,19 @@ if(ASTRAEA_BUILD_C1_RESEARCH)
         PRIVATE Astraea::core Zydis)
     astraea_set_project_warnings(astraea_c1_owned_cpu_step_research)
     astraea_enable_sanitizers(astraea_c1_owned_cpu_step_research)
+
+    # Source-owned, non-retiring indirect CALL observation under virtual
+    # execute/read permissions. Never follows an unresolved target.
+    add_executable(astraea_c1_indirect_call_research
+        tools/reference/ps5_process_entry_observer/owned_indirect_call_observation.cpp
+        tools/reference/ps5_process_entry_observer/owned_cpu_step.cpp
+        tools/reference/ps5_process_entry_observer/owned_guest_address_space.cpp
+        tools/reference/ps5_process_entry_observer/owned_indirect_call_observation_selftest.cpp
+    )
+    target_link_libraries(astraea_c1_indirect_call_research
+        PRIVATE Astraea::core Zydis)
+    astraea_set_project_warnings(astraea_c1_indirect_call_research)
+    astraea_enable_sanitizers(astraea_c1_indirect_call_research)
 endif()
 
 astraea_verify_explicit_cpp_sources(

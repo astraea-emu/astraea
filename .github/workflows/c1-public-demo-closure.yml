@@ -40,7 +40,7 @@ jobs:
             -DASTRAEA_WARNINGS_AS_ERRORS=ON \
             -DASTRAEA_BUILD_C1_RESEARCH=ON
           cmake --build "$RUNNER_TEMP/astraea-public-demo-profile" \
-            --target astraea astraea_c1_breakout_memory_plan_research astraea_c1_owned_guest_memory_research astraea_c1_owned_cpu_step_research --parallel 3
+            --target astraea astraea_c1_breakout_memory_plan_research astraea_c1_owned_guest_memory_research astraea_c1_owned_cpu_step_research astraea_c1_indirect_call_research --parallel 3
 
       - name: Exercise owned virtual guest memory permissions and failures
         run: |
@@ -84,6 +84,24 @@ jobs:
             "breakout_elf_execution=not_part_of_this_test" \
             "native_hostile_code_containment=not_established"; do
             grep -Fx "$expected" "$RUNNER_TEMP/astraea-owned-cpu-step.txt"
+          done
+
+      - name: Test typed checked indirect CALL observation without retirement
+        run: |
+          set -euo pipefail
+          probe="$RUNNER_TEMP/astraea-public-demo-profile/astraea_c1_indirect_call_research"
+          "$probe" | tee "$RUNNER_TEMP/astraea-indirect-call.txt"
+          for expected in \
+            "C1 INDIRECT CALL OBSERVATION PASS" \
+            "rip_relative_got_word=read_via_guest_virtual_memory" \
+            "call_control_transfer=not_retired" \
+            "source_byte_and_context_mismatch=refused" \
+            "nonexec_and_unreadable_got=refused" \
+            "missing_and_truncated_got=refused" \
+            "cpu_and_guest_bytes=unchanged" \
+            "sony_provider_resolution=not_attempted" \
+            "native_guest_execution=none"; do
+            grep -Fx "$expected" "$RUNNER_TEMP/astraea-indirect-call.txt"
           done
 
       - name: Fetch and verify pinned independent Breakout demo
@@ -517,13 +535,15 @@ jobs:
             "$RUNNER_TEMP/actual-breakout-plan.txt"
           grep -Fx "breakout_owned_callee_got_slot=0x68c8" \
             "$RUNNER_TEMP/actual-breakout-plan.txt"
+          grep -Fx "breakout_owned_callee_got_word=observed_read_only_no_transfer" \
+            "$RUNNER_TEMP/actual-breakout-plan.txt"
           grep -Fx "breakout_owned_callee_symbol_index=13" \
             "$RUNNER_TEMP/actual-breakout-plan.txt"
           grep -Fx "breakout_owned_callee_bare_nid=Vo5V8KAwCmk" \
             "$RUNNER_TEMP/actual-breakout-plan.txt"
           grep -Fx "breakout_owned_callee_stack_retaddr=preserved" \
             "$RUNNER_TEMP/actual-breakout-plan.txt"
-          grep -Fx "breakout_owned_callee_negative_cases=4_refused" \
+          grep -Fx "breakout_owned_callee_negative_cases=5_refused" \
             "$RUNNER_TEMP/actual-breakout-plan.txt"
           grep -Fx "breakout_owned_callee_native_guest_execution=0" \
             "$RUNNER_TEMP/actual-breakout-plan.txt"
