@@ -167,10 +167,192 @@ namespace m = astraea::memory;
 
     return true;
 }
+
+[[nodiscard]] bool test_owned_fetch_step() {
+    const auto x = m::GuestPermissions::checked_from_bits(4U);
+    const auto rw = m::GuestPermissions::checked_from_bits(3U);
+    const auto ro = m::GuestPermissions::checked_from_bits(1U);
+    const auto rwx = m::GuestPermissions::checked_from_bits(7U);
+    if (!x.has_value() || !rw.has_value() || !ro.has_value() ||
+        !rwx.has_value()) return false;
+
+    // Independent source-owned program. No Breakout bytes, imports,
+    // source-supplied decoded records, or host-native guest execution.
+    // PUSH RBP; MOV RBP,RSP; SUB RSP,16;
+    // MOV qword [RBP-8],0; CALL [RIP+0x6686] (must NOT retire).
+    std::array<std::byte, 22U> code{
+        std::byte{0x55},
+        std::byte{0x48}, std::byte{0x89}, std::byte{0xe5},
+        std::byte{0x48}, std::byte{0x83}, std::byte{0xec},
+        std::byte{0x10},
+        std::byte{0x48}, std::byte{0xc7}, std::byte{0x45},
+        std::byte{0xf8}, std::byte{0}, std::byte{0},
+        std::byte{0}, std::byte{0},
+        std::byte{0xff}, std::byte{0x15}, std::byte{0x86},
+        std::byte{0x66}, std::byte{0}, std::byte{0},
+    };
+    std::array<std::byte, 256U> stack{};
+    r::OwnedGuestAddressSpace memory;
+    if (!memory.map(0x200U, code, x.value()).has_value() ||
+        !memory.map(0x1000U, stack, rw.value()).has_value())
+        return false;
+    e::GuestCpuContext cpu{};
+    cpu.rip = 0x200U;
+    cpu.rsp = 0x1080U;
+    cpu.rbp = 0x1122334455667788ULL;
+    const auto invalid_budget = r::run_owned_x86_64(cpu, memory, 0U);
+    if (invalid_budget.stop != r::OwnedCpuRunStopCode::invalid_budget ||
+        cpu.rip != 0x200U) return false;
+
+    const auto prefix = r::run_owned_x86_64(cpu, memory, 4U);
+    if (prefix.stop != r::OwnedCpuRunStopCode::budget_exhausted ||
+        prefix.retired_instructions != 4U ||
+        prefix.guest_writes != 2U || cpu.rip != 0x210U ||
+        cpu.rbp != 0x1078U || cpu.rsp != 0x1068U ||
+        stack[0x78U] != std::byte{0x88} ||
+        stack[0x7fU] != std::byte{0x11} ||
+        stack[0x70U] != std::byte{0}) return false;
+
+    const auto before_call = cpu;
+    const auto before_stack = stack;
+    const auto blocked_call = r::run_owned_x86_64(cpu, memory, 5U);
+    if (blocked_call.stop != r::OwnedCpuRunStopCode::step_refused ||
+        blocked_call.stop_rip != 0x210U ||
+        blocked_call.retired_instructions != 0U ||
+        !blocked_call.step_stop.has_value() ||
+        blocked_call.step_stop->code !=
+            r::OwnedCpuStepStopCode::unresolved_control_transfer ||
+        cpu != before_call || stack != before_stack) return false;
+
+    // Instruction bytes require execute permission, not read permission.
+    std::array<std::byte, 1U> no_execute{std::byte{0x55}};
+    r::OwnedGuestAddressSpace forbidden;
+    if (!forbidden.map(0x300U, no_execute, ro.value()).has_value())
+        return false;
+    e::GuestCpuContext at_forbidden{};
+    at_forbidden.rip = 0x300U;
+    const auto refused = r::run_owned_x86_64(
+        at_forbidden, forbidden, 1U);
+    if (refused.stop != r::OwnedCpuRunStopCode::fetch_refused ||
+        !refused.memory_fault.has_value() ||
+        refused.memory_fault->code !=
+            r::OwnedGuestMemoryError::permission_denied ||
+        at_forbidden.rip != 0x300U) return false;
+
+    e::GuestCpuContext at_unmapped{};
+    at_unmapped.rip = 0x500U;
+    const auto missing = r::run_owned_x86_64(
+        at_unmapped, forbidden, 1U);
+    if (missing.stop != r::OwnedCpuRunStopCode::fetch_refused ||
+        !missing.memory_fault.has_value() ||
+        missing.memory_fault->code != r::OwnedGuestMemoryError::unmapped)
+        return false;
+
+    // An incomplete two-byte encoding has no permission to decode past
+    // the one executable byte. The stopped CPU remains untouched.
+    std::array<std::byte, 1U> truncated{std::byte{0x0f}};
+    r::OwnedGuestAddressSpace partial;
+    if (!partial.map(0x600U, truncated, x.value()).has_value())
+        return false;
+    e::GuestCpuContext at_partial{};
+    at_partial.rip = 0x600U;
+    const auto partial_stop = r::run_owned_x86_64(
+        at_partial, partial, 1U);
+    if (partial_stop.stop != r::OwnedCpuRunStopCode::fetch_refused ||
+        partial_stop.retired_instructions != 0U ||
+        !partial_stop.memory_fault.has_value() ||
+        partial_stop.memory_fault->guest_address != 0x601U ||
+        at_partial.rip != 0x600U) return false;
+
+    // A valid short instruction may end at a region boundary. A
+    // multi-byte instruction may also span two adjacent executable maps.
+    std::array<std::byte, 1U> first{std::byte{0x48}};
+    std::array<std::byte, 2U> second{
+        std::byte{0x89}, std::byte{0xe5}};
+    r::OwnedGuestAddressSpace adjacent;
+    if (!adjacent.map(0x900U, first, x.value()).has_value() ||
+        !adjacent.map(0x901U, second, x.value()).has_value())
+        return false;
+    e::GuestCpuContext cross{};
+    cross.rip = 0x900U;
+    cross.rsp = 0x1234U;
+    const auto crossed = r::run_owned_x86_64(cross, adjacent, 1U);
+    if (crossed.stop != r::OwnedCpuRunStopCode::budget_exhausted ||
+        crossed.retired_instructions != 1U ||
+        cross.rip != 0x903U || cross.rbp != 0x1234U) return false;
+
+    // Fresh bytes are fetched on each invocation. Replacing PUSH with
+    // UD2 must never execute a cached earlier PUSH record.
+    std::array<std::byte, 2U> mutable_code{
+        std::byte{0x55}, std::byte{0x90}};
+    std::array<std::byte, 64U> mutable_stack{};
+    r::OwnedGuestAddressSpace mutable_memory;
+    if (!mutable_memory.map(
+            0xa00U, mutable_code, rwx.value()).has_value() ||
+        !mutable_memory.map(
+            0xb00U, mutable_stack, rw.value()).has_value())
+        return false;
+    e::GuestCpuContext changing{};
+    changing.rip = 0xa00U;
+    changing.rsp = 0xb30U;
+    const auto first_run = r::run_owned_x86_64(
+        changing, mutable_memory, 1U);
+    if (first_run.retired_instructions != 1U ||
+        first_run.stop != r::OwnedCpuRunStopCode::budget_exhausted)
+        return false;
+    const std::array<std::byte, 2U> ud2{
+        std::byte{0x0f}, std::byte{0x0b}};
+    if (!mutable_memory.write(0xa00U, ud2).has_value())
+        return false;
+    changing.rip = 0xa00U;
+    const auto unchanged = changing;
+    const auto bytes_before_stop = mutable_stack;
+    const auto mutated = r::run_owned_x86_64(
+        changing, mutable_memory, 1U);
+    if (mutated.stop != r::OwnedCpuRunStopCode::step_refused ||
+        !mutated.step_stop.has_value() ||
+        mutated.step_stop->code !=
+            r::OwnedCpuStepStopCode::unsupported_instruction ||
+        changing != unchanged || mutable_stack != bytes_before_stop)
+        return false;
+
+    // One instruction retires, then a forbidden second-instruction
+    // stack write refuses. Prior progress stays, failed state does not.
+    std::array<std::byte, 4U> before_denial{
+        std::byte{0x48}, std::byte{0x89}, std::byte{0xe5},
+        std::byte{0x50}};
+    std::array<std::byte, 64U> read_only_stack{};
+    r::OwnedGuestAddressSpace denied;
+    if (!denied.map(0xc00U, before_denial, x.value()).has_value() ||
+        !denied.map(0xd00U, read_only_stack, ro.value()).has_value())
+        return false;
+    e::GuestCpuContext partial_cpu{};
+    partial_cpu.rip = 0xc00U;
+    partial_cpu.rsp = 0xd20U;
+    const auto late_refusal = r::run_owned_x86_64(
+        partial_cpu, denied, 4U);
+    if (late_refusal.stop != r::OwnedCpuRunStopCode::step_refused ||
+        late_refusal.stop_rip != 0xc03U ||
+        late_refusal.retired_instructions != 1U ||
+        late_refusal.guest_writes != 0U ||
+        !late_refusal.step_stop.has_value() ||
+        late_refusal.step_stop->code !=
+            r::OwnedCpuStepStopCode::guest_memory_refused ||
+        !late_refusal.step_stop->memory_fault.has_value() ||
+        late_refusal.step_stop->memory_fault->code !=
+            r::OwnedGuestMemoryError::permission_denied ||
+        partial_cpu.rip != 0xc03U || partial_cpu.rbp != 0xd20U ||
+        partial_cpu.rsp != 0xd20U ||
+        read_only_stack != std::array<std::byte, 64U>{})
+        return false;
+
+    return true;
+}
+
 } // namespace
 
 int main() {
-    if (!test_owned_steps()) {
+    if (!test_owned_steps() || !test_owned_fetch_step()) {
         std::fputs("C1 OWNED CPU STEP REFUSED\n", stderr);
         return 1;
     }
@@ -181,6 +363,10 @@ int main() {
     std::puts("failed_guest_write=cpu_and_bytes_unchanged");
     std::puts("guest_register_flags=sub_zero_case_verified");
     std::puts("malformed_record_and_unknown_opcode=refused");
+    std::puts("owned_guest_fetch_step=bounded_and_typed");
+    std::puts("owned_fetch_uses_execute_permission=verified");
+    std::puts("source_mutation_and_partial_faults=refused");
+    std::puts("failed_later_instruction=prior_retirements_only");
     std::puts("breakout_elf_execution=not_part_of_this_test");
     std::puts("native_hostile_code_containment=not_established");
 }
