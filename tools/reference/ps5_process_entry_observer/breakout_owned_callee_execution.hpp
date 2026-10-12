@@ -43,6 +43,9 @@ struct OwnedCalleeEvidence {
     std::size_t applied_relative_patches = 0U;
     std::uint64_t relative_patch_target = 0U;
     std::uint64_t relative_patch_value = 0U;
+    // Each unresolved GLOB_DAT is validated as guest-writable without
+    // binding any provider or mutating any GOT byte.
+    std::size_t preflighted_unresolved_imports = 0U;
     std::size_t untouched_unresolved_imports = 0U;
     std::uint64_t stopped_call_rip = 0U;
     std::uint64_t unresolved_got_slot = 0U;
