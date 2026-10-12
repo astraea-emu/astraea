@@ -84,12 +84,30 @@ OwnedCalleeResult run_owned_breakout_callee(
     };
     if (entry.context.rip != entry.branch_target ||
         entry.context.rsp != entry.guest_stack_write_address ||
-        entry.context.rsp > std::numeric_limits<std::uint64_t>::max() - 7U ||
+        entry.entry_rip != image.elf.header.entry ||
+        entry.initial_rsp != image.initial_stack.rsp.value() ||
+        entry.interpreted_instructions != 2U ||
         image.initial_stack.storage.size().value() != 4096U)
         return fail(OwnedCalleeError::unexpected_context);
+    if (entry.initial_rsp < 8U ||
+        entry.guest_stack_write_address !=
+            ((entry.initial_rsp & ~std::uint64_t{0xfU}) - 8U) ||
+        entry.guest_stack_write_address >
+            std::numeric_limits<std::uint64_t>::max() - 7U ||
+        !image.initial_stack.storage.contains(
+            m::GuestAddress{entry.guest_stack_write_address}) ||
+        !image.initial_stack.storage.contains(
+            m::GuestAddress{entry.guest_stack_write_address + 7U}))
+        return fail(OwnedCalleeError::stack_out_of_bounds);
 
     OwnedCalleeEvidence state{};
-    state.context = entry.context;
+    // The real executable entry is now fetched by the SAME generic
+    // research CPU runner as the subsequent callee. The independent
+    // two-instruction entry interpretation is retained only as an oracle.
+    state.context = e::make_synthetic_initial_context(image);
+    if (state.context.rip != entry.entry_rip ||
+        state.context.rsp != entry.initial_rsp)
+        return fail(OwnedCalleeError::unexpected_context);
     state.initial_callee_rsp = entry.context.rsp;
     state.guest_stack_base = image.initial_stack.storage.base().value();
 
@@ -101,13 +119,6 @@ OwnedCalleeResult run_owned_breakout_callee(
     OwnedGuestAddressSpace memory;
     if (!memory.map(state.guest_stack_base, state.guest_stack_bytes,
                     perms.value()).has_value())
-        return fail(OwnedCalleeError::stack_out_of_bounds);
-
-    // The entry CALL was already retired in #432. Reconstruct its exact
-    // owned simulated return word but do not count it among callee writes.
-    if (!memory.write(
-            entry.guest_stack_write_address,
-            entry.guest_stack_return_word).has_value())
         return fail(OwnedCalleeError::stack_out_of_bounds);
 
     // Stage ORIGINAL GuestImage mapping fragments into ordinary, separately
@@ -136,13 +147,30 @@ OwnedCalleeResult run_owned_breakout_callee(
         source_bytes += length;
     }
 
-    // Decode and step one fresh instruction at a time from the actual
-    // source-backed virtual mappings. The entry CALL was already modeled
-    // by interpret_pinned_breakout_entry; no new Sony startup is assumed.
+    // Run from the actual ELF entry in one bounded invocation: checked
+    // AND RSP,imm; checked CALL rel32; eleven callee instructions; then
+    // refuse the unresolved indirect Sony import before retirement.
+    constexpr std::size_t kExpectedEntryRetirements = 2U;
+    constexpr std::size_t kExpectedCalleeRetirements = 11U;
     const auto run = run_owned_x86_64(
-        state.context, memory, kC1MaxDecodedInstructions);
-    state.retired_instructions = run.retired_instructions;
-    state.guest_stack_writes = run.guest_writes;
+        state.context, memory, kC1MaxDecodedInstructions +
+                               kExpectedEntryRetirements);
+    if (run.retired_instructions !=
+            kExpectedEntryRetirements + kExpectedCalleeRetirements ||
+        run.guest_writes == 0U)
+        return fail(OwnedCalleeError::unsupported_instruction);
+    state.entry_retired_instructions = kExpectedEntryRetirements;
+    state.retired_instructions =
+        run.retired_instructions - kExpectedEntryRetirements;
+    state.guest_stack_writes = run.guest_writes - 1U;
+
+    // Compare the real checked CALL's return-stack effect with the
+    // separately source-backed two-instruction oracle.
+    std::array<std::byte, 8U> saved_return{};
+    if (!memory.read(entry.guest_stack_write_address,
+                     saved_return).has_value() ||
+        saved_return != entry.guest_stack_return_word)
+        return fail(OwnedCalleeError::unexpected_context);
     if (run.stop == OwnedCpuRunStopCode::fetch_refused ||
         run.stop == OwnedCpuRunStopCode::invalid_encoding)
         return fail(OwnedCalleeError::decode_refused);
