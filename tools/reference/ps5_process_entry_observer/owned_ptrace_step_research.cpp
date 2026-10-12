@@ -548,6 +548,8 @@ struct Evidence {
 // only the existing owned research tool builds/relocates its GuestImage.
 constexpr std::string_view kPinnedOwnedSha =
     "45920de847b2d33896c186654bbf22a728f1910fad84accb15204aa2da50c678";
+constexpr std::string_view kTwoInstructionOwnedSha =
+    "cdeab7a242aa88a90a01494ff85ac68f44b15e7a2e588498927e3aa6aae5a947";
 constexpr std::uint64_t kPinnedEntry = kGuestBase + 0x10U;
 constexpr std::uint64_t kPinnedStackOffset = 24ULL * 1024ULL * 1024ULL;
 constexpr std::size_t kMaxPinnedSize = 16U * 1024U * 1024U;
@@ -562,7 +564,8 @@ struct SourceFd {
 };
 
 [[nodiscard]] std::optional<std::vector<std::byte>>
-read_exact_owned_source(std::string_view name) {
+read_exact_owned_source(std::string_view name,
+                        bool two_instructions = false) {
     std::ifstream file(std::string{name}, std::ios::binary | std::ios::ate);
     if (!file) return std::nullopt;
     const auto end = file.tellg();
@@ -573,7 +576,8 @@ read_exact_owned_source(std::string_view name) {
     file.read(reinterpret_cast<char*>(source.data()),
               static_cast<std::streamsize>(source.size()));
     if (file.gcount() != static_cast<std::streamsize>(source.size()) ||
-        astraea::test::owned_pair_sha256_hex(source) != kPinnedOwnedSha)
+        astraea::test::owned_pair_sha256_hex(source) !=
+            (two_instructions ? kTwoInstructionOwnedSha : kPinnedOwnedSha))
         return std::nullopt;
     return source;
 }
@@ -738,7 +742,8 @@ read_tracee_kernel_vmas(pid_t pid) {
 // immutable source, production loader and relocation planner, and real
 // PTRACE_PEEKDATA into the stopped child (NOT its reported result).
 [[nodiscard]] bool inspect_pinned_guestimage(
-    pid_t pid, std::span<const std::byte> source) {
+    pid_t pid, std::span<const std::byte> source,
+    bool two_instructions = false) {
     namespace e = astraea::execution;
     namespace l = astraea::loader;
     namespace m = astraea::memory;
@@ -767,7 +772,13 @@ read_tracee_kernel_vmas(pid_t pid) {
     const auto view = original->initialized_image_view();
     if (!view.has_value()) return false;
     const std::array<unsigned char, 2U> ud2{0x0fU, 0x0bU};
-    if (!inspect_bytes(pid, kPinnedEntry, ud2)) return false;
+    const std::array<unsigned char, 7U> mov_then_ud2{
+        0xb8U, 0x2aU, 0x00U, 0x00U, 0x00U, 0x0fU, 0x0bU,
+    };
+    if (two_instructions
+            ? !inspect_bytes(pid, kPinnedEntry, mov_then_ud2)
+            : !inspect_bytes(pid, kPinnedEntry, ud2))
+        return false;
     std::array<bool, 8U> verified{};
     std::array<std::uint64_t, 8U> targets{};
     for (std::uint64_t i = 0U; i < verified.size(); ++i) {
@@ -828,7 +839,8 @@ read_tracee_kernel_vmas(pid_t pid) {
 }
 
 [[nodiscard]] bool pinned_source_leaf_launch(
-    std::string_view executable, const SourceFd& source) {
+    std::string_view executable, const SourceFd& source,
+    bool two_instructions = false) {
     char pid_text[32]{};
     if (std::snprintf(pid_text, sizeof(pid_text), "%ld",
                       static_cast<long>(::getppid())) <= 0 ||
@@ -847,13 +859,15 @@ read_tracee_kernel_vmas(pid_t pid) {
         return false;
     const std::string binary{executable};
     ::execl(binary.c_str(), binary.c_str(),
-            "--ptrace-owned-leaf", static_cast<char*>(nullptr));
+            two_instructions ? "--ptrace-owned-two-step-leaf"
+                             : "--ptrace-owned-leaf",
+            static_cast<char*>(nullptr));
     return false;
 }
 
 [[nodiscard]] bool run_pinned_once(
     std::string_view executable, std::span<const std::byte> original,
-    bool corrupt_artifact) {
+    bool corrupt_artifact, bool two_instructions = false) {
     ::alarm(12U);
     std::vector<std::byte> bytes(original.begin(), original.end());
     if (corrupt_artifact) bytes[0] ^= std::byte{1U};
@@ -862,7 +876,8 @@ read_tracee_kernel_vmas(pid_t pid) {
     const pid_t child = ::fork();
     if (child < 0) return false;
     if (child == 0)
-        ::_exit(pinned_source_leaf_launch(executable, artifact) ? 90 : 91);
+        ::_exit(pinned_source_leaf_launch(
+            executable, artifact, two_instructions) ? 90 : 91);
     ChildGuard guard{child};
     int status = 0;
     pid_t waited = -1;
@@ -883,7 +898,7 @@ read_tracee_kernel_vmas(pid_t pid) {
                  PTRACE_O_TRACEFORK | PTRACE_O_TRACEVFORK |
                  PTRACE_O_TRACECLONE | PTRACE_O_TRACEEXEC) != 0 ||
         !inspected_tracee_postbootstrap_policy(child) ||
-        !inspect_pinned_guestimage(child, original))
+        !inspect_pinned_guestimage(child, original, two_instructions))
         return false;
     auto before = registers(child);
     if (!before.has_value()) return false;
@@ -893,25 +908,60 @@ read_tracee_kernel_vmas(pid_t pid) {
     if (::ptrace(PTRACE_SYSEMU_SINGLESTEP, child, nullptr, nullptr) != 0)
         return false;
     int signal = 0;
+    if (two_instructions) {
+        // Exactly one ordinary source-built guest instruction retires.
+        // The independent controller observes registers; the leaf emits
+        // neither a guest trace nor a trusted stop record.
+        if (!wait_stop(child, signal) || signal != SIGTRAP)
+            return false;
+        const auto after_mov = registers(child);
+        if (!after_mov.has_value() ||
+            after_mov->rip != kPinnedEntry + 5U ||
+            after_mov->rax != 42U ||
+            !inspect_pinned_guestimage(child, original, true) ||
+            ::ptrace(PTRACE_SYSEMU_SINGLESTEP,
+                     child, nullptr, nullptr) != 0)
+            return false;
+    }
     if (!wait_stop(child, signal) || signal != SIGILL)
         return false;
     const auto after = registers(child);
-    if (!after.has_value() || after->rip != kPinnedEntry ||
-        !inspect_pinned_guestimage(child, original))
+    if (!after.has_value() ||
+        after->rip != kPinnedEntry + (two_instructions ? 5U : 0U) ||
+        (two_instructions && after->rax != 42U) ||
+        !inspect_pinned_guestimage(child, original, two_instructions))
         return false;
     ::alarm(0);
     return true;
 }
 
 [[nodiscard]] int pinned_elf_controller(
-    std::string_view title_path, std::string_view leaf_executable) {
-    const auto source = read_exact_owned_source(title_path);
+    std::string_view title_path, std::string_view leaf_executable,
+    bool two_instructions = false) {
+    const auto source = read_exact_owned_source(title_path, two_instructions);
     if (!source.has_value()) return 2;
-    if (!run_pinned_once(leaf_executable, source.value(), false) ||
-        !run_pinned_once(leaf_executable, source.value(), false) ||
-        !run_pinned_once(leaf_executable, source.value(), true)) {
+    if (!run_pinned_once(leaf_executable, source.value(), false,
+                         two_instructions) ||
+        !run_pinned_once(leaf_executable, source.value(), false,
+                         two_instructions) ||
+        !run_pinned_once(leaf_executable, source.value(), true,
+                         two_instructions)) {
         std::fputs("pinned_ptrace_guestimage_refused\n", stderr);
         return 3;
+    }
+    if (two_instructions) {
+        std::puts("C1 PINNED OWNED TWO-INSTRUCTION GUESTIMAGE PTRACE PASS");
+        std::puts("source_sha256=cdeab7a242aa88a90a01494ff85ac68f44b15e7a2e588498927e3aa6aae5a947");
+        std::puts("owned_guestimage_mov_eax_42_retirements_per_run=1");
+        std::puts("owned_guestimage_ud2_fault_after_mov_runs=2");
+        std::puts("owned_guestimage_two_step_relocations_verified=8");
+        std::puts("owned_guestimage_two_step_tamper=refused_before_entry");
+        std::puts("observations=independent_parent_ptrace_only");
+        std::puts("source_profile=astraea_owned_synthetic");
+        std::puts("external_guest_instructions=0");
+        std::puts("sony_entry_abi=not_established");
+        std::puts("hostile_guest_sandbox=not_established");
+        return 0;
     }
     std::puts("C1 PINNED OWNED GUESTIMAGE PTRACE PASS");
     std::puts("source_sha256=45920de847b2d33896c186654bbf22a728f1910fad84accb15204aa2da50c678");
@@ -935,6 +985,9 @@ read_tracee_kernel_vmas(pid_t pid) {
 int main(int argc, char** argv) {
     if (argc == 4 && std::string_view(argv[1]) == "--pinned-owned")
         return pinned_elf_controller(argv[2], argv[3]);
+    if (argc == 4 && std::string_view(argv[1]) ==
+            "--pinned-owned-two-step")
+        return pinned_elf_controller(argv[2], argv[3], true);
     if (argc == 3 && std::string_view(argv[1]) == "--leaf") {
         const auto mode = parse_mode(argv[2]);
         return mode.has_value() ? leaf(mode.value()) : 100;

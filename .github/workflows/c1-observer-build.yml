@@ -1112,3 +1112,56 @@ jobs:
               raise SystemExit("tracer admitted altered original ELF")
           print("PINNED GUESTIMAGE PTRACE SOURCE NEGATIVES PASS")
           PY
+
+      - name: Independently trace source-owned two-instruction PS5-format entry and typed fault
+        run: |
+          set -euo pipefail
+          trace="$RUNNER_TEMP/astraea-native-title-smoke/astraea_c1_ptrace_step_research"
+          leaf="$RUNNER_TEMP/astraea-native-title-smoke/astraea_c1_owned_entry_research"
+          title="$RUNNER_TEMP/astraea-two-instruction-native-title/build/eboot.elf"
+          timeout 35s "$trace" --pinned-owned-two-step "$title" "$leaf" \
+            | tee "$RUNNER_TEMP/astraea-c1-owned-two-instruction-trace.txt"
+          for expected in \
+            "C1 PINNED OWNED TWO-INSTRUCTION GUESTIMAGE PTRACE PASS" \
+            "source_sha256=cdeab7a242aa88a90a01494ff85ac68f44b15e7a2e588498927e3aa6aae5a947" \
+            "owned_guestimage_mov_eax_42_retirements_per_run=1" \
+            "owned_guestimage_ud2_fault_after_mov_runs=2" \
+            "owned_guestimage_two_step_relocations_verified=8" \
+            "owned_guestimage_two_step_tamper=refused_before_entry" \
+            "observations=independent_parent_ptrace_only" \
+            "source_profile=astraea_owned_synthetic" \
+            "external_guest_instructions=0" \
+            "sony_entry_abi=not_established" \
+            "hostile_guest_sandbox=not_established"; do
+            grep -Fx "$expected" "$RUNNER_TEMP/astraea-c1-owned-two-instruction-trace.txt"
+          done
+          python3 - <<'PY'
+          import os
+          import subprocess
+          from pathlib import Path
+          root = Path(os.environ["RUNNER_TEMP"])
+          trace = root / "astraea-native-title-smoke/astraea_c1_ptrace_step_research"
+          leaf = root / "astraea-native-title-smoke/astraea_c1_owned_entry_research"
+          old_title = root / "astraea-minimal-native-title/build/eboot.elf"
+          two_title = root / "astraea-two-instruction-native-title/build/eboot.elf"
+          direct = subprocess.run(
+              [str(leaf), "--ptrace-owned-two-step-leaf"],
+              capture_output=True, timeout=5, check=False)
+          if direct.returncode == 0 or direct.stdout or direct.stderr:
+              raise SystemExit("unbound two-instruction leaf admitted")
+          # Strictly prevent confusing the two *separate* hash admission
+          # profiles even though both share the toolchain and eight RELATIVE.
+          for command, artifact in (
+              ("--pinned-owned-two-step", old_title),
+              ("--pinned-owned", two_title),
+          ):
+              result = subprocess.run(
+                  [str(trace), command, str(artifact), str(leaf)],
+                  capture_output=True, timeout=5, check=False)
+              if result.returncode != 2 or result.stdout:
+                  raise SystemExit("wrong pinned source profile admitted")
+          print("SOURCE-OWNED TWO-INSTRUCTION TRACE CROSS-ADMISSION NEGATIVES PASS")
+          print("NO NATIVE BREAKOUT / COMMERCIAL GUEST EXECUTION")
+          PY
+
+
