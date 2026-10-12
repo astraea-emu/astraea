@@ -354,10 +354,104 @@ namespace m = astraea::memory;
     return true;
 }
 
+[[nodiscard]] bool test_checked_direct_entry() {
+    const auto x = m::GuestPermissions::checked_from_bits(4U);
+    const auto rw = m::GuestPermissions::checked_from_bits(3U);
+    const auto ro = m::GuestPermissions::checked_from_bits(1U);
+    if (!x.has_value() || !rw.has_value() || !ro.has_value())
+        return false;
+    // AND RSP,-16; CALL rel32 +0x17 to a separately mapped callee
+    // at 0x720. No import, Sony startup or native execution.
+    std::array<std::byte, 9U> entry{
+        std::byte{0x48}, std::byte{0x83}, std::byte{0xe4},
+        std::byte{0xf0}, std::byte{0xe8}, std::byte{0x17},
+        std::byte{0}, std::byte{0}, std::byte{0}};
+    std::array<std::byte, 1U> callee{std::byte{0x55}};
+    std::array<std::byte, 128U> stack{};
+    r::OwnedGuestAddressSpace memory;
+    if (!memory.map(0x700U, entry, x.value()).has_value() ||
+        !memory.map(0x720U, callee, x.value()).has_value() ||
+        !memory.map(0x1040U, stack, rw.value()).has_value())
+        return false;
+    e::GuestCpuContext cpu{};
+    cpu.rip = 0x700U;
+    cpu.rsp = 0x109fU;
+    cpu.rflags = 0x813U; // CF, OF and AF initially set
+    const auto run = r::run_owned_x86_64(cpu, memory, 2U);
+    if (run.stop != r::OwnedCpuRunStopCode::budget_exhausted ||
+        run.retired_instructions != 2U || run.guest_writes != 1U ||
+        cpu.rip != 0x720U || cpu.rsp != 0x1088U ||
+        (cpu.rflags & (1ULL | (1ULL << 11U))) != 0U ||
+        (cpu.rflags & ((1ULL << 4U) | (1ULL << 2U))) !=
+            ((1ULL << 4U) | (1ULL << 2U)))
+        return false;
+    std::array<std::byte, 8U> return_word{};
+    if (!memory.read(0x1088U, return_word).has_value() ||
+        return_word[0] != std::byte{0x09} ||
+        return_word[1] != std::byte{0x07} ||
+        return_word[7] != std::byte{0})
+        return false;
+
+    // The first instruction may retire while a denied later stack write
+    // refuses before updating the CPU or guest memory for CALL.
+    std::array<std::byte, 128U> readonly_stack{};
+    r::OwnedGuestAddressSpace denied;
+    if (!denied.map(0x700U, entry, x.value()).has_value() ||
+        !denied.map(0x720U, callee, x.value()).has_value() ||
+        !denied.map(0x1040U, readonly_stack, ro.value()).has_value())
+        return false;
+    e::GuestCpuContext no_write{};
+    no_write.rip = 0x700U;
+    no_write.rsp = 0x109fU;
+    const auto refused = r::run_owned_x86_64(no_write, denied, 3U);
+    if (refused.stop != r::OwnedCpuRunStopCode::step_refused ||
+        refused.retired_instructions != 1U ||
+        refused.guest_writes != 0U ||
+        refused.stop_rip != 0x704U ||
+        !refused.step_stop.has_value() ||
+        refused.step_stop->code !=
+            r::OwnedCpuStepStopCode::guest_memory_refused ||
+        no_write.rip != 0x704U || no_write.rsp != 0x1090U ||
+        readonly_stack != std::array<std::byte, 128U>{})
+        return false;
+    // Missing/nonexecutable CALL destination refuses before stack write.
+    std::array<std::byte, 128U> untouched_stack{};
+    r::OwnedGuestAddressSpace missing_target;
+    if (!missing_target.map(0x700U, entry, x.value()).has_value() ||
+        !missing_target.map(0x1040U, untouched_stack, rw.value()).has_value())
+        return false;
+    e::GuestCpuContext no_target{};
+    no_target.rip = 0x704U;
+    no_target.rsp = 0x1090U;
+    const auto before = no_target;
+    const auto direct = record(0x704U,
+        {0xe8, 0x17, 0, 0, 0}, ZYDIS_MNEMONIC_CALL);
+    const auto wrong = r::step_owned_x86_64(
+        direct, no_target, missing_target);
+    if (wrong.has_value() ||
+        wrong.error().code !=
+            r::OwnedCpuStepStopCode::unresolved_control_transfer ||
+        no_target != before ||
+        untouched_stack != std::array<std::byte, 128U>{})
+        return false;
+    // An indirect CALL never retires even if its GOT is mapped.
+    const auto indirect = record(0x704U,
+        {0xff, 0x15, 0x17, 0, 0, 0}, ZYDIS_MNEMONIC_CALL);
+    const auto blocked = r::step_owned_x86_64(
+        indirect, no_target, missing_target);
+    if (blocked.has_value() ||
+        blocked.error().code !=
+            r::OwnedCpuStepStopCode::unresolved_control_transfer ||
+        no_target != before)
+        return false;
+    return true;
+}
+
 } // namespace
 
 int main() {
-    if (!test_owned_steps() || !test_owned_fetch_step()) {
+    if (!test_owned_steps() || !test_owned_fetch_step() ||
+        !test_checked_direct_entry()) {
         std::fputs("C1 OWNED CPU STEP REFUSED\n", stderr);
         return 1;
     }
@@ -372,6 +466,8 @@ int main() {
     std::puts("owned_fetch_uses_execute_permission=verified");
     std::puts("source_mutation_and_partial_faults=refused");
     std::puts("failed_later_instruction=prior_retirements_only");
+    std::puts("owned_direct_entry_and_call=checked_two_instructions");
+    std::puts("direct_call_target_and_stack_denials=pre_retirement");
     std::puts("breakout_elf_execution=not_part_of_this_test");
     std::puts("native_hostile_code_containment=not_established");
 }
