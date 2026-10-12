@@ -908,6 +908,7 @@ prepare_temporary_breakout_guest_memory(
     // same source and compare normalized checked CPU/relocation evidence.
     if (callee->applied_relative_patches != 1U ||
         callee->relative_patch_target != 0x6900U ||
+        callee->preflighted_unresolved_imports != 19U ||
         callee->untouched_unresolved_imports != 19U)
         return 57;
     const auto repeated = astraea::research::run_owned_breakout_callee(
@@ -919,6 +920,8 @@ prepare_temporary_breakout_guest_memory(
             callee->applied_relative_patches ||
         repeated->relative_patch_target != callee->relative_patch_target ||
         repeated->relative_patch_value != callee->relative_patch_value ||
+        repeated->preflighted_unresolved_imports !=
+            callee->preflighted_unresolved_imports ||
         repeated->untouched_unresolved_imports !=
             callee->untouched_unresolved_imports ||
         repeated->stopped_call_rip != callee->stopped_call_rip ||
@@ -1271,6 +1274,8 @@ prepare_temporary_breakout_guest_memory(
               << callee->applied_relative_patches << '\n'
               << "breakout_interpreted_relative_guest_target=0x"
               << std::hex << callee->relative_patch_target << std::dec << '\n'
+              << "breakout_interpreted_import_write_preflighted="
+              << callee->preflighted_unresolved_imports << '\n'
               << "breakout_interpreted_unresolved_imports_unchanged="
               << callee->untouched_unresolved_imports << '\n'
               << "breakout_interpreted_repeat=two_identical_normalized_runs\n"
