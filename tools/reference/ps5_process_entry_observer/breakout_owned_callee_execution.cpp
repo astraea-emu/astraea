@@ -40,8 +40,6 @@ namespace e = astraea::execution;
         return false;
 
     const auto slot = observation.pointer_guest_address;
-    const auto view = image.initialized_image_view();
-    if (!view.has_value()) return false;
     // Demand a unique verified external import relocation for the actual
     // RIP-relative GOT operand; do NOT load a GOT pointer or follow it.
     const auto view = image.initialized_image_view();
