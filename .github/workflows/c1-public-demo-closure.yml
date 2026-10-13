@@ -84,6 +84,9 @@ jobs:
             "owned_direct_entry_and_call=checked_two_instructions" \
             "direct_call_target_and_stack_denials=pre_retirement" \
             "owned_guest_fetch_step=bounded_and_typed" \
+            "owned_cpu_backend_reference_trace=exact_commits_and_writes" \
+            "owned_cpu_backend_stopped_call=no_trace_event" \
+            "owned_cpu_backend_short_trace=refused_without_mutation" \
             "owned_fetch_uses_execute_permission=verified" \
             "source_mutation_and_partial_faults=refused" \
             "failed_later_instruction=prior_retirements_only" \
@@ -550,6 +553,12 @@ jobs:
           grep -Fx "breakout_interpreted_unresolved_imports_unchanged=19" \
             "$RUNNER_TEMP/actual-breakout-plan.txt"
           grep -Fx "breakout_interpreted_repeat=two_identical_normalized_runs" \
+            "$RUNNER_TEMP/actual-breakout-plan.txt"
+          grep -Fx "breakout_backend_reference_trace=13_exact_cpu_and_guest_write_commits" \
+            "$RUNNER_TEMP/actual-breakout-plan.txt"
+          grep -Fx "breakout_backend_reference_trace_repeat=identical" \
+            "$RUNNER_TEMP/actual-breakout-plan.txt"
+          grep -Fx "breakout_backend_reference_trace_unresolved_import=not_retired" \
             "$RUNNER_TEMP/actual-breakout-plan.txt"
           grep -Fx "breakout_interpreted_relative_load_bias=zero_synthetic" \
             "$RUNNER_TEMP/actual-breakout-plan.txt"
