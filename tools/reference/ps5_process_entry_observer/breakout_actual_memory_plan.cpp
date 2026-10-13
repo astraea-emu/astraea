@@ -936,6 +936,7 @@ prepare_temporary_breakout_guest_memory(
     }
     if (callee->entry_retired_instructions != 2U ||
         callee->retired_instructions != 11U ||
+        callee->execution_trace_count != 13U ||
         callee->guest_stack_writes != 9U ||
         callee->stopped_call_rip != 0x23cU ||
         callee->context.rip != callee->stopped_call_rip ||
@@ -981,6 +982,8 @@ prepare_temporary_breakout_guest_memory(
             callee->applied_relative_patches ||
         repeated->relative_patch_target != callee->relative_patch_target ||
         repeated->relative_patch_value != callee->relative_patch_value ||
+        repeated->execution_trace_count != callee->execution_trace_count ||
+        repeated->execution_trace != callee->execution_trace ||
         repeated->preflighted_unresolved_imports !=
             callee->preflighted_unresolved_imports ||
         repeated->untouched_unresolved_imports !=
@@ -1389,6 +1392,11 @@ prepare_temporary_breakout_guest_memory(
               << "breakout_interpreted_unresolved_imports_unchanged="
               << callee->untouched_unresolved_imports << '\n'
               << "breakout_interpreted_repeat=two_identical_normalized_runs\n"
+              << "breakout_backend_reference_trace="
+              << callee->execution_trace_count
+              << "_exact_cpu_and_guest_write_commits\n"
+              << "breakout_backend_reference_trace_repeat=identical\n"
+              << "breakout_backend_reference_trace_unresolved_import=not_retired\n"
               << "breakout_interpreted_relative_load_bias=zero_synthetic\n"
               << "breakout_postimport_fallthrough=source_only_no_execution\n"
               << "breakout_postimport_rax_frontier="
