@@ -247,11 +247,15 @@ namespace m = astraea::memory;
         reference_trace[3U].after_context != cpu ||
         !reference_trace[0U].guest_write_address.has_value() ||
         reference_trace[0U].guest_write_address.value() != 0x1078U ||
+        reference_trace[0U].guest_write_size != 8U ||
         reference_trace[0U].guest_write_bytes[0] != std::byte{0x88} ||
         reference_trace[0U].guest_write_bytes[7] != std::byte{0x11} ||
         reference_trace[1U].guest_write_address.has_value() ||
+        reference_trace[1U].guest_write_size != 0U ||
         reference_trace[2U].guest_write_address.has_value() ||
+        reference_trace[2U].guest_write_size != 0U ||
         reference_trace[3U].guest_write_address != 0x1070U ||
+        reference_trace[3U].guest_write_size != 8U ||
         reference_trace[3U].guest_write_bytes !=
             std::array<std::byte, 8U>{})
         return false;
