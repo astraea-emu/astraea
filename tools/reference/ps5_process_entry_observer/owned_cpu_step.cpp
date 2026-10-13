@@ -289,6 +289,7 @@ OwnedCpuStepResult step_owned_x86_64(
         .next_rip = next,
         .guest_writes = guest_writes,
         .guest_write_address = guest_write_address,
+        .guest_write_size = guest_writes == 0U ? 0U : 8U,
         .guest_write_bytes = committed_word,
     });
 }
@@ -385,6 +386,7 @@ OwnedCpuRunReport run_owned_x86_64(
                 .after_rip = cpu.rip,
                 .after_context = cpu,
                 .guest_write_address = committed->guest_write_address,
+                .guest_write_size = committed->guest_write_size,
                 .guest_write_bytes = committed->guest_write_bytes,
             };
         }
