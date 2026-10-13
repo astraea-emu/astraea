@@ -37,8 +37,9 @@ struct OwnedCpuStepStop {
 struct OwnedCpuStepCommit {
     std::uint64_t next_rip = 0U;
     std::size_t guest_writes = 0U;
-    // Explicit guest-visible write effect of the ONE currently supported
-    // write-capable instruction. No host address is ever recorded.
+    // Exact guest-visible effect of a supported write-capable instruction.
+    // The present forms (PUSH/CALL/MOV) each produce at most one 8-byte
+    // guest store. No host address is ever recorded.
     std::optional<std::uint64_t> guest_write_address;
     // Either zero (no write) or exactly eight bytes for the current ISA
     // subset. Wider/partial/multi-write effects require a new contract.
