@@ -328,6 +328,18 @@ if(ASTRAEA_BUILD_C1_RESEARCH)
     astraea_set_project_warnings(astraea_c1_owned_cpu_step_research)
     astraea_enable_sanitizers(astraea_c1_owned_cpu_step_research)
 
+    # Backend-neutral bounded CPU effect/fault ledger with a live bridge
+    # to the checked owned stepper. No production guest engine is changed.
+    add_executable(astraea_c1_owned_effect_ledger_research
+        tools/reference/ps5_process_entry_observer/owned_cpu_step.cpp
+        tools/reference/ps5_process_entry_observer/owned_guest_address_space.cpp
+        tools/reference/ps5_process_entry_observer/owned_cpu_effect_ledger_selftest.cpp
+    )
+    target_link_libraries(astraea_c1_owned_effect_ledger_research
+        PRIVATE Astraea::core Zydis)
+    astraea_set_project_warnings(astraea_c1_owned_effect_ledger_research)
+    astraea_enable_sanitizers(astraea_c1_owned_effect_ledger_research)
+
     # Source-owned, non-retiring indirect CALL observation under virtual
     # execute/read permissions. Never follows an unresolved target.
     add_executable(astraea_c1_indirect_call_research
