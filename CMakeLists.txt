@@ -340,6 +340,17 @@ if(ASTRAEA_BUILD_C1_RESEARCH)
     astraea_set_project_warnings(astraea_c1_owned_effect_ledger_research)
     astraea_enable_sanitizers(astraea_c1_owned_effect_ledger_research)
 
+    # An external Unicorn research process emits frozen source-owned
+    # evidence; this C++ consumer uses only Astraea virtual memory/ledger.
+    add_executable(astraea_c1_unicorn_effect_bridge_research
+        tools/reference/ps5_process_entry_observer/owned_unicorn_effect_bridge.cpp
+        tools/reference/ps5_process_entry_observer/owned_guest_address_space.cpp
+    )
+    target_link_libraries(astraea_c1_unicorn_effect_bridge_research
+        PRIVATE Astraea::core)
+    astraea_set_project_warnings(astraea_c1_unicorn_effect_bridge_research)
+    astraea_enable_sanitizers(astraea_c1_unicorn_effect_bridge_research)
+
     # Source-owned, non-retiring indirect CALL observation under virtual
     # execute/read permissions. Never follows an unresolved target.
     add_executable(astraea_c1_indirect_call_research
