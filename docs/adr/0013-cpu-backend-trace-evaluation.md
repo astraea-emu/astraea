@@ -84,7 +84,10 @@ review. No candidate is declared a winner in this **Proposed** ADR.
   failures to remain visible.
 - Differentially test opcode families against an independent x86 semantic
   oracle; identical output from two Astraea helpers is not enough for
-  semantic correctness.
+  semantic correctness. Raw RFLAGS remains diagnostic data: comparison across
+  engines must mask **architecturally undefined bits per opcode** (e.g. AF
+  after AND), while demanding agreement on all *defined* flag bits. No
+  undefined-bit mask may be invented without independent ISA evidence.
 - Record measured first-pass/warm throughput, repeated p50/p95 latency,
   memory use and test-host identity on supported hosts. Numeric performance
   claims require actually running benchmarks; CI runtimes are not a
