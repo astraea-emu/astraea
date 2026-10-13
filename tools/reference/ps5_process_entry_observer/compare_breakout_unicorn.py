@@ -60,7 +60,7 @@ def parse_reference(path):
                 r"source_x86_callee\[(\d+)\]\.mnemonic=(\w+)", line)
             if matched:
                 check(int(matched[1]) not in mnemonics, "duplicate mnemonic")
-                mnemonics[int(matched[1])] = matched[2]
+                mnemonics[int(matched[1])] = matched[2].upper()
     required = ("version", "source_sha256", "entry", "stack_base",
                 "stack_size", "initial_rsp", "initial_rflags",
                 "relative_target", "relative_value", "unresolved_got",
@@ -75,6 +75,9 @@ def parse_reference(path):
     check(count == 13 and sorted(steps) == list(range(count)),
           "incomplete or reordered 13-step reference")
     check(len(mnemonics) >= 11, "missing source-backed callee mnemonics")
+    for i in range(1, count):
+        check(steps[i - 1][1] == steps[i][0],
+              "discontinuous source-backed instruction trace")
     ref = {x: int(single["c1trace." + x], 16)
            for x in required if x not in
            ("version", "source_sha256", "steps", "import_calls_retired")}
@@ -136,7 +139,7 @@ def run(elf_path, reference_path):
     mapped = map_original_loads(uc, elf)
     stack_base = ref["stack_base"]
     check(stack_base % PAGE == 0 and
-          all((stack_base + i) not in mapped for i in range(0, PAGE, PAGE)) and
+          stack_base not in mapped and
           stack_base <= ref["initial_rsp"] < stack_base + PAGE,
           "invalid or aliased synthetic stack")
     uc.mem_map(stack_base, PAGE, 7)
