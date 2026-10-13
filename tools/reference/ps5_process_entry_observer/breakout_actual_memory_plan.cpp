@@ -839,6 +839,63 @@ prepare_temporary_breakout_guest_memory(
         entry_decode->instructions[1].mnemonic != ZYDIS_MNEMONIC_CALL ||
         !entry_decode->instructions[1].control_flow_boundary)
         return 29;
+    // Independent SOURCE-OWNED decoder fixtures use a disposable copy of
+    // this mapped guest image. They verify the generic RAX dependency and
+    // exceptional/control-flow classification without executing any byte,
+    // changing the exact pinned baseline or assuming Sony ABI semantics.
+    // No fixture may be admitted by the original Breakout source SHA gate.
+    const auto fixture_map = std::find_if(
+        image->mappings.begin(), image->mappings.end(),
+        [&](const m::MappingIntent& mapping) {
+            return mapping.range.contains(entry) &&
+                mapping.backing.kind == m::MappingBackingKind::file;
+        });
+    if (fixture_map == image->mappings.end()) return 66;
+    const auto fixture_offset = fixture_map->backing.file_offset +
+        entry.value() - fixture_map->range.base().value();
+    if (fixture_offset > image->image_bytes.size() ||
+        image->image_bytes.size() - fixture_offset < 6U) return 67;
+    struct OwnedDecodeCase {
+        std::array<std::uint8_t, 6U> bytes;
+        std::size_t length;
+        bool reads_rax;
+        bool overwrites_full_rax;
+        bool control_flow_boundary;
+    };
+    constexpr std::array<OwnedDecodeCase, 15U> kOwnedDecoderCases{{
+        {{0xb8U, 0x2aU, 0U, 0U, 0U, 0U}, 5U, false, true, false}, // mov eax,42
+        {{0xb0U, 0x7fU, 0U, 0U, 0U, 0U}, 2U, false, false, false}, // mov al,127
+        {{0xb4U, 0x7fU, 0U, 0U, 0U, 0U}, 2U, false, false, false}, // mov ah,127
+        {{0x48U, 0x85U, 0xc0U, 0U, 0U, 0U}, 3U, true, false, false}, // test rax,rax
+        {{0x48U, 0x8bU, 0x38U, 0U, 0U, 0U}, 3U, true, false, false}, // mov rdi,[rax]
+        {{0x48U, 0x8dU, 0x40U, 1U, 0U, 0U}, 4U, true, true, false}, // lea rax,[rax+1]
+        {{0xe8U, 0U, 0U, 0U, 0U, 0U}, 5U, false, false, true}, // call rel32
+        {{0xe9U, 0U, 0U, 0U, 0U, 0U}, 5U, false, false, true}, // jmp rel32
+        {{0xc3U, 0U, 0U, 0U, 0U, 0U}, 1U, false, false, true}, // ret
+        {{0x0fU, 0x05U, 0U, 0U, 0U, 0U}, 2U, false, false, true}, // syscall
+        {{0xccU, 0U, 0U, 0U, 0U, 0U}, 1U, false, false, true}, // int3
+        {{0x0fU, 0x0bU, 0U, 0U, 0U, 0U}, 2U, false, false, true}, // ud2
+        {{0x48U, 0x89U, 0xc8U, 0U, 0U, 0U}, 3U, false, true, false}, // mov rax,rcx
+        {{0xecU, 0U, 0U, 0U, 0U, 0U}, 1U, false, false, true}, // in al,dx
+        {{0x48U, 0x89U, 0x18U, 0U, 0U, 0U}, 3U, true, false, false}, // mov [rax],rbx
+    }};
+    for (const auto& fixture : kOwnedDecoderCases) {
+        auto changed = image.value();
+        for (std::size_t n = 0U; n < fixture.length; ++n)
+            changed.image_bytes[static_cast<std::size_t>(
+                fixture_offset) + n] = static_cast<std::byte>(
+                    fixture.bytes[n]);
+        const auto decoded = astraea::research::decode_source_x86_64(
+            changed, interpreted->entry_rip, 1U);
+        if (!decoded.has_value() || decoded->count != 1U ||
+            decoded->instructions[0].length != fixture.length ||
+            decoded->instructions[0].reads_rax != fixture.reads_rax ||
+            decoded->instructions[0].overwrites_full_rax !=
+                fixture.overwrites_full_rax ||
+            decoded->instructions[0].control_flow_boundary !=
+                fixture.control_flow_boundary)
+            return 68;
+    }
     const auto callee_decode =
         astraea::research::decode_source_x86_64(
             image.value(), interpreted->branch_target,
@@ -1313,6 +1370,7 @@ prepare_temporary_breakout_guest_memory(
               << "source_x86_callee_decode_next_rip=0x" << std::hex
               << callee_decode->next_rip << std::dec << '\n'
               << "source_x86_decoder_invalid_requests=3_refused\n"
+              << "source_x86_decoder_rax_boundary_owned_cases=15_pass\n"
               << "source_x86_callee_decoded_instructions=12\n"
               << "breakout_owned_callee_fetch=original_guestimage_virtual_mappings\n"
               << "breakout_unified_entry_callee=13_source_backed_steps\n"

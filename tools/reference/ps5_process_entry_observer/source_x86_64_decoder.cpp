@@ -113,6 +113,14 @@ SourceDecodeResult decode_source_x86_64(
             category == ZYDIS_CATEGORY_COND_BR ||
             category == ZYDIS_CATEGORY_UNCOND_BR ||
             category == ZYDIS_CATEGORY_RET ||
+            // Conservative stop on any exceptional, privileged, or I/O
+            // effect even when it is not classified as a direct branch.
+            // Static linear fallthrough must never imply safe execution.
+            category == ZYDIS_CATEGORY_INTERRUPT ||
+            category == ZYDIS_CATEGORY_SYSCALL ||
+            category == ZYDIS_CATEGORY_SYSTEM ||
+            category == ZYDIS_CATEGORY_IO ||
+            category == ZYDIS_CATEGORY_IOSTRINGOP ||
             instruction.mnemonic == ZYDIS_MNEMONIC_SYSCALL ||
             instruction.mnemonic == ZYDIS_MNEMONIC_SYSENTER ||
             instruction.mnemonic == ZYDIS_MNEMONIC_INT ||
