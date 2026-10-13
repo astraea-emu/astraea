@@ -9,6 +9,7 @@ import hashlib
 import re
 import struct
 import sys
+import traceback
 from pathlib import Path
 
 PINNED_SHA256 = "05c414993d1cd9e7182bbf5647be1ffad72c6ed6b6f5399d01af27281fef48b8"
@@ -231,7 +232,11 @@ def main():
     try:
         run(args.original_elf, args.astraea_trace)
     except (ValueError, OSError, IndexError, KeyError, struct.error) as exc:
-        print(f"C1 UNICORN PARITY REFUSED: {exc}", file=sys.stderr)
+        print(f"C1 UNICORN PARITY REFUSED: {type(exc).__name__}: {exc}",
+              file=sys.stderr)
+        # On a frozen, hash-pinned research input, point to the exact
+        # comparator operation that failed without catching/forgiving it.
+        traceback.print_exc(limit=8, file=sys.stderr)
         return 1
     return 0
 
