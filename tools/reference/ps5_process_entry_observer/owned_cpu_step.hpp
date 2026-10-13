@@ -40,6 +40,9 @@ struct OwnedCpuStepCommit {
     // Explicit guest-visible write effect of the ONE currently supported
     // write-capable instruction. No host address is ever recorded.
     std::optional<std::uint64_t> guest_write_address;
+    // Either zero (no write) or exactly eight bytes for the current ISA
+    // subset. Wider/partial/multi-write effects require a new contract.
+    std::size_t guest_write_size = 0U;
     std::array<std::byte, 8U> guest_write_bytes{};
 };
 
@@ -87,6 +90,9 @@ struct OwnedCpuTraceStep {
     std::uint64_t after_rip = 0U;
     astraea::execution::GuestCpuContext after_context{};
     std::optional<std::uint64_t> guest_write_address;
+    // Either zero (no write) or exactly eight bytes for the current ISA
+    // subset. Wider/partial/multi-write effects require a new contract.
+    std::size_t guest_write_size = 0U;
     std::array<std::byte, 8U> guest_write_bytes{};
 
     auto operator<=>(const OwnedCpuTraceStep&) const = default;
