@@ -694,6 +694,39 @@ read_tracee_kernel_vmas(pid_t pid) {
     return true;
 }
 
+// The native GuestImage tracee contains ordinary host runtime mappings
+// besides its exact guest-page plan. Read the kernel's VMA table from the
+// independent controller and COUNT writable VMAs not completely covered by
+// planned guest regions. This documents the concrete remaining containment
+// gap before admitting any outside-authored native code. Never classify
+// syscall restrictions or ptrace tracing as protection from ordinary stores.
+[[nodiscard]] std::optional<std::size_t>
+count_non_guest_writable_vmas(
+    const astraea::execution::ExecutionMemoryPlan& plan,
+    const std::vector<KernelVma>& observed) {
+    if (plan.regions.empty() || observed.empty()) return std::nullopt;
+    std::size_t count = 0U;
+    for (const auto& vma : observed) {
+        if (vma.first >= vma.limit) return std::nullopt;
+        if (vma.protection[1] != 'w') continue;
+        auto cursor = vma.first;
+        for (const auto& region : plan.regions) {
+            const auto start = region.range.base().value();
+            const auto span = region.range.size().value();
+            if (span == 0U ||
+                start > std::numeric_limits<std::uint64_t>::max() - span)
+                return std::nullopt;
+            const auto limit = start + span;
+            if (limit <= cursor) continue;
+            if (start > cursor) break;
+            cursor = std::min(vma.limit, limit);
+            if (cursor == vma.limit) break;
+        }
+        if (cursor != vma.limit) ++count;
+    }
+    return count;
+}
+
 [[nodiscard]] bool inspect_pinned_kernel_guest_page_plan(
     pid_t pid, const astraea::loader::GuestImage& image) {
     namespace e = astraea::execution;
@@ -720,6 +753,39 @@ read_tracee_kernel_vmas(pid_t pid) {
     const auto observed = read_tracee_kernel_vmas(pid);
     if (!plan.has_value() || !observed.has_value() ||
         !kernel_plan_matches(plan.value(), observed.value()))
+        return false;
+
+    // Real, independently observed stopped tracee VMAs expose at least
+    // one writable page outside any admitted GuestImage page. If this ever
+    // changes, do not silently promote the leaf to hostile-code safety:
+    // reassess the classifier and the remaining host capabilities.
+    const auto uncontained =
+        count_non_guest_writable_vmas(plan.value(), observed.value());
+    if (!uncontained.has_value() || uncontained.value() == 0U)
+        return false;
+
+    // Independent classification controls on LOCAL COPIES of kernel
+    // evidence (never alter tracee VMAs): clearing one non-guest write
+    // permission decreases the outside count, while clearing a guest-owned
+    // writable entry leaves it unchanged. A naive "all writable VMAs"
+    // counter would fail the latter control.
+    bool non_guest_classification_control = false;
+    bool guest_exclusion_control = false;
+    for (std::size_t i = 0U; i < observed->size(); ++i) {
+        if ((*observed)[i].protection[1] != 'w') continue;
+        auto altered_vmas = observed.value();
+        altered_vmas[i].protection[1] = '-';
+        const auto revised =
+            count_non_guest_writable_vmas(plan.value(), altered_vmas);
+        if (revised.has_value()) {
+            if (revised.value() < uncontained.value() &&
+                uncontained.value() - revised.value() == 1U)
+                non_guest_classification_control = true;
+            if (revised.value() == uncontained.value())
+                guest_exclusion_control = true;
+        }
+    }
+    if (!non_guest_classification_control || !guest_exclusion_control)
         return false;
 
     // A negative checks that the matching logic would reject an
@@ -970,6 +1036,9 @@ read_tracee_kernel_vmas(pid_t pid) {
     std::puts("owned_guestimage_wrong_entry_permissions=refused");
     std::puts("ptrace_pinned_postbootstrap_seccomp_filter_verified_runs=2");
     std::puts("ptrace_pinned_postbootstrap_no_new_privs_verified_runs=2");
+    std::puts("ptrace_pinned_non_guest_writable_vmas=kernel_observed_in_both_runs");
+    std::puts("ptrace_pinned_non_guest_writable_classifier_control=passed");
+    std::puts("ptrace_pinned_general_host_memory_containment=not_established");
     std::puts("ptrace_pinned_postbootstrap_denials=write_mmap_mprotect_ptrace_invalid_tgkill");
     std::puts("owned_guestimage_entry_ud2_fault_runs=2");
     std::puts("owned_guestimage_tampered_source=refused_before_trace");
