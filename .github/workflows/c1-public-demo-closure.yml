@@ -820,3 +820,27 @@ jobs:
           done
           test "$(grep -c '^C1 OWNED UNICORN CASE PASS:' \
             "$RUNNER_TEMP/astraea-unicorn-owned-conformance.txt")" = 12
+
+      # Characterize the commit/fault boundary for future CPU trace design.
+      # The existing single-eight-byte-write trace cannot represent these
+      # wider, repeated or partially committed instruction effects.
+      - name: Qualify mediated wide, repeated and restartable write effects
+        run: |
+          set -euo pipefail
+          script="tools/reference/ps5_process_entry_observer/qualify_unicorn_effect_boundaries.py"
+          python3 -m py_compile "$script"
+          "$RUNNER_TEMP/astraea-unicorn-c1-venv/bin/python" "$script" |
+            tee "$RUNNER_TEMP/astraea-unicorn-effect-boundaries.txt"
+          for claim in \
+            "C1 UNICORN RESTARTABLE EFFECT BOUNDARY PASS" \
+            "source_owned_effect_cases=4" \
+            "faulting_rep=partial_guest_mutation_before_fault" \
+            "faulting_rep_architecture=restartable_context" \
+            "wide_write=readback_not_64_bit_hook_value" \
+            "locked_rmw=single_thread_no_atomicity_claim" \
+            "host_native_execution=none" \
+            "sony_imports=unresolved"; do
+            grep -Fx "$claim" "$RUNNER_TEMP/astraea-unicorn-effect-boundaries.txt"
+          done
+          test "$(grep -c '^C1 UNICORN EFFECT CASE PASS:' \
+            "$RUNNER_TEMP/astraea-unicorn-effect-boundaries.txt")" = 4

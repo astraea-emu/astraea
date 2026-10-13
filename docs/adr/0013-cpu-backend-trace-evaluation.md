@@ -29,10 +29,17 @@ guest-memory ownership, and performance.
    single-write subset's exact guest-VA address, **explicit width (0 or 8
    bytes)** and contents. Multi-write, vector and variable-width effects
    must be added to this contract and independently qualified before those
-   opcodes can be evaluated. Unsupported calls, faults and
-   disallowed stores must be pre-retirement typed stops with **zero**
-   committed event for the stopped instruction. Instruction budgets are
-   strict and original mapped bytes have their own immutable provenance.
+   opcodes can be evaluated. For the current supported subset, unsupported
+   calls and denied writes must refuse **before** changing guest CPU/memory
+   state and must emit no retirement event. **This is not a universal x86
+   fault-atomicity rule:** a repeating string instruction can commit earlier
+   iterations before an exception, leaving RIP at the faulting instruction
+   and source/destination/count registers at a restartable intermediate state.
+   A future backend contract must represent these already-committed effects,
+   the precise fault stage, and partial CPU state without falsely retiring the
+   whole instruction. A memory-access hook notification alone does not prove
+   successful memory commitment. Instruction budgets are strict and original
+   mapped bytes have their own immutable provenance.
 2. **Current source-backed interpreter is the initial oracle, not the final
    CPU engine.** It now optionally emits caller-owned, bounded exact
    per-retirement records on both original Breakout and independently
