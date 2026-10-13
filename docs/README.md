@@ -30,9 +30,13 @@ Current high-value entries:
 - [`research/c1_pc_first_execution_hardware_readiness_2026-10-09.md`](research/c1_pc_first_execution_hardware_readiness_2026-10-09.md) — immediate C1 priority, PC-only work and hardware-ready checklist;
 - [`research/ps5_initial_process_abi.md`](research/ps5_initial_process_abi.md) — C1 process-entry evidence and promotion boundary;
 - [`research/ps5_process_entry_probe.md`](research/ps5_process_entry_probe.md) — transport-neutral owned-hardware observation contract;
-- [`research/scene_review_2026-10-07.md`](research/scene_review_2026-10-07.md) — current PS5-emulation scene comparison and architecture cross-check;
+- [`research/scene_review_2026-10-07.md`](research/scene_review_2026-10-07.md) — dated PS5-emulation scene comparison; use as historical context, **not** a live compatibility ranking;
 - [`research/sce_agc_link_shaders.md`](research/sce_agc_link_shaders.md) — LinkShaders evidence record;
 - [`research/rdna2-ps5-graphics.md`](research/rdna2-ps5-graphics.md) — generic RDNA2 vs PS5-specific graphics evidence.
+
+- [Breakout integration #378](https://github.com/astraea-emu/astraea/issues/378) — exact independent homebrew entry/import frontier; source-backed non-native stop and unresolved service semantics;
+- [Native containment #410](https://github.com/astraea-emu/astraea/issues/410) — source-owned ptrace/write protections, confirmed host-runtime writable VMAs, and remaining arbitrary guest isolation requirements;
+- [Repository hygiene #168](https://github.com/astraea-emu/astraea/issues/168) — bounded stale-branch triage and admin-only protection/auto-delete settings;
 
 See [`research/README.md`](research/README.md) for the full research index.
 

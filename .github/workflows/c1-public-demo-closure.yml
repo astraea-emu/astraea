@@ -4,6 +4,9 @@ on:
   workflow_dispatch:
   pull_request:
     paths:
+      # Changing live Breakout claims must re-run source-pinned closure.
+      - 'README.md'
+      - 'docs/STATUS.md'
       - '.github/workflows/c1-public-demo-closure.yml'
       - 'src/app/**'
       - 'tools/reference/public_breakout_import_audit.py'
