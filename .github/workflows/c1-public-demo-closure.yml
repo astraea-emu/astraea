@@ -795,3 +795,28 @@ jobs:
               raise SystemExit("modified independent ELF was admitted")
           print("C1 UNICORN EXTERNAL SOURCE/TRACE DRIFT NEGATIVES PASS")
           PY
+
+      # An independent, source-owned instruction/fault corpus supplements
+      # the authentic Breakout comparison above. It never admits native
+      # outside-authored x86 or qualifies a production runtime dependency.
+      - name: Qualify mediated x86-64 stack, faults, permissions and bounded steps
+        run: |
+          set -euo pipefail
+          script="tools/reference/ps5_process_entry_observer/qualify_unicorn_owned_x86.py"
+          python3 -m py_compile "$script"
+          "$RUNNER_TEMP/astraea-unicorn-c1-venv/bin/python" "$script" |
+            tee "$RUNNER_TEMP/astraea-unicorn-owned-conformance.txt"
+          for claim in \
+            "C1 SOURCE-OWNED UNICORN X86-64 FAULT CORPUS PASS" \
+            "source_owned_cases=12" \
+            "code_fixtures=independently_authored" \
+            "memory_permissions=readonly_unmapped_nonexecutable_checked" \
+            "guest_stack=implicit_call_push_ret_verified" \
+            "undefined_and_AF=not_assumed" \
+            "engine=unicorn_2.1.4_external_research_only" \
+            "native_breakout_admission=not_authorized" \
+            "sony_services=not_executed"; do
+            grep -Fx "$claim" "$RUNNER_TEMP/astraea-unicorn-owned-conformance.txt"
+          done
+          test "$(grep -c '^C1 OWNED UNICORN CASE PASS:' \
+            "$RUNNER_TEMP/astraea-unicorn-owned-conformance.txt")" = 12
