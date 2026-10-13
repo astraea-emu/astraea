@@ -75,4 +75,16 @@ using ExecutionMemoryPlanResult =
 [[nodiscard]] ExecutionMemoryPlanResult build_execution_memory_plan(
     const ExecutionMemoryPlanRequest& request);
 
+// Research-facing, pure authorization for ONE prospective guest write.
+// Requires both an exact writable guest mapping/stack range AND writable,
+// non-executable host-page backing in a trusted prepared memory plan.
+// Page-rounded permission alone never grants writes into guest-VA padding.
+// No allocation, mutation, host pointer, ISA decode, or general sandbox.
+[[nodiscard]] bool guest_write_owned_by_plan(
+    const ExecutionMemoryPlan& plan,
+    std::span<const astraea::memory::MappingIntent> guest_mappings,
+    astraea::memory::GuestRange guest_stack,
+    astraea::memory::GuestAddress target,
+    std::size_t byte_count) noexcept;
+
 }  // namespace astraea::execution
