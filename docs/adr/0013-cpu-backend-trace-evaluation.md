@@ -25,8 +25,11 @@ guest-memory ownership, and performance.
 1. **One guest semantic contract, multiple potential host backends.** A CPU
    engine may advance a guest instruction only through Astraea-owned virtual
    mappings and CPU context. It reports each *committed* instruction with
-   before/after guest RIP, full GPR/RFLAGS/FS/GS state, and any exact guest-VA
-   memory write (address and byte values). Unsupported calls, faults and
+   before/after guest RIP, full GPR/RFLAGS/FS/GS state, and the current
+   single-write subset's exact guest-VA address, **explicit width (0 or 8
+   bytes)** and contents. Multi-write, vector and variable-width effects
+   must be added to this contract and independently qualified before those
+   opcodes can be evaluated. Unsupported calls, faults and
    disallowed stores must be pre-retirement typed stops with **zero**
    committed event for the stopped instruction. Instruction budgets are
    strict and original mapped bytes have their own immutable provenance.
