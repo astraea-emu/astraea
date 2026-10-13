@@ -77,3 +77,35 @@ writes crossing mappings, read-modify-write, vector widths, overlapping
 writes, fault recovery and budget handling, while carefully separating
 observation from authorization. Then measure controlled performance and
 evaluate version-specific license/host support before deciding ADR 0013.
+
+## First independently executed mediated-engine bridge
+
+The research-only `emit_unicorn_owned_effects.py` program executes fixed,
+Astraea-authored `REP MOVSB` bytes (`f3a4`) through a **separate**
+version-locked Unicorn 2.1.4 Python environment. It emits a finite v1
+source-owned text transcript only after comparing **all 20 registered
+general/context fields** and the selected final guest bytes against
+independently specified expectations, including source preservation and
+a read-only-page fault's unchanged bytes. Two cases are intentionally
+fixed: a four-byte complete repeat, and a one-byte committed prefix
+followed by a denied second write and restartable RIP/RCX/RSI/RDI.
+
+The separately compiled
+`astraea_c1_unicorn_effect_bridge_research` consumes this **untrusted**
+transcript, refuses unexpected fields/state/writes, replays the expected
+finished bytes into *distinct* Astraea-owned virtual guest memory, and
+records them through `OwnedCpuEffectLedger`. The bridge never links to
+Unicorn, never loads external ELF, and never executes source-authored
+instructions natively; it checks the evidence interchange, not a
+production CPU-engine API. Negative tests corrupt a committed write
+and a partial-fault outcome and require refusal.
+
+**Crucial limitation:** this two-process study does not independently
+prove causality for arbitrary writes, does not expose a generic post-commit
+callback, and does not validate general string instruction behavior,
+concurrency, aliasing, large REP sequences or exception delivery. The
+C++ verifier **models** the already-observed effects by applying known
+bytes; it does not execute REP itself. Only the disposable Unicorn process
+executes the fixed bytes. Both source implementation and runtime-ABI
+adoption remain HOLD pending broader tests, licensing, performance,
+portable embedding and security qualification.
