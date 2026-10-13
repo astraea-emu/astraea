@@ -834,7 +834,10 @@ prepare_temporary_breakout_guest_memory(
         entry_decode->instructions[1].length != 5U ||
         entry_decode->instructions[1].rip != interpreted->entry_rip + 4U ||
         entry_decode->instructions[0].mnemonic != ZYDIS_MNEMONIC_AND ||
-        entry_decode->instructions[1].mnemonic != ZYDIS_MNEMONIC_CALL)
+        entry_decode->instructions[0].reads_rax ||
+        entry_decode->instructions[0].control_flow_boundary ||
+        entry_decode->instructions[1].mnemonic != ZYDIS_MNEMONIC_CALL ||
+        !entry_decode->instructions[1].control_flow_boundary)
         return 29;
     const auto callee_decode =
         astraea::research::decode_source_x86_64(
@@ -843,7 +846,8 @@ prepare_temporary_breakout_guest_memory(
     if (!callee_decode.has_value() ||
         callee_decode->count != astraea::research::kC1MaxDecodedInstructions ||
         callee_decode->instructions[0].rip != interpreted->branch_target ||
-        callee_decode->next_rip <= interpreted->branch_target)
+        callee_decode->next_rip <= interpreted->branch_target ||
+        !callee_decode->instructions[11U].control_flow_boundary)
         return 30;
     // Decoder misuse and a source address without an executable mapping
     // must be typed refusals, not partial or synthetic instruction records.
@@ -928,6 +932,54 @@ prepare_temporary_breakout_guest_memory(
         repeated->unresolved_got_slot != callee->unresolved_got_slot ||
         repeated->unresolved_bare_nid != callee->unresolved_bare_nid)
         return 58;
+
+    // Source-only, no guest continuation: inspect the *compiled* fallthrough
+    // of the verified unretired imported CALL. The author's C source
+    // discards its return, but the compiled register dependency must be
+    // observed independently. Stop at the FIRST RAX read/full overwrite or
+    // control-flow boundary; linear decoding across a CALL/JMP is not a
+    // path or a simulated HLE. All service side effects remain unknown.
+    const auto blocked_import = astraea::research::decode_source_x86_64(
+        image.value(), callee->stopped_call_rip, 1U);
+    if (!blocked_import.has_value() ||
+        blocked_import->count != 1U ||
+        blocked_import->instructions[0].mnemonic != ZYDIS_MNEMONIC_CALL ||
+        blocked_import->instructions[0].length != 6U ||
+        !blocked_import->instructions[0].control_flow_boundary ||
+        blocked_import->next_rip != 0x242U)
+        return 64;
+
+    std::uint64_t postimport_next_rip = blocked_import->next_rip;
+    std::uint64_t postimport_boundary_rip = postimport_next_rip;
+    std::size_t postimport_decoded_count = 0U;
+    std::string_view postimport_rax_frontier = "budget_without_resolution";
+    for (std::size_t i = 0U;
+         i < astraea::research::kC1MaxDecodedInstructions; ++i) {
+        const auto step = astraea::research::decode_source_x86_64(
+            image.value(), postimport_next_rip, 1U);
+        if (!step.has_value() || step->count != 1U) {
+            postimport_rax_frontier = "source_decode_refused";
+            break;
+        }
+        const auto& instruction = step->instructions[0];
+        ++postimport_decoded_count;
+        postimport_boundary_rip = instruction.rip;
+        if (instruction.reads_rax) {
+            postimport_rax_frontier = "read_before_control_boundary";
+            break;
+        }
+        if (instruction.overwrites_full_rax) {
+            postimport_rax_frontier = "overwritten_before_read";
+            break;
+        }
+        if (instruction.control_flow_boundary) {
+            postimport_rax_frontier = "control_boundary_before_read";
+            break;
+        }
+        postimport_next_rip = step->next_rip;
+    }
+    if (postimport_decoded_count == 0U) return 65;
+
     // Ensure the entry CALL's return address is still present in the
     // owned stack buffer following all eleven real callee prologue steps.
     const auto return_index = callee->initial_callee_rsp -
@@ -1280,6 +1332,14 @@ prepare_temporary_breakout_guest_memory(
               << callee->untouched_unresolved_imports << '\n'
               << "breakout_interpreted_repeat=two_identical_normalized_runs\n"
               << "breakout_interpreted_relative_load_bias=zero_synthetic\n"
+              << "breakout_postimport_fallthrough=source_only_no_execution\n"
+              << "breakout_postimport_rax_frontier="
+              << postimport_rax_frontier << '\n'
+              << "breakout_postimport_decoded_instructions="
+              << postimport_decoded_count << '\n'
+              << "breakout_postimport_first_boundary_rip=0x"
+              << std::hex << postimport_boundary_rip << std::dec << '\n'
+              << "breakout_postimport_sony_service_effects=unknown\n"
               << "breakout_owned_callee_stop=unresolved_bare_nid_before_call\n"
               << "breakout_owned_callee_stop_rip=0x" << std::hex
               << callee->stopped_call_rip << std::dec << '\n'

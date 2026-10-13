@@ -548,6 +548,41 @@ jobs:
             "$RUNNER_TEMP/actual-breakout-plan.txt"
           grep -Fx "breakout_interpreted_relative_load_bias=zero_synthetic" \
             "$RUNNER_TEMP/actual-breakout-plan.txt"
+          grep -Fx "breakout_postimport_fallthrough=source_only_no_execution" \
+            "$RUNNER_TEMP/actual-breakout-plan.txt"
+          grep -Fx "breakout_postimport_sony_service_effects=unknown" \
+            "$RUNNER_TEMP/actual-breakout-plan.txt"
+          grep -Fx "breakout_postimport_rax_frontier=control_boundary_before_read" \
+            "$RUNNER_TEMP/actual-breakout-plan.txt"
+          grep -Fx "breakout_postimport_decoded_instructions=4" \
+            "$RUNNER_TEMP/actual-breakout-plan.txt"
+          grep -Fx "breakout_postimport_first_boundary_rip=0x254" \
+            "$RUNNER_TEMP/actual-breakout-plan.txt"
+          python3 - <<'PY'
+          from pathlib import Path
+          import os
+          report = (Path(os.environ["RUNNER_TEMP"]) /
+                    "actual-breakout-plan.txt").read_text().splitlines()
+          expected = {
+              "read_before_control_boundary",
+              "overwritten_before_read",
+              "control_boundary_before_read",
+              "source_decode_refused",
+              "budget_without_resolution",
+          }
+          frontiers = [line.split("=", 1)[1] for line in report
+                       if line.startswith("breakout_postimport_rax_frontier=")]
+          counts = [line.split("=", 1)[1] for line in report
+                    if line.startswith("breakout_postimport_decoded_instructions=")]
+          rip = [line.split("=", 1)[1] for line in report
+                 if line.startswith("breakout_postimport_first_boundary_rip=")]
+          if (len(frontiers) != 1 or frontiers[0] not in expected or
+              len(counts) != 1 or not counts[0].isdigit() or
+              not (1 <= int(counts[0]) <= 12) or len(rip) != 1 or
+              not rip[0].startswith("0x")):
+              raise SystemExit("source-backed post-import RAX audit malformed")
+          print("BREAKOUT POST-IMPORT RAX AUDIT SOURCE-ONLY PASS")
+          PY
           grep -Fx "breakout_owned_callee_stop=unresolved_bare_nid_before_call" \
             "$RUNNER_TEMP/actual-breakout-plan.txt"
           grep -Fx "breakout_owned_callee_stop_rip=0x23c" \
