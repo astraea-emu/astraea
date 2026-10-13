@@ -310,8 +310,14 @@ enum class CheckedStoreGate { allow_guest, deny_non_guest, unsupported };
 // guest mapping intents AND Astraea's own host page-rounded plan. The
 // native tracee's other writable pages are not guest ranges. This
 // source-owned fixture is not the external Breakout GuestImage.
-[[nodiscard]] bool owned_guest_plan_allows_write(
-    std::uint64_t address, std::size_t byte_count) {
+struct OwnedFixtureAuthorization {
+    std::array<astraea::memory::MappingIntent, 2U> mappings;
+    astraea::memory::GuestRange stack;
+    astraea::execution::ExecutionMemoryPlan plan;
+};
+
+[[nodiscard]] std::optional<OwnedFixtureAuthorization>
+make_owned_fixture_authorization() {
     namespace e = astraea::execution;
     namespace m = astraea::memory;
     const auto rx = m::GuestPermissions::checked_from_bits(5U);
@@ -324,7 +330,7 @@ enum class CheckedStoreGate { allow_guest, deny_non_guest, unsupported };
         m::GuestAddress{kOwnedGuestStackBase}, m::GuestSize{kPage});
     if (!rx.has_value() || !rw.has_value() ||
         !code.has_value() || !data.has_value() || !stack.has_value())
-        return false;
+        return std::nullopt;
     constexpr auto kBackingKind = m::MappingBackingKind::anonymous;
     const std::array<m::MappingIntent, 2U> mappings{{
         {
@@ -356,14 +362,17 @@ enum class CheckedStoreGate { allow_guest, deny_non_guest, unsupported };
             .stack_pointer = m::GuestAddress{kOwnedGuestRsp},
             .host_page_size = kPage,
         });
-    return plan.has_value() &&
-        e::guest_write_owned_by_plan(
-            plan.value(), mappings, stack.value(),
-            m::GuestAddress{address}, byte_count);
+    if (!plan.has_value()) return std::nullopt;
+    return OwnedFixtureAuthorization{
+        .mappings = mappings,
+        .stack = stack.value(),
+        .plan = std::move(plan.value()),
+    };
 }
 
 [[nodiscard]] CheckedStoreGate checked_owned_guest_store(
-    pid_t child, const user_regs_struct& before) {
+    pid_t child, const user_regs_struct& before,
+    const OwnedFixtureAuthorization& authority) {
     if (before.rip < kGuestBase ||
         before.rip > kGuestBase + kPage - 3U)
         return CheckedStoreGate::unsupported;
@@ -399,10 +408,18 @@ enum class CheckedStoreGate { allow_guest, deny_non_guest, unsupported };
         bytes[0] != 0xc6U || bytes[1] != 0x00U ||
         bytes[2] != 0x7fU)
         return CheckedStoreGate::unsupported;
-    return owned_guest_plan_allows_write(before.rax, 1U)
+    return astraea::execution::guest_write_owned_by_plan(
+               authority.plan, authority.mappings, authority.stack,
+               astraea::memory::GuestAddress{before.rax}, 1U)
         ? CheckedStoreGate::allow_guest
         : CheckedStoreGate::deny_non_guest;
 }
+
+// Independent controller/kernel VMA observation is defined below the
+// existing read_tracee_kernel_vmas/kernel_plan_matches helpers. It uses
+// the SAME prepared plan that authorizes this fixture's native store.
+[[nodiscard]] bool verified_owned_fixture_kernel_plan(
+    pid_t child, const astraea::execution::ExecutionMemoryPlan& plan);
 
 struct Evidence {
     Mode mode;
@@ -449,6 +466,15 @@ struct Evidence {
                  PTRACE_O_TRACESYSGOOD | PTRACE_O_EXITKILL |
                  PTRACE_O_TRACEFORK | PTRACE_O_TRACEVFORK |
                  PTRACE_O_TRACECLONE | PTRACE_O_TRACEEXEC) != 0)
+        return std::nullopt;
+
+    // Build exact source-owned guest intents and the production host
+    // page-rounded plan ONCE in the independent controller. The first
+    // native instruction may retire only after the controller verifies
+    // these expectations against the tracee's actual kernel VMAs.
+    const auto authority = make_owned_fixture_authorization();
+    if (!authority.has_value() ||
+        !verified_owned_fixture_kernel_plan(child, authority->plan))
         return std::nullopt;
 
     const Probe probe = probe_for(mode);
@@ -521,7 +547,8 @@ struct Evidence {
         if ((mode == Mode::write_rw_guarded ||
              mode == Mode::write_guest_guarded) &&
             before->rip == kGuestBase + 10U) {
-            const auto gate = checked_owned_guest_store(child, before.value());
+            const auto gate = checked_owned_guest_store(
+                child, before.value(), authority.value());
             if (evidence.executed != 1U ||
                 before->rax != probe.write_target ||
                 !canary_untouched(child))
@@ -868,6 +895,34 @@ count_non_guest_writable_vmas(
         if (cursor != vma.limit) ++count;
     }
     return count;
+}
+
+// The policy must be grounded in the actual kernel page protections of
+// the stopped exec-separated fixture, not just our reconstructed plan.
+// Negative control: a locally altered expected guest data permission must
+// disagree with the same unchanged kernel VMAs. Never mutate tracee VMAs.
+[[nodiscard]] bool verified_owned_fixture_kernel_plan(
+    pid_t child, const astraea::execution::ExecutionMemoryPlan& plan) {
+    const auto observed = read_tracee_kernel_vmas(child);
+    if (!observed.has_value() ||
+        !kernel_plan_matches(plan, observed.value()))
+        return false;
+    auto altered = plan;
+    bool touched_guest_data = false;
+    const auto rx = astraea::memory::GuestPermissions::checked_from_bits(5U);
+    if (!rx.has_value()) return false;
+    for (auto& region : altered.regions) {
+        if (!region.range.contains(
+                astraea::memory::GuestAddress{kOwnedGuestDataBase}))
+            continue;
+        if (!region.permissions.has(
+                astraea::memory::GuestPermission::write))
+            return false;
+        region.permissions = rx.value();
+        touched_guest_data = true;
+    }
+    return touched_guest_data &&
+        !kernel_plan_matches(altered, observed.value());
 }
 
 [[nodiscard]] bool inspect_pinned_kernel_guest_page_plan(
@@ -1278,6 +1333,8 @@ int main(int argc, char** argv) {
     std::puts("owned_decoded_store_guard=bounded_subset_not_general_sandbox");
     std::puts("owned_write_authority=exact_guest_source_and_host_plan");
     std::puts("owned_native_fixture_rsp=independent_guest_stack");
+    std::puts("owned_native_fixture_kernel_vmas=verified_before_first_step");
+    std::puts("owned_native_fixture_wrong_page_rights=refused");
     std::puts("owned_write_controller_only_sigsegv_maperr_repeated=2");
     std::puts("controller_canary_not_mapped_in_tracee_repeated=2");
     std::puts("controller_private_canary_unchanged_repeated=2");
