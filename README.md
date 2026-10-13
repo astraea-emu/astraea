@@ -2,159 +2,56 @@
 
 [![CI](https://github.com/astraea-emu/astraea/actions/workflows/ci.yml/badge.svg)](https://github.com/astraea-emu/astraea/actions/workflows/ci.yml)
 
-**A verification-first, clean-room PlayStation 5 compatibility research emulator.**
+**A verification-first, clean-room PlayStation 5 compatibility research emulator written in C++23.**
 
-Astraea explores PS5 executable/runtime behavior, native x86-64 execution,
-AGC/RDNA2 graphics, and Vulkan translation with an evidence-first rule:
-unknown platform behavior stays explicit instead of becoming a compatibility
-guess.
+Astraea studies PS5 executable loading, guest CPU execution, PS5 AGC/RDNA2 graphics and Vulkan translation. Unsupported platform behavior remains visible rather than being replaced with unverified compatibility assumptions.
 
-> **Research status:** Astraea has not executed a commercial PS5 game's first
-> instruction or rendered a commercial-title frame. Linux x86-64 provides a
-> supervised, fail-closed diagnostic path. Independently authored generic ELFs and an exact source-built PS5-format
-> diagnostic can execute in isolated research-only paths; production
-> commercial-title entry remains disabled pending verified startup contracts.
+> **Development status:** This is **not a playable PS5 emulator**. No commercial title has executed a first guest instruction or produced a title-generated frame in Astraea. The production Linux diagnostic is deliberately pre-entry; separately admitted source-owned test binaries and one independent homebrew analysis do not constitute retail compatibility.
 
-Astraea is an independent project and is not affiliated with or endorsed by
-Sony Interactive Entertainment.
+Astraea is independent and is not affiliated with or endorsed by Sony Interactive Entertainment.
 
-## Current frontier
+## Where the project stands
 
-| Area | State |
+| Area | Currently verified |
 | --- | --- |
-| Graphics V0-V3 | **Complete for bounded owned workloads** — AGC/RDNA2 input through typed guest GPU state to deterministic Vulkan execution/readback |
-| Retail C0 | **Complete on Linux x86-64** — supervised sealed-artifact diagnostic with typed first-boundary reporting |
-| Retail C1 | **Active, commercial entry blocked** — controlled linked-ELF execution, and source-owned PS5-format `GuestImage` native research through one retired `mov eax,42` followed by real `UD2` fault (#447–#448); synthetic entry only |
-| Public homebrew Breakout | **Static profile + bounded non-native CPU interpretation** — 5 needed names, 20 dynamic symbols, 1 RELATIVE + 19 GLOB_DAT, 19/19 source NIDs; 13 source-backed instructions interpreted through first unresolved CALL without retiring it (#440); the host-compiled #413 canvas is **not** guest rendering |
-| Execution security gate | **Open (#410)** — bounded source-owned exec-separated research and Linux tracer tests (#419–#448), including syscall and page-permission controls; general hostile native guest memory/control-flow containment is **not established** |
-| Verification S0 | **Established** — multi-platform CI, ASan/UBSan, fuzz smoke, traces, probes, typed unsupported behavior, ADR/provenance discipline |
-| Commercial game boot/playability | **Not claimed** |
+| Loader / C0 | Bounded PS5/SCE ELF parsing, dynamic metadata, relocations, mappings and supervised read-only/pre-entry diagnostics on Linux x86-64 |
+| CPU / C1 research | Source-owned native x86-64 instruction/fault observations; thirteen independent Breakout instructions interpreted **non-natively** to an unsupported imported CALL |
+| Native security | Kernel-observed guest/non-guest memory distinction and a restricted source-owned native write gate; **general arbitrary-code containment remains open** |
+| Graphics / V0–V3 | Bounded owned AGC/RDNA2 → typed shader/state → SPIR-V/Vulkan execution/readback; **no title-produced frame** |
+| Verification | Linux x64, Windows x64, macOS ARM64, ASan/UBSan and fuzz smoke plus two pinned C1 workflows |
+| Playable titles | None demonstrated |
 
-The exact merged frontier and next dependency live in
-[`docs/STATUS.md`](docs/STATUS.md).
+See **[Live Project Status](docs/STATUS.md)** for the exact merged frontier, blocked dependencies and current priority. The comprehensive [project plan](docs/PROJECT_PLAN.md) defines the C0–C6, V0–V5 and S0–S5 milestones; do not confuse passing isolated research tests with completing a compatibility milestone.
 
-## What exists today
+## Selected independent homebrew: Breakout
 
-### Loader and execution
+The unchanged publicly authored [SharpEmu Breakout demo](https://github.com/sharpemu/sharpemu-demo) is the current software-first integration target. The source-pinned PS5-marked ELF has one `RELATIVE` and 19 `GLOB_DAT` relocations, with all 19 imports still **unbound**. Under an explicitly synthetic CPU/stack context, Astraea interprets 13 genuine source-backed instructions, stopping **before** the first unsupported indirect CALL at RIP `0x23c`, GOT `0x68c8`, bare NID `Vo5V8KAwCmk`.
 
-- strict PS5/SCE ELF parsing and mapping validation;
-- dynamic metadata, symbol, relocation, import-identity, and TLS-template foundations;
-- controlled native x86-64 guest execution for Astraea-owned probes;
-- Linux and Windows owned native-execution/supervisor proofs;
-- typed HLE/import gate infrastructure;
-- a corroborated partial direct-title process-entry contract.
-
-### Supervised retail diagnostics
-
-Linux x86-64 has a production diagnostic path with:
-
-- separate controller and untrusted worker processes;
-- sealed artifact handoff instead of passing the original host pathname;
-- finite wall-clock and kernel resource ceilings;
-- pidfd-backed worker identity/signalling when available;
-- pre-kernel seccomp interception for guest-originated raw `SYSCALL`;
-- typed syscall/fault/diagnostic boundaries;
-- deterministic loader, dependency, relocation, TLS, and process-entry stops.
-
-An input with no earlier dependency, relocation or TLS blockers reaches
-`unsupported_initial_process_abi`; the selected source-built minimal PS5-format
-ELF instead stops earlier at `unsupported_relocations` (eight `R_X86_64_RELATIVE`
-records). These are intentional **production** pre-entry boundaries. An
-**opt-in Linux-only research runner** separately maps the exact source-built
-minimal image, applies all eight relocations and twice reaches its authored
-`UD2` fault under a synthetic entry profile ([PR #403](https://github.com/astraea-emu/astraea/pull/403)).
-Separately, [#447](https://github.com/astraea-emu/astraea/pull/447) built a second exact source-owned PS5-format ELF and [#448](https://github.com/astraea-emu/astraea/pull/448) independently traced its `mov eax,42` retirement (`RAX=42`, `RIP=entry+5`), followed by real `SIGILL` at its authored `UD2`, twice with negative controls. Neither research path admits independent Breakout native execution or any commercial PS5 title.
-
-### Independent game-like corpus
-
-[PR #404](https://github.com/astraea-emu/astraea/pull/404) added a
-hash-pinned, independently authored PS5-marked Breakout ELF as a **read-only**
-CI compatibility oracle. Its original production `diagnose` result is
-`loader_rejected` before entry. [PR #406](https://github.com/astraea-emu/astraea/pull/406)
-merged a separately opted-in `profile --ps5-raw-elf` and
-`dependencies --ps5-raw-elf` structural parser without admitting execution.
-
-Merged [PR #408](https://github.com/astraea-emu/astraea/pull/408)
-validates bounded GNU-hash symbol counts and a frozen external report
-of five needed libraries, 20 dynamic symbols and 20 relocations
-(1 `RELATIVE`, 19 `GLOB_DAT`). Merged [PR #409](https://github.com/astraea-emu/astraea/pull/409)
-separately verifies 19/19 imported NIDs against the independent author's pinned
-source declarations. Neither static finding is a successful library binding or PS5 service. Subsequent [#440](https://github.com/astraea-emu/astraea/pull/440) interpreted 13 source-backed Breakout instructions in one checked **non-native** synthetic-context run, stopping before the first unresolved imported CALL (`RIP=0x23c`, bare NID `Vo5V8KAwCmk`). No independent guest instruction has been executed **natively** and no game frame has been produced by Astraea guest execution. Production `diagnose` remains deliberately strict. See [current status](docs/STATUS.md).
-
-### Graphics
-
-The bounded graphics path proves:
-
-```text
-AGC shader/container
-  -> generic RDNA2 decode
-  -> semantic Shader IR
-  -> compiler/value IR
-  -> Vulkan-valid SPIR-V
-
-submitted PM4/state/resources
-  -> typed guest GPU state
-  -> shader/resource resolution
-  -> real Vulkan raster/transfer execution
-  -> deterministic readback
-```
-
-This does **not** imply complete PM4, AGC, shader ISA, descriptors, tiling,
-resource tracking, synchronization, or presentation support.
+Later static-only analysis observed four compiled fallthrough instructions before the next control-flow boundary, but **did not execute the import or those instructions**. A separate host-compiled Breakout canvas is a reference oracle, **not** guest-executed rendering. [Integration issue #378](https://github.com/astraea-emu/astraea/issues/378) tracks the first real executable/service boundary.
 
 ## Architecture
 
-Astraea keeps guest semantics separate from host implementation:
+```text
+Authorized executable → checked GuestImage / relocations / guest virtual memory
+                               ↓
+           CPU process context / controlled execution / typed stop
+                               ↓
+               verified service identity / HLE or LLE boundary
+                               ↓
+                guest GPU commands, resources, synchronization
+                               ↓
+              RDNA2 / Shader IR → SPIR-V → Vulkan backend
+                               ↓
+                        readback / presentation
 
-1. **Guest image / process** — SCE ELF, mappings, relocations, imports, process-entry state, TLS and native x86-64 execution.
-2. **Supervised runtime** — worker isolation, syscall interception, faults, finite resource policy and typed stops.
-3. **PS5 GPU frontend** — AGC objects, PM4, registers, resources and synchronization.
-4. **Shader semantics** — AMD-documented RDNA2 decoding into a guest-semantic Shader IR.
-5. **Compiler/backend** — workload-driven compiler IR, SPIR-V and Vulkan.
-6. **Verification** — deterministic fixtures, trace/first-divergence tooling, AstraeaProbe, sanitizers, fuzzing and controlled hardware evidence.
+     separate trusted controller / untrusted worker / diagnostic gates
+```
 
-The full architecture and gate definitions are in
-[`docs/PROJECT_PLAN.md`](docs/PROJECT_PLAN.md) and [`docs/adr/`](docs/adr/).
-
-## Roadmap
-
-Astraea tracks three orthogonal axes:
-
-- **V — graphics technology:** bounded graphics integration and controlled differential validation;
-- **C — compatibility:** diagnostic -> first retail instruction -> first deterministic post-entry divergence -> runtime closure -> boot -> headless frame -> presentation -> in-game/playable -> reference-guarded support;
-- **S — scalability/readiness:** first-divergence coverage, cross-title regression guards, architecture ratchets, measured performance, and eventual release quality.
-
-The current critical path is **C1, software-first**: safely execute the
-**exact independently authored Breakout ELF** in a research-only confined
-worker until its **first observed, typed unsupported imported-service stop**.
-This is distinct from the completed, source-pinned, import-free PS5-format
-`UD2` first-instruction experiment ([#403](https://github.com/astraea-emu/astraea/pull/403))
-and from the CPU-only Breakout framebuffer reference ([#413](https://github.com/astraea-emu/astraea/pull/413)).
-Neither has established genuine runtime service binding or commercial-title
-execution.
-
-Security is a **measured prerequisite**: [#410](https://github.com/astraea-emu/astraea/issues/410) remains open. Merged source-owned process separation, post-bootstrap syscall filtering and external tracer/page audits (#419–#448) narrow selected hazards, but have **not** demonstrated containment of arbitrary native guest memory writes, host-code control-flow escape or all descendant capabilities. The non-native Breakout interpretation does not authorize unsafe native execution.
-Concurrently, a legitimately held retail executable may undergo **read-only
-C0 preflight** without enabling native guest entry. The actual PS5 startup
-observation [#334](https://github.com/astraea-emu/astraea/issues/334)
-comes only when a normal-title launch/logging route and a selected-path ABI
-question justify reference hardware.
-
-For the exact PC-first gating sequence and the deliberately delayed firmware-13.00 hardware experiment, read the [C1 execution and hardware readiness plan](docs/research/c1_pc_first_execution_hardware_readiness_2026-10-09.md).
-
-The #334 two-run real-PS5 normal-title startup observation remains required
-later, before promoting the selected real-title process-entry profile (#348).
-The first post-entry milestone is C2.0: a typed reproducible retail
-divergence, not 'boot'. See [current status](docs/STATUS.md), the
-[governing C1 sequence](docs/PROJECT_PLAN.md), and
-[public native-title closure evidence](docs/research/public_native_title_closure_2026-10-08.md).
-
-See [`docs/README.md`](docs/README.md) for the documentation map.
+The CPU strategy is still under active review: direct native acceleration is attractive on x86-64 but requires **enforceable isolation of host memory and control flow**; a mediated CPU backend may be needed for safe and portable execution. Astraea does **not** currently admit arbitrary native Breakout or retail code. See [security issue #410](https://github.com/astraea-emu/astraea/issues/410) and [accepted ADRs](docs/adr/README.md).
 
 ## Build and test
 
-Requirements include CMake 3.25+, a C++23 compiler, and the platform tools
-needed by the selected preset.
+Requires CMake 3.25+, a C++23 compiler and platform dependencies described by the selected preset.
 
 Linux:
 
@@ -173,76 +70,28 @@ cmake --build --preset macos-dev
 ctest --preset macos-dev
 ```
 
-Windows development uses the `windows-dev` CMake preset.
+Windows uses the `windows-dev` CMake preset. The project's CI runs the five general configurations noted above and separate pinned C1 research proofs. A successful build is not evidence of gameplay.
 
-CI gates every pull request on Linux x64, Windows x64, macOS ARM64, Linux
-ASan+UBSan, and Linux Clang fuzz smoke.
+## Diagnostic-only interfaces
 
-### Static retail closure profile
-
-On any supported development host, Astraea can perform read-only structural
-analysis of a locally supplied PS5/SCE executable without executing guest
-instructions:
+A locally authorized artifact can be inspected **without executing its guest instructions**:
 
 ```sh
 ./out/build/linux-dev/astraea profile /path/to/artifact
-```
-
-Use the equivalent built `astraea` binary on Windows or macOS.
-
-The command reports independent structural-pressure dimensions such as module/
-library dependencies, relocations, mapped/executable footprint, symbol-table
-size and TLS requirements. It deliberately does **not** collapse them into a
-compatibility percentage or weighted difficulty score.
-
-For additional *read-only* exact metadata on lawfully held SCE ELF inputs:
-
-```sh
 ./out/build/linux-dev/astraea dependencies /path/to/artifact
 ```
 
-The default manifest preserves opaque SCE dynamic records, losslessly
-hex-encodes untrusted dependency and symbol names, and counts referenced
-relocations. The **opt-in** `dependencies --public-sce-pack-v1` mode
-experiments with one independently authored public-linker field encoding;
-it must not be interpreted as a universal PS5 ABI. See
-[the second clean-room PRX corpus](docs/research/public_cleanroom_prx_second_corpus_2026-10-08.md)
-and [the current status](docs/STATUS.md).
-
-`profile` and the Linux `diagnose` path share one bounded artifact reader
-and one deterministic non-overlapping analysis-stack policy, so title-selection
-analysis cannot silently drift from production preflight behavior.
-
-### Linux retail diagnostic
-
-On Linux x86-64, a locally built Astraea binary can inspect a legally obtained
-artifact through the supervised diagnostic boundary:
+On Linux x86-64, supervised pre-entry diagnostics are also available:
 
 ```sh
 ./out/build/linux-dev/astraea diagnose /path/to/artifact
 ```
 
-This is a diagnostic/research interface. It does not imply that the title will
-boot or that Astraea supports redistributed game content.
+Use the equivalent built executable on macOS/Windows for portable structural analysis. These commands report bounded metadata or explicit unsupported states; they do not promise to boot a title. Opt-in public-linker/raw-ELF interpretation remains separate from authenticated Sony ABI behavior. Details and limitations: [documentation index](docs/README.md), [live status](docs/STATUS.md) and [research notes](docs/research/README.md).
 
-## Clean-room boundary
+## Clean-room, contribution and licensing
 
-This repository does not include or request Sony source code, firmware, keys,
-proprietary SDK files, proprietary system modules, or retail game content.
-
-PS5-specific behavior must be supported by public specifications, lawful
-interface information, independently authored tooling, or controlled
-observations with provenance. Comparative emulator implementations are useful
-for experiment design, but are not treated as hardware truth.
-
-Read [`docs/CLEAN_ROOM.md`](docs/CLEAN_ROOM.md) before contributing
-PS5-specific behavior.
-
-## Contributing
-
-Contributions should be small, testable, provenance-aware, and tied to a real
-dependency or invariant. See [`CONTRIBUTING.md`](CONTRIBUTING.md).
-
-## License
-
-GNU General Public License v3.0 or later. See [`LICENSE`](LICENSE).
+- **Never commit:** Sony firmware, encryption keys, proprietary system modules/SDK materials, decrypted retail executables, proprietary game assets or unsafe access-control bypass material.
+- **Guest-visible PS5 semantics require evidence:** independently authored sources, lawful public interface information or controlled measurements. Third-party emulator behavior is comparative evidence, not automatically platform truth.
+- **Contribution standard:** one scoped dependency, explicit permitted/prohibited behavior, ownership and provenance, positive/negative tests, final exact-head CI. See [CONTRIBUTING](CONTRIBUTING.md) and [clean-room policy](docs/CLEAN_ROOM.md).
+- **License:** GPL-3.0-or-later; see [LICENSE](LICENSE).
