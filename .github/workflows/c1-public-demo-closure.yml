@@ -524,6 +524,8 @@ jobs:
             "$RUNNER_TEMP/actual-breakout-plan.txt"
           grep -Fx "source_x86_decoder_invalid_requests=3_refused" \
             "$RUNNER_TEMP/actual-breakout-plan.txt"
+          grep -Fx "source_x86_decoder_rax_boundary_owned_cases=15_pass" \
+            "$RUNNER_TEMP/actual-breakout-plan.txt"
           grep -Fx "source_x86_callee_decoded_instructions=12" \
             "$RUNNER_TEMP/actual-breakout-plan.txt"
           grep -Fx "breakout_owned_callee_fetch=original_guestimage_virtual_mappings" \
