@@ -727,3 +727,71 @@ jobs:
               raise SystemExit("drifted Breakout code admitted by actual planner")
           print("ACTUAL GUESTIMAGE PLAN SOURCE-DRIFT NEGATIVE PASS")
           PY
+
+      # Research-only external interpreter is downloaded into the throwaway CI
+      # virtualenv; its GPLv2 code is neither linked to nor redistributed as
+      # an Astraea component. Keep any future runtime adoption behind a
+      # separate compatibility/licensing decision (ADR 0013, issue #461).
+      - name: Compare independent mediated Unicorn to pinned Breakout guest CPU trace
+        run: |
+          set -euo pipefail
+          research="$RUNNER_TEMP/astraea-public-demo-profile/astraea_c1_breakout_memory_plan_research"
+          original="$RUNNER_TEMP/sharpemu-demo-eboot.elf"
+          reference="$RUNNER_TEMP/c1-breakout-reference-trace.txt"
+          python3 -m py_compile tools/reference/ps5_process_entry_observer/compare_breakout_unicorn.py
+          "$research" "$original" --emit-cpu-trace > "$reference"
+          grep -Fx "c1trace.source_sha256=05c414993d1cd9e7182bbf5647be1ffad72c6ed6b6f5399d01af27281fef48b8" "$reference"
+          grep -Fx "c1trace.steps=13" "$reference"
+          grep -Fx "c1trace.import_calls_retired=0" "$reference"
+          python3 -m venv "$RUNNER_TEMP/astraea-unicorn-c1-venv"
+          # Exact reviewed CPython abi3 Linux x86-64 wheel SHA-256 from PyPI
+          # 2.1.4. Forbid source compilation and unpinned replacement wheels.
+          printf '%s\n' 'unicorn==2.1.4 --hash=sha256:9d6e6dea140560de4ebd8446661f7ef84a357d428c14a3ef09dacd306ec8c239' \
+            > "$RUNNER_TEMP/astraea-unicorn-locked-requirement.txt"
+          "$RUNNER_TEMP/astraea-unicorn-c1-venv/bin/python" -m pip install \
+            --only-binary=:all: --require-hashes \
+            -r "$RUNNER_TEMP/astraea-unicorn-locked-requirement.txt"
+          "$RUNNER_TEMP/astraea-unicorn-c1-venv/bin/python" \
+            tools/reference/ps5_process_entry_observer/compare_breakout_unicorn.py \
+            "$original" "$reference" | tee "$RUNNER_TEMP/astraea-unicorn-breakout-parity.txt"
+          for claim in \
+            "C1 UNICORN EXTERNAL MEDIATED BREAKOUT PARITY PASS" \
+            "original_breakout_commits=13" \
+            "cpu_and_guest_write_parity=13_source_backed_steps" \
+            "unresolved_import_call=unretired_at_0x23c" \
+            "unbound_got=unchanged" \
+            "sony_services=not_executed" \
+            "runtime_license_adoption=not_authorized" \
+            "production_guest_admission=unchanged"; do
+            grep -Fx "$claim" "$RUNNER_TEMP/astraea-unicorn-breakout-parity.txt"
+          done
+          "$RUNNER_TEMP/astraea-unicorn-c1-venv/bin/python" - <<'PY'
+          from pathlib import Path
+          import os
+          import subprocess
+          import sys
+          root = Path(os.environ["RUNNER_TEMP"])
+          original = root / "sharpemu-demo-eboot.elf"
+          trace = root / "c1-breakout-reference-trace.txt"
+          script = Path("tools/reference/ps5_process_entry_observer/compare_breakout_unicorn.py")
+          bad_trace = root / "c1-mutated-reference.txt"
+          data = trace.read_text()
+          assert "c1trace.stop_rip=0x23c" in data
+          bad_trace.write_text(data.replace(
+              "c1trace.stop_rip=0x23c", "c1trace.stop_rip=0x255", 1))
+          neg = subprocess.run(
+              [sys.executable, str(script), str(original), str(bad_trace)],
+              capture_output=True, text=True, timeout=20)
+          if neg.returncode == 0 or "REFUSED" not in neg.stderr:
+              raise SystemExit("mutated trace reached Unicorn as admitted")
+          bad_elf = root / "c1-unicorn-drifted.elf"
+          mutated = bytearray(original.read_bytes())
+          mutated[0] ^= 1
+          bad_elf.write_bytes(mutated)
+          neg = subprocess.run(
+              [sys.executable, str(script), str(bad_elf), str(trace)],
+              capture_output=True, text=True, timeout=20)
+          if neg.returncode == 0 or "REFUSED" not in neg.stderr:
+              raise SystemExit("modified independent ELF was admitted")
+          print("C1 UNICORN EXTERNAL SOURCE/TRACE DRIFT NEGATIVES PASS")
+          PY

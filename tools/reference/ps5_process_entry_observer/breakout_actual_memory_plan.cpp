@@ -741,7 +741,7 @@ prepare_temporary_breakout_guest_memory(
     return result;
 }
 
-[[nodiscard]] int inspect(const char* path) {
+[[nodiscard]] int inspect(const char* path, bool emit_cpu_trace) {
     auto bytes = read_pinned_elf(path);
     if (!bytes.has_value()) return 2;
 
@@ -1490,11 +1490,78 @@ prepare_temporary_breakout_guest_memory(
               << "native_guest_instructions=0\n"
               << "guest_write_semantics_preserved=not_proven\n"
               << "security_admission=not_granted\n";
+
+    // Export a bounded reference trace ONLY on explicit request. The
+    // reporter has already authenticated the exact ELF SHA, all virtual
+    // guest maps, relocations and the unchanged unresolved imported CALL.
+    // This record contains GUEST VA/register/write bytes; no host pointer,
+    // Sony return or imported-service side effect enters the output.
+    if (emit_cpu_trace) {
+        std::cout << "c1trace.version=1\n"
+                  << "c1trace.source_sha256=" << kPinnedSha256 << '\n'
+                  << "c1trace.entry=0x" << std::hex
+                  << image->elf.header.entry << '\n'
+                  << "c1trace.stack_base=0x"
+                  << image->initial_stack.storage.base().value() << '\n'
+                  << "c1trace.stack_size=0x"
+                  << image->initial_stack.storage.size().value() << '\n'
+                  << "c1trace.initial_rsp=0x"
+                  << image->initial_stack.rsp.value() << '\n'
+                  << "c1trace.initial_rflags=0x2\n"
+                  << "c1trace.relative_target=0x"
+                  << callee->relative_patch_target << '\n'
+                  << "c1trace.relative_value=0x"
+                  << callee->relative_patch_value << '\n'
+                  << "c1trace.unresolved_got=0x"
+                  << callee->unresolved_got_slot << '\n'
+                  << "c1trace.unresolved_word=0x"
+                  << callee->unresolved_got_raw_word << '\n'
+                  << "c1trace.stop_rip=0x" << callee->stopped_call_rip
+                  << std::dec << '\n'
+                  << "c1trace.steps=" << callee->execution_trace_count << '\n';
+        for (std::size_t i = 0U; i < callee->execution_trace_count; ++i) {
+            const auto& record = callee->execution_trace[i];
+            const auto& cpu = record.after_context;
+            const std::array<std::uint64_t, 19U> regs{
+                cpu.rax, cpu.rbx, cpu.rcx, cpu.rdx, cpu.rsi, cpu.rdi,
+                cpu.rbp, cpu.rsp, cpu.r8, cpu.r9, cpu.r10, cpu.r11,
+                cpu.r12, cpu.r13, cpu.r14, cpu.r15, cpu.rflags,
+                cpu.fs_base, cpu.gs_base,
+            };
+            std::cout << "c1trace.step[" << i << "]=0x" << std::hex
+                      << record.before_rip << "|0x" << record.after_rip
+                      << '|';
+            if (record.guest_write_address.has_value())
+                std::cout << "0x" << record.guest_write_address.value();
+            else
+                std::cout << '-';
+            std::cout << '|' << std::dec << record.guest_write_size << '|';
+            if (record.guest_write_size != 0U) {
+                for (std::size_t j = 0U; j < record.guest_write_size; ++j) {
+                    const auto byte =
+                        std::to_integer<unsigned>(record.guest_write_bytes[j]);
+                    std::cout << hex_digits[byte >> 4U]
+                              << hex_digits[byte & 0xfU];
+                }
+            } else {
+                std::cout << '-';
+            }
+            std::cout << '|';
+            for (std::size_t j = 0U; j < regs.size(); ++j) {
+                if (j != 0U) std::cout << ',';
+                std::cout << "0x" << std::hex << regs[j];
+            }
+            std::cout << std::dec << '\n';
+        }
+        std::cout << "c1trace.import_calls_retired=0\n";
+    }
     return 0;
 }
 } // namespace
 
 int main(int argc, char** argv) {
-    if (argc != 2) return 1;
-    return inspect(argv[1]);
+    if (argc != 2 && argc != 3) return 1;
+    if (argc == 3 && std::string_view{argv[2]} != "--emit-cpu-trace")
+        return 1;
+    return inspect(argv[1], argc == 3);
 }
