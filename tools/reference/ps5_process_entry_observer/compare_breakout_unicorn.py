@@ -83,7 +83,7 @@ def parse_reference(path):
            for x in required if x not in
            ("version", "source_sha256", "steps", "import_calls_retired")}
     check(ref["entry"] == steps[0][0] and
-          ref["stop_rip"] == steps[-1][1] == 0x23c and
+          ref["stop_rip"] == steps[count - 1][1] == 0x23c and
           ref["unresolved_got"] == 0x68c8 and
           ref["relative_target"] == 0x6900 and
           ref["stack_size"] == PAGE and
