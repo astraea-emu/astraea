@@ -9,6 +9,7 @@
 #include <astraea/loader/dynamic_relocations.hpp>
 #include <astraea/loader/guest_image.hpp>
 #include <astraea/memory/guest_address.hpp>
+#include <Zydis/Zydis.h>
 
 #include <algorithm>
 #include <cstddef>
@@ -45,14 +46,16 @@ constexpr std::uint64_t kHostSentinelBase = 0x0000000100010000ULL;
 constexpr std::uint64_t kCanaryBase = 0x0000000100020000ULL;
 constexpr std::uint64_t kNoAccessBase = 0x0000000100030000ULL;
 constexpr std::uint64_t kControllerOnlyBase = 0x0000000100040000ULL;
+constexpr std::uint64_t kOwnedGuestDataBase = kGuestBase + 0x2000U;
 constexpr std::size_t kPage = 4096U;
 constexpr std::size_t kMaxSteps = 8U;
 
-enum class Mode { fault, syscall, escape, write_rx, write_none, write_rw, write_rw_guarded, write_controller_only };
+enum class Mode { fault, syscall, escape, write_rx, write_none, write_rw, write_rw_guarded, write_guest_guarded, write_controller_only };
 
 [[nodiscard]] bool is_write_mode(Mode mode) noexcept {
     return mode == Mode::write_rx || mode == Mode::write_none ||
         mode == Mode::write_rw || mode == Mode::write_rw_guarded ||
+        mode == Mode::write_guest_guarded ||
         mode == Mode::write_controller_only;
 }
 [[nodiscard]] std::uint64_t write_target_for(Mode mode) noexcept {
@@ -61,6 +64,7 @@ enum class Mode { fault, syscall, escape, write_rx, write_none, write_rw, write_
     case Mode::write_none: return kNoAccessBase;
     case Mode::write_rw:
     case Mode::write_rw_guarded: return kCanaryBase;
+    case Mode::write_guest_guarded: return kOwnedGuestDataBase;
     case Mode::write_controller_only: return kControllerOnlyBase;
     default: return 0U;
     }
@@ -74,6 +78,7 @@ enum class Mode { fault, syscall, escape, write_rx, write_none, write_rw, write_
     if (name == "write-none") return Mode::write_none;
     if (name == "write-rw") return Mode::write_rw;
     if (name == "write-rw-guarded") return Mode::write_rw_guarded;
+    if (name == "write-guest-guarded") return Mode::write_guest_guarded;
     if (name == "write-controller-only") return Mode::write_controller_only;
     return std::nullopt;
 }
@@ -86,6 +91,7 @@ enum class Mode { fault, syscall, escape, write_rx, write_none, write_rw, write_
     case Mode::write_none: return "write-none";
     case Mode::write_rw: return "write-rw";
     case Mode::write_rw_guarded: return "write-rw-guarded";
+    case Mode::write_guest_guarded: return "write-guest-guarded";
     case Mode::write_controller_only: return "write-controller-only";
     }
     return "invalid";
@@ -196,6 +202,7 @@ constexpr std::array<unsigned char, 15U> kHostSentinel{
         !map_exact(kHostSentinelBase, PROT_READ | PROT_EXEC,
                    kHostSentinel) ||
         !map_exact(kCanaryBase, PROT_READ | PROT_WRITE, {}) ||
+        !map_exact(kOwnedGuestDataBase, PROT_READ | PROT_WRITE, {}) ||
         !map_exact(kNoAccessBase, PROT_NONE, {}))
         return 96;
     if (::ptrace(PTRACE_TRACEME, 0, nullptr, nullptr) != 0) return 97;
@@ -287,6 +294,58 @@ struct ControllerCanary {
     return inspect_bytes(child, kCanaryBase, zeros);
 }
 
+// Minimal, source-owned enforcement experiment: independently decode the
+// CURRENT stopped tracee instruction and derive the write target from the
+// observed CPU register, not from a title-supplied address or leaf report.
+// Supported instruction class: MOV byte ptr [RAX], imm8. Every other store
+// shape is unsupported and may NOT be granted by this experimental gate.
+// The permitted write interval is a separate, explicitly guest-owned page.
+// This is not full x86 memory mediation, nor outside-authored admission.
+enum class CheckedStoreGate { allow_guest, deny_non_guest, unsupported };
+
+[[nodiscard]] CheckedStoreGate checked_owned_guest_store(
+    pid_t child, const user_regs_struct& before) {
+    if (before.rip < kGuestBase ||
+        before.rip > kGuestBase + kPage - 3U)
+        return CheckedStoreGate::unsupported;
+    errno = 0;
+    const long raw = ::ptrace(
+        PTRACE_PEEKDATA, child,
+        reinterpret_cast<void*>(
+            static_cast<std::uintptr_t>(before.rip)), nullptr);
+    if (raw == -1L && errno != 0) return CheckedStoreGate::unsupported;
+    std::array<unsigned char, sizeof(long)> bytes{};
+    std::memcpy(bytes.data(), &raw, bytes.size());
+    ZydisDecoder decoder{};
+    ZydisDecodedInstruction insn{};
+    std::array<ZydisDecodedOperand, ZYDIS_MAX_OPERAND_COUNT> operands{};
+    if (ZYAN_FAILED(ZydisDecoderInit(
+            &decoder, ZYDIS_MACHINE_MODE_LONG_64,
+            ZYDIS_STACK_WIDTH_64)) ||
+        ZYAN_FAILED(ZydisDecoderDecodeFull(
+            &decoder, bytes.data(), bytes.size(),
+            &insn, operands.data())))
+        return CheckedStoreGate::unsupported;
+    if (insn.mnemonic != ZYDIS_MNEMONIC_MOV || insn.length != 3U ||
+        insn.operand_count_visible != 2U ||
+        operands[0].type != ZYDIS_OPERAND_TYPE_MEMORY ||
+        operands[0].size != 8U ||
+        operands[0].mem.base != ZYDIS_REGISTER_RAX ||
+        operands[0].mem.index != ZYDIS_REGISTER_NONE ||
+        operands[1].type != ZYDIS_OPERAND_TYPE_IMMEDIATE ||
+        operands[1].size != 8U ||
+        operands[1].imm.value.u != 0x7fU ||
+        // This exact owner-authored encoding has neither segment override
+        // nor displacement; reject any other encoding before retirement.
+        bytes[0] != 0xc6U || bytes[1] != 0x00U ||
+        bytes[2] != 0x7fU)
+        return CheckedStoreGate::unsupported;
+    return before.rax >= kOwnedGuestDataBase &&
+           before.rax < kOwnedGuestDataBase + kPage
+        ? CheckedStoreGate::allow_guest
+        : CheckedStoreGate::deny_non_guest;
+}
+
 struct Evidence {
     Mode mode;
     std::size_t executed = 0U;
@@ -299,6 +358,8 @@ struct Evidence {
     bool memory_protection_fault = false;
     bool writable_non_guest_memory_modified = false;
     bool non_guest_write_denied_before_step = false;
+    bool guest_write_admitted_before_step = false;
+    bool guest_only_write_committed = false;
     bool controller_only_canary_unchanged = false;
     bool controller_mapping_absent_in_tracee = false;
 };
@@ -348,7 +409,9 @@ struct Evidence {
     if (!inspect_bytes(child, kGuestBase,
                        {probe.bytes.data(), probe.length}) ||
         !inspect_bytes(child, kHostSentinelBase, kHostSentinel) ||
-        !canary_untouched(child))
+        !canary_untouched(child) ||
+        !inspect_bytes(child, kOwnedGuestDataBase,
+                       std::array<unsigned char, sizeof(long)>{}))
         return std::nullopt;
 
     auto regs = registers(child);
@@ -387,23 +450,26 @@ struct Evidence {
         // asking the kernel to retire it. The canary is ordinary writable
         // host memory, so the absence of a write is a tracer decision,
         // not a hardware page-permission accident.
-        if (mode == Mode::write_rw_guarded &&
+        if ((mode == Mode::write_rw_guarded ||
+             mode == Mode::write_guest_guarded) &&
             before->rip == kGuestBase + 10U) {
-            constexpr std::array<unsigned char, 3U> store{
-                0xc6U, 0x00U, 0x7fU,
-            };
+            const auto gate = checked_owned_guest_store(child, before.value());
             if (evidence.executed != 1U ||
-                before->rax != kCanaryBase ||
-                !inspect_bytes(child, kGuestBase + 10U, store) ||
+                before->rax != probe.write_target ||
                 !canary_untouched(child))
                 return std::nullopt;
-            evidence.terminal_rip = before->rip;
-            evidence.non_guest_write_denied_before_step = true;
-            evidence.host_canary_unchanged = true;
-            evidence.stopped = true;
-            evidence.only_tracer_observations = true;
-            ::alarm(0U);
-            return evidence;
+            if (mode == Mode::write_rw_guarded) {
+                if (gate != CheckedStoreGate::deny_non_guest) return std::nullopt;
+                evidence.terminal_rip = before->rip;
+                evidence.non_guest_write_denied_before_step = true;
+                evidence.host_canary_unchanged = true;
+                evidence.stopped = true;
+                evidence.only_tracer_observations = true;
+                ::alarm(0U);
+                return evidence;
+            }
+            if (gate != CheckedStoreGate::allow_guest) return std::nullopt;
+            evidence.guest_write_admitted_before_step = true;
         }
         if (::ptrace(PTRACE_SYSEMU_SINGLESTEP, child, nullptr, nullptr) != 0 ||
             !wait_stop(child, signal))
@@ -449,18 +515,24 @@ struct Evidence {
             evidence.executed == 1U &&
             before->rax == probe.write_target &&
             after->rax == probe.write_target) {
-            if (mode == Mode::write_rw) {
+            if (mode == Mode::write_rw ||
+                mode == Mode::write_guest_guarded) {
                 constexpr std::array<unsigned char, sizeof(long)> changed{
                     0x7fU,
                 };
+                const bool guest = mode == Mode::write_guest_guarded;
                 if (signal != SIGTRAP ||
                     after->rip != kGuestBase + 13U ||
-                    !inspect_bytes(child, kCanaryBase, changed) ||
-                    !inspect_bytes(child, kHostSentinelBase, kHostSentinel))
+                    !inspect_bytes(child,
+                        guest ? kOwnedGuestDataBase : kCanaryBase, changed) ||
+                    !inspect_bytes(child, kHostSentinelBase, kHostSentinel) ||
+                    (guest && (!evidence.guest_write_admitted_before_step ||
+                               !canary_untouched(child))))
                     return std::nullopt;
                 ++evidence.executed;
-                evidence.writable_non_guest_memory_modified = true;
-                evidence.host_canary_unchanged = false;
+                evidence.guest_only_write_committed = guest;
+                evidence.writable_non_guest_memory_modified = !guest;
+                evidence.host_canary_unchanged = guest;
             } else {
                 siginfo_t info{};
                 if (signal != SIGSEGV ||
@@ -537,6 +609,9 @@ struct Evidence {
             b.writable_non_guest_memory_modified &&
         a.non_guest_write_denied_before_step ==
             b.non_guest_write_denied_before_step &&
+        a.guest_write_admitted_before_step ==
+            b.guest_write_admitted_before_step &&
+        a.guest_only_write_committed == b.guest_only_write_committed &&
         a.controller_only_canary_unchanged ==
             b.controller_only_canary_unchanged &&
         a.controller_mapping_absent_in_tracee ==
@@ -1063,10 +1138,11 @@ int main(int argc, char** argv) {
     }
     if (argc != 1) return 2;
 
-    constexpr std::array<Mode, 8U> cases{
+    constexpr std::array<Mode, 9U> cases{
         Mode::fault, Mode::syscall, Mode::escape,
         Mode::write_rx, Mode::write_none, Mode::write_rw,
-        Mode::write_rw_guarded, Mode::write_controller_only,
+        Mode::write_rw_guarded, Mode::write_guest_guarded,
+        Mode::write_controller_only,
     };
     for (const Mode mode : cases) {
         const auto first = run_once(mode);
@@ -1099,6 +1175,13 @@ int main(int argc, char** argv) {
               first->writable_non_guest_memory_modified ||
               !first->host_canary_unchanged ||
               first->terminal_rip != kGuestBase + 10U)) ||
+            (mode == Mode::write_guest_guarded &&
+             (first->executed != 2U ||
+              !first->guest_write_admitted_before_step ||
+              !first->guest_only_write_committed ||
+              first->writable_non_guest_memory_modified ||
+              !first->host_canary_unchanged ||
+              first->terminal_rip != kGuestBase + 10U)) ||
             (mode == Mode::write_controller_only &&
              (first->executed != 1U ||
               !first->memory_protection_fault ||
@@ -1122,6 +1205,9 @@ int main(int argc, char** argv) {
     std::puts("writable_host_canary_modified_in_positive_control=1");
     std::puts("owned_write_rw_guarded_refused_before_retirement_repeated=2");
     std::puts("writable_host_canary_unchanged_when_guarded=1");
+    std::puts("owned_decoded_guest_only_store_admitted_repeated=2");
+    std::puts("owned_decoded_non_guest_store_denied_repeated=2");
+    std::puts("owned_decoded_store_guard=bounded_subset_not_general_sandbox");
     std::puts("owned_write_controller_only_sigsegv_maperr_repeated=2");
     std::puts("controller_canary_not_mapped_in_tracee_repeated=2");
     std::puts("controller_private_canary_unchanged_repeated=2");
