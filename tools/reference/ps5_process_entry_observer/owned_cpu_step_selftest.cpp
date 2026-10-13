@@ -209,7 +209,24 @@ namespace m = astraea::memory;
         excessive.retired_instructions != 0U ||
         cpu.rip != 0x200U) return false;
 
-    const auto prefix = r::run_owned_x86_64(cpu, memory, 4U);
+    // A too-small caller trace cannot yield a truncated *successful*
+    // reference. Refuse BEFORE any instruction/state/memory mutation.
+    std::array<r::OwnedCpuTraceStep, 4U> reference_trace{};
+    const auto state_before_trace = cpu;
+    const auto stack_before_trace = stack;
+    const auto short_trace = r::run_owned_x86_64(
+        cpu, memory, 4U,
+        std::span<r::OwnedCpuTraceStep>{reference_trace}.first(2U));
+    if (short_trace.stop != r::OwnedCpuRunStopCode::invalid_budget ||
+        short_trace.retired_instructions != 0U ||
+        short_trace.trace_steps != 0U ||
+        cpu != state_before_trace || stack != stack_before_trace ||
+        reference_trace !=
+            std::array<r::OwnedCpuTraceStep, 4U>{})
+        return false;
+
+    const auto prefix = r::run_owned_x86_64(
+        cpu, memory, 4U, reference_trace);
     if (prefix.stop != r::OwnedCpuRunStopCode::budget_exhausted ||
         prefix.retired_instructions != 4U ||
         prefix.guest_writes != 2U || cpu.rip != 0x210U ||
@@ -217,11 +234,42 @@ namespace m = astraea::memory;
         stack[0x78U] != std::byte{0x88} ||
         stack[0x7fU] != std::byte{0x11} ||
         stack[0x70U] != std::byte{0}) return false;
+    // Compare the full architectural state after every retirement, not
+    // merely the final RIP/count. Explicit write records expose the
+    // guest-VA and exact bytes that a second backend must reproduce.
+    constexpr std::array<std::uint64_t, 4U> expected_rips{
+        0x200U, 0x201U, 0x204U, 0x208U,
+    };
+    constexpr std::array<std::uint64_t, 4U> expected_next{
+        0x201U, 0x204U, 0x208U, 0x210U,
+    };
+    if (prefix.trace_steps != 4U ||
+        reference_trace[3U].after_context != cpu ||
+        !reference_trace[0U].guest_write_address.has_value() ||
+        reference_trace[0U].guest_write_address.value() != 0x1078U ||
+        reference_trace[0U].guest_write_bytes[0] != std::byte{0x88} ||
+        reference_trace[0U].guest_write_bytes[7] != std::byte{0x11} ||
+        reference_trace[1U].guest_write_address.has_value() ||
+        reference_trace[2U].guest_write_address.has_value() ||
+        reference_trace[3U].guest_write_address != 0x1070U ||
+        reference_trace[3U].guest_write_bytes !=
+            std::array<std::byte, 8U>{})
+        return false;
+    for (std::size_t i = 0U; i < reference_trace.size(); ++i) {
+        if (reference_trace[i].before_rip != expected_rips[i] ||
+            reference_trace[i].after_rip != expected_next[i] ||
+            reference_trace[i].after_context.rip != expected_next[i])
+            return false;
+    }
 
     const auto before_call = cpu;
     const auto before_stack = stack;
-    const auto blocked_call = r::run_owned_x86_64(cpu, memory, 5U);
+    std::array<r::OwnedCpuTraceStep, 5U> stopped_trace{};
+    const auto blocked_call = r::run_owned_x86_64(
+        cpu, memory, 5U, stopped_trace);
     if (blocked_call.stop != r::OwnedCpuRunStopCode::step_refused ||
+        blocked_call.trace_steps != 0U ||
+        stopped_trace != std::array<r::OwnedCpuTraceStep, 5U>{} ||
         blocked_call.stop_rip != 0x210U ||
         blocked_call.retired_instructions != 0U ||
         !blocked_call.step_stop.has_value() ||
