@@ -26,6 +26,12 @@ Architecture Decision Records (ADRs) capture decisions that would otherwise be r
 
 Use `0000-template.md` for new decisions.
 
+## Proposed for review
+
+- [`0013-cpu-backend-trace-evaluation.md`](0013-cpu-backend-trace-evaluation.md)
+  — proposed backend-neutral CPU/memory-effect trace contract and measured
+  native vs mediated execution candidate criteria; **no CPU engine is selected**.
+
 ## Current accepted architecture decisions
 
 - `0006-dependency-driven-vertical-integration.md` — choose the next smallest
