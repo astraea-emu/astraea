@@ -511,6 +511,9 @@ int main() {
     std::puts("guest_register_flags=sub_zero_case_verified");
     std::puts("malformed_record_and_unknown_opcode=refused");
     std::puts("owned_guest_fetch_step=bounded_and_typed");
+    std::puts("owned_cpu_backend_reference_trace=exact_commits_and_writes");
+    std::puts("owned_cpu_backend_stopped_call=no_trace_event");
+    std::puts("owned_cpu_backend_short_trace=refused_without_mutation");
     std::puts("owned_fetch_uses_execute_permission=verified");
     std::puts("source_mutation_and_partial_faults=refused");
     std::puts("failed_later_instruction=prior_retirements_only");
