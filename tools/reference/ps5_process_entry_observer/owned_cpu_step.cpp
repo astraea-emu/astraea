@@ -274,10 +274,11 @@ OwnedCpuStepResult step_owned_x86_64(
     }
 
     std::size_t guest_writes = 0U;
+    std::array<std::byte, 8U> committed_word{};
     if (guest_write_address.has_value()) {
-        const auto word = word_bytes(guest_write_value);
+        committed_word = word_bytes(guest_write_value);
         const auto write = memory.write(
-            guest_write_address.value(), word);
+            guest_write_address.value(), committed_word);
         if (!write.has_value())
             return memory_refusal(cpu.rip, write.error());
         guest_writes = 1U;
@@ -287,16 +288,21 @@ OwnedCpuStepResult step_owned_x86_64(
     return OwnedCpuStepResult::success(OwnedCpuStepCommit{
         .next_rip = next,
         .guest_writes = guest_writes,
+        .guest_write_address = guest_write_address,
+        .guest_write_size = guest_writes == 0U ? 0U : 8U,
+        .guest_write_bytes = committed_word,
     });
 }
 
 OwnedCpuRunReport run_owned_x86_64(
     e::GuestCpuContext& cpu, OwnedGuestAddressSpace& memory,
-    std::size_t instruction_budget) {
+    std::size_t instruction_budget,
+    std::span<OwnedCpuTraceStep> trace) {
     OwnedCpuRunReport report{};
     report.stop_rip = cpu.rip;
     if (instruction_budget == 0U ||
-        instruction_budget > kC1MaxOwnedRunInstructions)
+        instruction_budget > kC1MaxOwnedRunInstructions ||
+        (!trace.empty() && trace.size() < instruction_budget))
         return report;
 
     ZydisDecoder decoder{};
@@ -370,6 +376,19 @@ OwnedCpuRunReport run_owned_x86_64(
             report.stop = OwnedCpuRunStopCode::step_refused;
             report.step_stop = committed.error();
             return report;
+        }
+        // Commit-only trace: a refused call, invalid decode or failed
+        // guest write must never produce a record. The CPU context and
+        // write address/value are GUEST state, independent of host ISA.
+        if (!trace.empty()) {
+            trace[report.trace_steps++] = OwnedCpuTraceStep{
+                .before_rip = record.rip,
+                .after_rip = cpu.rip,
+                .after_context = cpu,
+                .guest_write_address = committed->guest_write_address,
+                .guest_write_size = committed->guest_write_size,
+                .guest_write_bytes = committed->guest_write_bytes,
+            };
         }
         ++report.retired_instructions;
         report.guest_writes += committed->guest_writes;

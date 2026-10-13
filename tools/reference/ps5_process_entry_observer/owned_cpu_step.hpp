@@ -6,8 +6,10 @@
 #include "owned_guest_address_space.hpp"
 #include "source_x86_64_decoder.hpp"
 
+#include <array>
 #include <cstddef>
 #include <cstdint>
+#include <span>
 #include <optional>
 
 #include <Zydis/Zydis.h>
@@ -35,6 +37,14 @@ struct OwnedCpuStepStop {
 struct OwnedCpuStepCommit {
     std::uint64_t next_rip = 0U;
     std::size_t guest_writes = 0U;
+    // Exact guest-visible effect of a supported write-capable instruction.
+    // The present forms (PUSH/CALL/MOV) each produce at most one 8-byte
+    // guest store. No host address is ever recorded.
+    std::optional<std::uint64_t> guest_write_address;
+    // Either zero (no write) or exactly eight bytes for the current ISA
+    // subset. Wider/partial/multi-write effects require a new contract.
+    std::size_t guest_write_size = 0U;
+    std::array<std::byte, 8U> guest_write_bytes{};
 };
 
 using OwnedCpuStepResult = astraea::core::Result<
@@ -72,9 +82,27 @@ enum class OwnedCpuRunStopCode {
     step_refused,
 };
 
+// Comparable, caller-owned reference record for evaluating future CPU
+// backends on identical original source bytes and guest virtual memory.
+// Includes complete committed CPU state and any eight-byte guest store.
+// Unsupported instructions produce NO trace event and NO state commit.
+struct OwnedCpuTraceStep {
+    std::uint64_t before_rip = 0U;
+    std::uint64_t after_rip = 0U;
+    astraea::execution::GuestCpuContext after_context{};
+    std::optional<std::uint64_t> guest_write_address;
+    // Either zero (no write) or exactly eight bytes for the current ISA
+    // subset. Wider/partial/multi-write effects require a new contract.
+    std::size_t guest_write_size = 0U;
+    std::array<std::byte, 8U> guest_write_bytes{};
+
+    auto operator<=>(const OwnedCpuTraceStep&) const = default;
+};
+
 struct OwnedCpuRunReport {
     std::size_t retired_instructions = 0U;
     std::size_t guest_writes = 0U;
+    std::size_t trace_steps = 0U;
     OwnedCpuRunStopCode stop = OwnedCpuRunStopCode::invalid_budget;
     std::uint64_t stop_rip = 0U;
     std::optional<OwnedGuestMemoryFault> memory_fault;
@@ -87,9 +115,14 @@ struct OwnedCpuRunReport {
 // step refusal. A stop never retires its own instruction; previous completed
 // instructions remain committed (not a multi-step transaction).
 // This does not invoke native guest code, resolve imports or infer PS5 ABI.
+// An optional, caller-owned trace span must hold the ENTIRE requested
+// instruction budget; a too-small nonempty span is refused before execution.
+// Only successfully retired instructions are recorded. No allocation occurs
+// inside the runner and no trace is emitted for a stopped instruction.
 [[nodiscard]] OwnedCpuRunReport run_owned_x86_64(
     astraea::execution::GuestCpuContext& context,
     OwnedGuestAddressSpace& memory,
-    std::size_t instruction_budget);
+    std::size_t instruction_budget,
+    std::span<OwnedCpuTraceStep> trace = {});
 
 } // namespace astraea::research

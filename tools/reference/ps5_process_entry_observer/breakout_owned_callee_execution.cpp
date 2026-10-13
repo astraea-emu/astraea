@@ -239,14 +239,26 @@ OwnedCalleeResult run_owned_breakout_callee(
     constexpr std::size_t kExpectedCalleeRetirements = 11U;
     const auto run = run_owned_x86_64(
         state.context, memory, kC1MaxDecodedInstructions +
-                               kExpectedEntryRetirements);
+                               kExpectedEntryRetirements,
+        state.execution_trace);
     if (run.stop == OwnedCpuRunStopCode::fetch_refused ||
         run.stop == OwnedCpuRunStopCode::invalid_encoding)
         return fail(OwnedCalleeError::decode_refused);
     if (run.retired_instructions !=
             kExpectedEntryRetirements + kExpectedCalleeRetirements ||
-        run.guest_writes == 0U)
+        run.trace_steps != run.retired_instructions ||
+        run.guest_writes == 0U ||
+        state.execution_trace[0U].before_rip != entry.entry_rip ||
+        state.execution_trace[run.trace_steps - 1U].after_rip !=
+            state.context.rip ||
+        state.execution_trace[run.trace_steps - 1U].after_context !=
+            state.context ||
+        state.execution_trace[1U].guest_write_address !=
+            entry.guest_stack_write_address ||
+        state.execution_trace[1U].guest_write_bytes !=
+            entry.guest_stack_return_word)
         return fail(OwnedCalleeError::unsupported_instruction);
+    state.execution_trace_count = run.trace_steps;
     state.entry_retired_instructions = kExpectedEntryRetirements;
     state.retired_instructions =
         run.retired_instructions - kExpectedEntryRetirements;

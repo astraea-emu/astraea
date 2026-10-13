@@ -4,6 +4,7 @@
 // No guest instructions enter the host CPU. The first unresolved CALL stops
 // before dereferencing its GOT slot, modifying state or invoking a provider.
 #include "breakout_offline_entry_interpreter.hpp"
+#include "owned_cpu_step.hpp"
 
 #include <array>
 #include <cstddef>
@@ -38,6 +39,12 @@ struct OwnedCalleeEvidence {
     std::size_t entry_retired_instructions = 0U;
     std::size_t retired_instructions = 0U;
     std::size_t guest_stack_writes = 0U;
+    // Exact per-retirement guest CPU and write effects from the same
+    // uninterrupted source-backed entry/callee run. Zero entries for
+    // the stopped imported CALL; compare these with any future backend.
+    std::array<OwnedCpuTraceStep, kC1MaxDecodedInstructions + 2U>
+        execution_trace{};
+    std::size_t execution_trace_count = 0U;
     // One source-backed, checked R_X86_64_RELATIVE, with explicit zero
     // synthetic load bias in ORIGINAL ELF guest-VA coordinates.
     std::size_t applied_relative_patches = 0U;
