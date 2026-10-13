@@ -159,6 +159,9 @@ jobs:
             "owned_write_rw_non_guest_side_effect_repeated=2" \
             "writable_host_canary_modified_in_positive_control=1" \
             "owned_write_rw_guarded_refused_before_retirement_repeated=2" \
+            "owned_decoded_guest_only_store_admitted_repeated=2" \
+            "owned_decoded_non_guest_store_denied_repeated=2" \
+            "owned_decoded_store_guard=bounded_subset_not_general_sandbox" \
             "writable_host_canary_unchanged_when_guarded=1" \
             "owned_write_controller_only_sigsegv_maperr_repeated=2" \
             "controller_canary_not_mapped_in_tracee_repeated=2" \
