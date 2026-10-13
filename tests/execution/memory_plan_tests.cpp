@@ -277,3 +277,73 @@ TEST_CASE("planner rejects rounded coverage of the entire 64-bit domain without 
     REQUIRE_FALSE(plan.has_value());
     REQUIRE(plan.error().code == ExecutionPlanErrorCode::host_page_arithmetic_overflow);
 }
+
+
+TEST_CASE("write authorization requires exact guest range and mapped host page",
+          "[execution][memory-plan][guest-write]") {
+    namespace e = astraea::execution;
+    std::array mappings{
+        mapping(0x4000, 0x200, kRead | kExecute, 0),
+        mapping(0x6008, 0x100, kRead | kWrite, 1),
+    };
+    const auto stack = range(0x8000, 0x1000);
+    const auto plan = e::build_execution_memory_plan(
+        request(mappings, stack, GuestAddress{0x4000}, GuestAddress{0x8000}));
+    REQUIRE(plan.has_value());
+    const auto allowed = [&](std::uint64_t address, std::size_t count) {
+        return e::guest_write_owned_by_plan(
+            plan.value(), mappings, stack, GuestAddress{address}, count);
+    };
+    REQUIRE(allowed(0x6008, 1));
+    REQUIRE(allowed(0x6100, 8));
+    REQUIRE(allowed(0x8000, 8));
+    REQUIRE(allowed(0x8ff8, 8));
+    REQUIRE_FALSE(allowed(0x6000, 1)); // host-page padding
+    REQUIRE_FALSE(allowed(0x6108, 1)); // tail padding
+    REQUIRE_FALSE(allowed(0x6100, 9)); // crosses raw mapping
+    REQUIRE_FALSE(allowed(0x4000, 1)); // guest code is RX
+    REQUIRE_FALSE(allowed(0x5000, 1)); // not in GuestImage
+    REQUIRE_FALSE(allowed(0x9000, 1)); // after guest stack
+    REQUIRE_FALSE(allowed(0x8000, 0)); // zero write
+    REQUIRE_FALSE(allowed(
+        std::numeric_limits<std::uint64_t>::max() - 3U, 8));
+}
+
+TEST_CASE("write authorization rejects conflicting sources and forged W+X host page",
+          "[execution][memory-plan][guest-write]") {
+    namespace e = astraea::execution;
+    std::array mappings{
+        mapping(0x4000, 0x200, kRead | kExecute, 0),
+        mapping(0x6008, 0x100, kRead | kWrite, 1),
+    };
+    const auto stack = range(0x8000, 0x1000);
+    auto plan = e::build_execution_memory_plan(
+        request(mappings, stack, GuestAddress{0x4000}, GuestAddress{0x8000}));
+    REQUIRE(plan.has_value());
+    const auto check = [&](const auto& candidate, std::uint64_t addr,
+                           std::size_t size) {
+        return e::guest_write_owned_by_plan(
+            candidate, mappings, stack, GuestAddress{addr}, size);
+    };
+    REQUIRE(check(plan.value(), 0x6008, 8));
+    for (auto& region : plan->regions) {
+        if (!region.range.contains(GuestAddress{0x6008})) continue;
+        region.permissions = permissions(kRead | kWrite | kExecute);
+    }
+    REQUIRE_FALSE(check(plan.value(), 0x6008, 8));
+
+    const auto trusted = e::build_execution_memory_plan(
+        request(mappings, stack, GuestAddress{0x4000}, GuestAddress{0x8000}));
+    REQUIRE(trusted.has_value());
+    // A write-bearing mapping cannot silently authorize bytes that an
+    // overlapping independent guest source defines as read-only.
+    std::array overlapped{
+        mappings[0],
+        mappings[1],
+        mapping(0x6010, 0x10, kRead, 2),
+    };
+    REQUIRE_FALSE(e::guest_write_owned_by_plan(
+        trusted.value(), overlapped, stack, GuestAddress{0x6010}, 8));
+    REQUIRE(e::guest_write_owned_by_plan(
+        trusted.value(), overlapped, stack, GuestAddress{0x6030}, 8));
+}

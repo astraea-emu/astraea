@@ -47,6 +47,8 @@ constexpr std::uint64_t kCanaryBase = 0x0000000100020000ULL;
 constexpr std::uint64_t kNoAccessBase = 0x0000000100030000ULL;
 constexpr std::uint64_t kControllerOnlyBase = 0x0000000100040000ULL;
 constexpr std::uint64_t kOwnedGuestDataBase = kGuestBase + 0x2000U;
+constexpr std::uint64_t kOwnedGuestStackBase = kGuestBase + 0x3000U;
+constexpr std::uint64_t kOwnedGuestRsp = kOwnedGuestStackBase + 0x800U;
 constexpr std::size_t kPage = 4096U;
 constexpr std::size_t kMaxSteps = 8U;
 
@@ -203,6 +205,7 @@ constexpr std::array<unsigned char, 15U> kHostSentinel{
                    kHostSentinel) ||
         !map_exact(kCanaryBase, PROT_READ | PROT_WRITE, {}) ||
         !map_exact(kOwnedGuestDataBase, PROT_READ | PROT_WRITE, {}) ||
+        !map_exact(kOwnedGuestStackBase, PROT_READ | PROT_WRITE, {}) ||
         !map_exact(kNoAccessBase, PROT_NONE, {}))
         return 96;
     if (::ptrace(PTRACE_TRACEME, 0, nullptr, nullptr) != 0) return 97;
@@ -303,6 +306,62 @@ struct ControllerCanary {
 // This is not full x86 memory mediation, nor outside-authored admission.
 enum class CheckedStoreGate { allow_guest, deny_non_guest, unsupported };
 
+// Controller-owned authorization is derived from the exact original
+// guest mapping intents AND Astraea's own host page-rounded plan. The
+// native tracee's other writable pages are not guest ranges. This
+// source-owned fixture is not the external Breakout GuestImage.
+[[nodiscard]] bool owned_guest_plan_allows_write(
+    std::uint64_t address, std::size_t byte_count) {
+    namespace e = astraea::execution;
+    namespace m = astraea::memory;
+    const auto rx = m::GuestPermissions::checked_from_bits(5U);
+    const auto rw = m::GuestPermissions::checked_from_bits(3U);
+    const auto code = m::GuestRange::create(
+        m::GuestAddress{kGuestBase}, m::GuestSize{kPage});
+    const auto data = m::GuestRange::create(
+        m::GuestAddress{kOwnedGuestDataBase}, m::GuestSize{kPage});
+    const auto stack = m::GuestRange::create(
+        m::GuestAddress{kOwnedGuestStackBase}, m::GuestSize{kPage});
+    if (!rx.has_value() || !rw.has_value() ||
+        !code.has_value() || !data.has_value() || !stack.has_value())
+        return false;
+    constexpr auto kBackingKind = m::MappingBackingKind::anonymous;
+    const std::array<m::MappingIntent, 2U> mappings{{
+        {
+            .range = code.value(),
+            .permissions = rx.value(),
+            .backing = {
+                .kind = kBackingKind,
+                .file_offset = 0U,
+                .byte_count = m::GuestSize{kPage},
+            },
+            .source_index = 0U,
+        },
+        {
+            .range = data.value(),
+            .permissions = rw.value(),
+            .backing = {
+                .kind = kBackingKind,
+                .file_offset = 0U,
+                .byte_count = m::GuestSize{kPage},
+            },
+            .source_index = 1U,
+        },
+    }};
+    const auto plan = e::build_execution_memory_plan(
+        e::ExecutionMemoryPlanRequest{
+            .mappings = mappings,
+            .stack_storage = stack.value(),
+            .entry_point = m::GuestAddress{kGuestBase},
+            .stack_pointer = m::GuestAddress{kOwnedGuestRsp},
+            .host_page_size = kPage,
+        });
+    return plan.has_value() &&
+        e::guest_write_owned_by_plan(
+            plan.value(), mappings, stack.value(),
+            m::GuestAddress{address}, byte_count);
+}
+
 [[nodiscard]] CheckedStoreGate checked_owned_guest_store(
     pid_t child, const user_regs_struct& before) {
     if (before.rip < kGuestBase ||
@@ -340,8 +399,7 @@ enum class CheckedStoreGate { allow_guest, deny_non_guest, unsupported };
         bytes[0] != 0xc6U || bytes[1] != 0x00U ||
         bytes[2] != 0x7fU)
         return CheckedStoreGate::unsupported;
-    return before.rax >= kOwnedGuestDataBase &&
-           before.rax < kOwnedGuestDataBase + kPage
+    return owned_guest_plan_allows_write(before.rax, 1U)
         ? CheckedStoreGate::allow_guest
         : CheckedStoreGate::deny_non_guest;
 }
@@ -418,7 +476,17 @@ struct Evidence {
     if (!regs.has_value()) return std::nullopt;
     regs->rip = kGuestBase;
     regs->rax = 0U;
+    // The source-owned fixture no longer inherits a trusted host C++ stack
+    // as its guest RSP. The independent controller selects one mapped
+    // guest-only stack page, verified before any native instruction retires.
+    regs->rsp = kOwnedGuestRsp;
     if (::ptrace(PTRACE_SETREGS, child, nullptr, &regs.value()) != 0)
+        return std::nullopt;
+    const auto confirmed = registers(child);
+    if (!confirmed.has_value() ||
+        confirmed->rsp != kOwnedGuestRsp ||
+        !inspect_bytes(child, kOwnedGuestStackBase,
+                       std::array<unsigned char, sizeof(long)>{}))
         return std::nullopt;
 
     Evidence evidence{.mode = mode};
@@ -1208,6 +1276,8 @@ int main(int argc, char** argv) {
     std::puts("owned_decoded_guest_only_store_admitted_repeated=2");
     std::puts("owned_decoded_non_guest_store_denied_repeated=2");
     std::puts("owned_decoded_store_guard=bounded_subset_not_general_sandbox");
+    std::puts("owned_write_authority=exact_guest_source_and_host_plan");
+    std::puts("owned_native_fixture_rsp=independent_guest_stack");
     std::puts("owned_write_controller_only_sigsegv_maperr_repeated=2");
     std::puts("controller_canary_not_mapped_in_tracee_repeated=2");
     std::puts("controller_private_canary_unchanged_repeated=2");

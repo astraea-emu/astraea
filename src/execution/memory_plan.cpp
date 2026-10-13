@@ -311,4 +311,59 @@ ExecutionMemoryPlanResult build_execution_memory_plan(
     }
 }
 
+// Deliberately requires exact guest intent in addition to the host's
+// page-rounded plan. A 4-KiB host page may cover inaccessible padding
+// surrounding a small initialized writable guest extent. Ordinary host
+// writable mappings that are absent from guest ownership cannot pass.
+bool guest_write_owned_by_plan(
+    const ExecutionMemoryPlan& plan,
+    std::span<const MappingIntent> guest_mappings,
+    GuestRange guest_stack,
+    GuestAddress target,
+    std::size_t byte_count) noexcept {
+    if (byte_count == 0U || plan.host_page_size == 0U)
+        return false;
+    const auto address = target.value();
+    if (byte_count >
+        std::numeric_limits<std::uint64_t>::max() - address)
+        return false;
+    const auto last = address + static_cast<std::uint64_t>(byte_count);
+
+    const auto fully_within = [address, byte_count](
+        const GuestRange& range) noexcept {
+        const auto start = range.base().value();
+        const auto size = range.size().value();
+        return address >= start && address - start <= size &&
+            byte_count <= size - (address - start);
+    };
+    const auto intersects = [address, last](
+        const GuestRange& range) noexcept {
+        if (range.empty()) return false;
+        const auto start = range.base().value();
+        const auto size = range.size().value();
+        return address >= start
+            ? address - start < size
+            : start < last;
+    };
+
+    // Include an independently provided exact guest stack but refuse any
+    // conflicting non-writable source covering part of the write.
+    bool owned = fully_within(guest_stack);
+    for (const auto& mapping : guest_mappings) {
+        if (fully_within(mapping.range) &&
+            mapping.permissions.has(GuestPermission::write))
+            owned = true;
+        if (intersects(mapping.range) &&
+            !mapping.permissions.has(GuestPermission::write))
+            return false;
+    }
+    if (!owned) return false;
+    for (const auto& region : plan.regions) {
+        if (!fully_within(region.range)) continue;
+        return region.permissions.has(GuestPermission::write) &&
+            !region.permissions.has(GuestPermission::execute);
+    }
+    return false;
+}
+
 }  // namespace astraea::execution
