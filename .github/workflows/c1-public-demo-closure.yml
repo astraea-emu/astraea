@@ -918,3 +918,34 @@ jobs:
                   raise SystemExit(f"tampered {scenario} evidence was accepted")
           print("C1 EXTERNAL EFFECT TRANSCRIPT TAMPER NEGATIVES PASS")
           PY
+
+      # Exact same independently authored x86-64 program, three modes:
+      # batch, instruction hooks and per-instruction stepping. This is
+      # controlled CI research telemetry, never release/game performance.
+      - name: Measure bounded mediated CPU modes with state parity
+        run: |
+          set -euo pipefail
+          script="tools/reference/ps5_process_entry_observer/benchmark_unicorn_owned_execution_modes.py"
+          python3 -m py_compile "$script"
+          "$RUNNER_TEMP/astraea-unicorn-c1-venv/bin/python" "$script" |
+            tee "$RUNNER_TEMP/astraea-unicorn-owned-execution-modes.txt"
+          for claim in \
+            "C1 MEDIATED X86-64 EXECUTION MODE EVALUATION PASS" \
+            "C1 MEDIATED CPU SOURCE/BUDGET NEGATIVES PASS" \
+            "fixture_sha256=16460540c7d856baa1e96fd5d335b82c2bf872f5d84398a76b97ab1c8d2e193d" \
+            "source_owned_instructions=256" \
+            "same_guest_cpu_result=3_execution_modes" \
+            "engine=unicorn_2.1.4_research_only" \
+            "benchmark_scope=ci_host_execution_only_not_ps5_game_performance" \
+            "source_owned_guest_code_native_execution=none" \
+            "production_backend_selected=no"; do
+            grep -Fx "$claim" "$RUNNER_TEMP/astraea-unicorn-owned-execution-modes.txt"
+          done
+          for mode in batch code_hook single_step; do
+            grep -Fx "C1 MEDIATED CPU MODE PASS: $mode" \
+              "$RUNNER_TEMP/astraea-unicorn-owned-execution-modes.txt"
+            grep -Fx "$mode.samples=25" \
+              "$RUNNER_TEMP/astraea-unicorn-owned-execution-modes.txt"
+          done
+          test "$(grep -c '^C1 MEDIATED CPU MODE PASS:' \
+            "$RUNNER_TEMP/astraea-unicorn-owned-execution-modes.txt")" = 3
