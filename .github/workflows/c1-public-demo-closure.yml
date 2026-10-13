@@ -43,7 +43,7 @@ jobs:
             -DASTRAEA_WARNINGS_AS_ERRORS=ON \
             -DASTRAEA_BUILD_C1_RESEARCH=ON
           cmake --build "$RUNNER_TEMP/astraea-public-demo-profile" \
-            --target astraea astraea_c1_breakout_memory_plan_research astraea_c1_owned_guest_memory_research astraea_c1_owned_cpu_step_research astraea_c1_owned_effect_ledger_research astraea_c1_indirect_call_research --parallel 3
+            --target astraea astraea_c1_breakout_memory_plan_research astraea_c1_owned_guest_memory_research astraea_c1_owned_cpu_step_research astraea_c1_owned_effect_ledger_research astraea_c1_unicorn_effect_bridge_research astraea_c1_indirect_call_research --parallel 3
 
       - name: Exercise owned virtual guest memory permissions and failures
         run: |
@@ -862,3 +862,59 @@ jobs:
           done
           test "$(grep -c '^C1 UNICORN EFFECT CASE PASS:' \
             "$RUNNER_TEMP/astraea-unicorn-effect-boundaries.txt")" = 4
+
+      # The external interpreter stays in its hash-locked temporary Python
+      # venv; only exact, independently executed owned fixtures are emitted.
+      # A separate C++ process verifies and replays effects via Astraea's
+      # checked guest virtual memory and research-only effect ledger.
+      - name: Verify external mediated CPU effects through owned C++ ledger
+        run: |
+          set -euo pipefail
+          producer="tools/reference/ps5_process_entry_observer/emit_unicorn_owned_effects.py"
+          bridge="$RUNNER_TEMP/astraea-public-demo-profile/astraea_c1_unicorn_effect_bridge_research"
+          python3 -m py_compile "$producer"
+          for scenario in complete partial; do
+            evidence="$RUNNER_TEMP/astraea-unicorn-${scenario}-effects.txt"
+            "$RUNNER_TEMP/astraea-unicorn-c1-venv/bin/python" "$producer" "$scenario" > "$evidence"
+            "$bridge" "$scenario" "$evidence" |
+              tee "$RUNNER_TEMP/astraea-owned-${scenario}-bridge.txt"
+            grep -Fx "C1 EXTERNAL UNICORN TO OWNED EFFECT LEDGER PASS" \
+              "$RUNNER_TEMP/astraea-owned-${scenario}-bridge.txt"
+            grep -Fx "case=$scenario" "$RUNNER_TEMP/astraea-owned-${scenario}-bridge.txt"
+            grep -Fx "complete_context=checked" \
+              "$RUNNER_TEMP/astraea-owned-${scenario}-bridge.txt"
+            grep -Fx "fault_stage_and_restart_state=checked" \
+              "$RUNNER_TEMP/astraea-owned-${scenario}-bridge.txt"
+            grep -Fx "external_engine_linked_into_core=no" \
+              "$RUNNER_TEMP/astraea-owned-${scenario}-bridge.txt"
+            grep -Fx "sony_services=not_executed" \
+              "$RUNNER_TEMP/astraea-owned-${scenario}-bridge.txt"
+          done
+          grep -Fx "verified_guest_writes=4" \
+            "$RUNNER_TEMP/astraea-owned-complete-bridge.txt"
+          grep -Fx "verified_guest_writes=1" \
+            "$RUNNER_TEMP/astraea-owned-partial-bridge.txt"
+          python3 - <<'PY'
+          import os
+          from pathlib import Path
+          import subprocess
+          root = Path(os.environ["RUNNER_TEMP"])
+          bridge = root / "astraea-public-demo-profile/astraea_c1_unicorn_effect_bridge_research"
+          scenarios = {
+              "complete": ("WRITE|300080|11", "WRITE|300080|ff"),
+              "partial": ("OUTCOME|fault_after_effects|memory_permission|301000",
+                          "OUTCOME|retired|none|-"),
+          }
+          for scenario, (old, new) in scenarios.items():
+              evidence = (root / f"astraea-unicorn-{scenario}-effects.txt").read_text()
+              if evidence.count(old) != 1:
+                  raise SystemExit("fixed transcript drift prevented negative")
+              altered = root / f"astraea-unicorn-{scenario}-tampered.txt"
+              altered.write_text(evidence.replace(old, new, 1))
+              test = subprocess.run(
+                  [str(bridge), scenario, str(altered)],
+                  text=True, capture_output=True, timeout=10)
+              if test.returncode == 0 or "BRIDGE REFUSED" not in test.stderr:
+                  raise SystemExit(f"tampered {scenario} evidence was accepted")
+          print("C1 EXTERNAL EFFECT TRANSCRIPT TAMPER NEGATIVES PASS")
+          PY
