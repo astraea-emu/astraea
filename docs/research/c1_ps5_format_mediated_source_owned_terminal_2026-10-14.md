@@ -54,7 +54,18 @@ engine instances**.
 
 The source instruction `MOV EAX,42` must retire, followed by original
 `UD2` raising a typed invalid-instruction error with RIP still at
-entry+5 and RAX=42. No unreviewed code address or guest memory write is
+entry+5 and RAX=42.
+
+During qualification, Unicorn's pre-instruction code hook at the **invalid
+UD2** address `0x15` reported width **`0xF1F1F1F1`**, not a valid decoded
+two-byte length. An early guard correctly refused that untrusted width, but
+also prevented fault delivery. The final guard authenticates the **exact
+original `0F 0B` bytes** and a two-byte original executable virtual extent
+at this one known faulting RIP, ignoring only the invalid decoder's reported
+width. It still demands a subsequent actual typed invalid-instruction
+exception, the same RIP/RAX, exactly the two expected code callbacks and
+zero guest data reads/writes. This is no general invalid-opcode decoding
+policy or host-isolation guarantee. No unreviewed code address or guest memory write is
 accepted; source code and all relocated words remain unchanged. The two
 runs must agree exactly on the observed terminal CPU/stack snapshot.
 
