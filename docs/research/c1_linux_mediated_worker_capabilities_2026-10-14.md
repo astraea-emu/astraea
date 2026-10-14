@@ -16,7 +16,7 @@ The controller checks RIP sequence, exact read and write events, full final gues
 
 ## Linux capability probe
 
-The worker installs no_new_privs and seccomp-BPF after loading Unicorn. The filter rejects x32-number and non-x86-64 architecture cases, returns EPERM for selected open/socket/fork/exec and resource-management syscalls, and otherwise ALLOWS syscalls. After filter installation, genuine open, socket and fork attempts must all fail with kernel EPERM.
+The worker installs no_new_privs and seccomp-BPF after loading Unicorn. The filter intentionally distinguishes CLONE_THREAD (permitted for the mediated engine's pthreads) from fork-style clone (denied). It returns ENOSYS for clone3 to exercise glibc's legacy clone fallback; this is an engine integration concession, not hostile-code confinement. The filter rejects x32-number and non-x86-64 architecture cases, returns EPERM for selected open/socket/fork/exec and resource-management syscalls, and otherwise ALLOWS syscalls. After filter installation, genuine open, socket and fork attempts must all fail with kernel EPERM.
 
 The parent starts a separate worker with closed nonstandard inherited FDs, disabled stdin, finite wall/CPU/address-space/file-size limits and a strict bounded JSON output.
 
