@@ -883,6 +883,7 @@ jobs:
             "guest_data_reads=1_independently_checked" \
             "fresh_worker_processes=2_identical" \
             "kernel_denied_host_operations=open_socket_fork" \
+            "kernel_thread_exception=clone_thread_joined" \
             "controller_rejected_report_mutations=8" \
             "external_cpu=unicorn_2.1.4_research_only" \
             "worker_seccomp_policy=partial_deny_not_full_sandbox" \
