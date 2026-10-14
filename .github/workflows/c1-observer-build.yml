@@ -1381,6 +1381,7 @@ jobs:
             "relative_relocations=8_readback_verified" \
             "full_mapped_guest_pages=post_execution_compared" \
             "original_byte_range_write_authority=checked" \
+            "reusable_original_RX_RW_policy=checked" \
             "source_owned_write_denial_cases=7" \
             "fresh_runs=2_identical" \
             "source_owned_instruction_count_before_fault=2" \
@@ -1420,3 +1421,26 @@ jobs:
           refuses(title, bad_manifest, "RELATIVE relocation type")
           print("C1 SOURCE-OWNED GUEST STORE SOURCE/RELOCATION NEGATIVES PASS")
           PY
+
+      # Standalone policy oracle; never claims that Unicorn pre-write hooks
+      # provide a post-commit guard for arbitrary guest machine code.
+      - name: Qualify reusable original guest byte-range access policy
+        run: |
+          set -euo pipefail
+          root="tools/reference/ps5_process_entry_observer"
+          python3 -m py_compile \
+            "$root/owned_guest_byte_access_policy.py" \
+            "$root/owned_guest_byte_access_policy_selftest.py" \
+            "$root/execute_owned_ps5_elf_data_store.py"
+          python3 "$root/owned_guest_byte_access_policy_selftest.py" |
+            tee "$RUNNER_TEMP/astraea-owned-byte-policy.txt"
+          for required in \
+            "C1 ORIGINAL GUEST BYTE-RANGE POLICY PASS" \
+            "source_owned_policy_cases=18" \
+            "mixed_host_page_guest_RX_RW_separation=checked" \
+            "cross_region_and_gap_access=checked" \
+            "overflow_and_invalid_access=refused" \
+            "zero_permission_source_mapping=all_access_refused" \
+            "no_native_guest_execution=confirmed"; do
+            grep -Fx "$required" "$RUNNER_TEMP/astraea-owned-byte-policy.txt"
+          done
