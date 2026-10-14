@@ -865,6 +865,30 @@ jobs:
           test "$(grep -c '^C1 UNICORN EFFECT CASE PASS:' \
             "$RUNNER_TEMP/astraea-unicorn-effect-boundaries.txt")" = 4
 
+      # Controller reads both pipes with hard byte caps before buffering.
+      # An intentionally uncooperative child must be killed with its
+      # process group, including a descendant that holds output pipes open.
+      - name: Reject overlong and hanging mediated child output
+        run: |
+          set -euo pipefail
+          script="tools/reference/ps5_process_entry_observer/owned_bounded_worker_io_selftest.py"
+          python3 -m py_compile \
+            tools/reference/ps5_process_entry_observer/owned_bounded_worker_io.py \
+            "$script"
+          python3 "$script" | tee "$RUNNER_TEMP/astraea-c1-bounded-worker-io.txt"
+          for claim in \
+            "C1 BOUNDED MEDIATED WORKER IO NEGATIVES PASS" \
+            "source_owned_capture_cases=10" \
+            "stdout_stderr_streaming_caps=enforced_before_allocation" \
+            "concurrent_pipe_progress=checked" \
+            "timeout_and_process_group_kill=checked" \
+            "descendant_host_effect=absent_after_timeout" \
+            "nonzero_exit_and_invalid_json=refused_by_controller_contract" \
+            "retail_code_executed=none" \
+            "hostile_worker_sandbox=not_established"; do
+            grep -Fx "$claim" "$RUNNER_TEMP/astraea-c1-bounded-worker-io.txt"
+          done
+
       # A source-owned multi-instruction x86-64 fixture runs in a separate
       # Linux child via the existing pinned, research-only Unicorn wheel.
       # Verify real kernel-denied host operations plus controller-side page
