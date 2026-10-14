@@ -17,8 +17,8 @@ from execute_pinned_owned_ps5_elf_mediated import load_manifest, map_guest
 
 # Frozen from source-generated artifact on the exact pinned public toolchain.
 # Never replace these with a digest computed from the candidate being checked.
-EXPECTED_SHA256 = "PENDING_SOURCE_BUILD_IDENTITY"
-EXPECTED_SIZE = 0
+EXPECTED_SHA256 = "3a69a4a035a10656c1532b1b8825eb4e361d2f755ac356ddeb7a36932f5c8cd7"
+EXPECTED_SIZE = 66600
 ENTRY = 0x10
 CODE_LENGTH = 14
 MARKER_INITIAL = 0x4153545241454101
@@ -87,12 +87,11 @@ def inspect(title):
     demand(len(text) == 1, "entry_not_unique_file_backed_executable")
     off = text[0]["fileoff"] + ENTRY - text[0]["va"]
     code = elf[off:off + CODE_LENGTH]
-    demand(len(code) == CODE_LENGTH and
-           code[:8] == bytes.fromhex("b82a000000488905") and
-           code[12:] == b"\x0f\x0b",
+    demand(code == bytes.fromhex("b82a000000488905c4c000000f0b"),
            "source_compiled_rip_store_instruction_changed")
     displacement = struct.unpack_from("<i", code, 8)[0]
     marker = ENTRY + 12 + displacement
+    demand(marker == 0xc0e0, "compiled_source_marker_target_drift")
     demand(0 <= marker <= (1 << 64) - 8,
            "rip_store_target_overflow")
     target = [r for r in regions if r["flags"] & 2 and
