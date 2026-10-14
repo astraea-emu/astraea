@@ -190,11 +190,22 @@ def execute_once(elf, regions, pages, relocations):
 
     def on_code(_engine, address, size, _data):
         observed.append((address, size))
+        # Unicorn's code-hook width for the deliberately INVALID UD2
+        # has been observed as 0xF1F1F1F1, not an architectural two-byte
+        # decode. Only the *first valid MOV* requires a trusted size.
+        # For the terminal fault, authenticate the exact pinned bytes
+        # and executable source VA separately; require a real UC_ERR
+        # exception after this callback, never treat the hook as success.
+        expected_extent = (5 if address == ENTRY else
+                           2 if address == ENTRY + 5 else 0)
         source_exec = [r for r in regions
                        if (r["flags"] & 1) and r["va"] <= address and
-                       0 < size <= 15 and address + size <= r["end"]]
-        if len(source_exec) != 1 or len(observed) > 2 or observed[-1] not in (
-            (ENTRY, 5), (ENTRY + 5, 2)):
+                       expected_extent > 0 and
+                       address + expected_extent <= r["end"]]
+        authorized = (address == ENTRY and size == 5 or
+                      address == ENTRY + 5 and
+                      bytes(uc.mem_read(address, 2)) == b"\x0f\x0b")
+        if len(source_exec) != 1 or len(observed) > 2 or not authorized:
             uc.emu_stop()
 
     def on_write(_engine, _access, address, width, _value, _data):
@@ -229,7 +240,8 @@ def execute_once(elf, regions, pages, relocations):
             f" rip=0x{uc.reg_read(xr.UC_X86_REG_RIP):x}"
             f" rax={uc.reg_read(xr.UC_X86_REG_RAX)}")
 
-    require(observed == [(ENTRY, 5), (ENTRY + 5, 2)],
+    require(len(observed) == 2 and observed[0] == (ENTRY, 5) and
+            observed[1][0] == ENTRY + 5,
             "unexpected_source_guest_instruction_path")
     require(not attempted_writes and not attempted_reads and
             uc.reg_read(xr.UC_X86_REG_RAX) == 42 and
@@ -267,6 +279,7 @@ def main():
     print("source_owned_elf_type=0xfe10")
     print("source_owned_first_retired_mov_eax_42=1")
     print("source_owned_terminal_ud2=typed_invalid_instruction")
+    print("ud2_hook_size=not_trusted_exact_source_bytes_checked")
     print("checked_relative_relocations=" + str(first[2]))
     print("source_mixed_permission_pages=" + str(len(mixed)))
     print("mixed_page_policy=virtual_storage_union_exact_exec_no_data_access")
