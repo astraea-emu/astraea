@@ -1263,3 +1263,160 @@ jobs:
           refuses(title, altered_manifest, "changed relative relocation")
           print("C1 OWNED PS5-FORMAT MEDIATED SOURCE/RELOCATION NEGATIVES PASS")
           PY
+
+      # New source-owned PS5-format guest DATA effect fixture, built by the
+      # same pinned public compiler/converter. Discovery phase freezes the
+      # exact emitted artifact before mediated execution is authorized.
+      - name: Build and attest source-owned PS5-format guest data-write fixture
+        env:
+          PINNED_BLACKBEAR: 2f672d1c2f508e26f82ce6e27cef289a0861413c
+        run: |
+          set -euo pipefail
+          git -C "$RUNNER_TEMP/ps5-native-app-boilerplate" worktree add --detach \
+            "$RUNNER_TEMP/astraea-owned-write-native-title" "$PINNED_BLACKBEAR"
+          python3 tools/reference/ps5_process_entry_observer/prepare_minimal_public_title.py \
+            --checkout "$RUNNER_TEMP/astraea-owned-write-native-title" \
+            --entry-mode mov42-store-ud2 \
+            | tee "$RUNNER_TEMP/astraea-owned-write-source.json"
+          ln -s "$RUNNER_TEMP/ps5-native-app-boilerplate/.deps" \
+            "$RUNNER_TEMP/astraea-owned-write-native-title/.deps"
+          make --directory="$RUNNER_TEMP/astraea-owned-write-native-title" \
+            USE_CCACHE=0 APP_SOURCE_DIR=astraea_minimal APP_ASSETS= app
+          title="$RUNNER_TEMP/astraea-owned-write-native-title/build/eboot.elf"
+          cli="$RUNNER_TEMP/astraea-native-title-smoke/astraea"
+          "$cli" dependencies "$title" > "$RUNNER_TEMP/astraea-owned-write-deps.txt"
+          python3 - <<'PY'
+          import hashlib
+          import json
+          import os
+          from pathlib import Path
+          import struct
+
+          root = Path(os.environ["RUNNER_TEMP"])
+          title = root / "astraea-owned-write-native-title/build/eboot.elf"
+          raw = title.read_bytes()
+          source = json.loads((root / "astraea-owned-write-source.json").read_text())
+          if source["entry_mode"] != "mov42-store-ud2" or source["execution"] != "none":
+              raise SystemExit("source-owned entry variant drift")
+          typ, machine = struct.unpack_from("<HH", raw, 16)
+          entry, phoff = struct.unpack_from("<QQ", raw, 24)
+          phsize, phnum = struct.unpack_from("<HH", raw, 54)
+          if (typ, machine, entry, phsize) != (0xfe10, 62, 0x10, 56) or not 1 <= phnum <= 32:
+              raise SystemExit("unexpected PS5-format source-owned linked ELF header")
+          if phoff + phnum * phsize > len(raw):
+              raise SystemExit("unbounded program header extent")
+          segments = []
+          for i in range(phnum):
+              k, perms, off, va, _paddr, sz, memsz, _align = struct.unpack_from(
+                  "<IIQQQQQQ", raw, phoff + i * phsize)
+              if k == 1:
+                  if sz > memsz or off + sz > len(raw):
+                      raise SystemExit("invalid PT_LOAD source extent")
+                  segments.append((va, va + memsz, perms, off, sz))
+          text = [(va, off + entry - va) for va, end, perms, off, sz in segments
+                  if perms & 1 and va <= entry and entry + 14 <= va + sz]
+          if len(text) != 1:
+              raise SystemExit("not uniquely file-backed executable entry")
+          code = raw[text[0][1]:text[0][1]+14]
+          if code[:8] != bytes.fromhex("b82a000000488905") or code[12:] != b"\x0f\x0b":
+              raise SystemExit(f"unexpected source-compiled store-and-UD2 bytes {code.hex()}")
+          displacement = struct.unpack_from("<i", code, 8)[0]
+          marker = entry + 12 + displacement
+          writable = [(va, end, perms, off, sz) for va, end, perms, off, sz in segments
+                      if perms & 2 and va <= marker and marker + 8 <= va + sz]
+          if len(writable) != 1:
+              raise SystemExit("store target not uniquely writable, file-backed guest data")
+          va, _end, _perms, off, _size = writable[0]
+          initial = raw[off + marker - va:off + marker - va + 8]
+          if initial != (0x4153545241454101).to_bytes(8, "little"):
+              raise SystemExit("source-owned marker's original value drifted")
+          deps = dict(line.split("=", 1) for line in
+                      (root / "astraea-owned-write-deps.txt").read_text().splitlines()[1:]
+                      if "=" in line)
+          for key in ("generic_needed_records", "sce_needed_module_records",
+                      "sce_import_library_records"):
+              if deps.get(key) != "0":
+                  raise SystemExit(f"new runtime dependency: {key}")
+          if deps.get("relocation_records") != "8" or deps.get("resolution") != "not_attempted":
+              raise SystemExit("new relocation/dependency census drift")
+          expected_digest = "3a69a4a035a10656c1532b1b8825eb4e361d2f755ac356ddeb7a36932f5c8cd7"
+          if hashlib.sha256(raw).hexdigest() != expected_digest or len(raw) != 66600:
+              raise SystemExit("frozen source-built data-write ELF identity drift")
+          if marker != 0xc0e0 or code.hex() != "b82a000000488905c4c000000f0b":
+              raise SystemExit("frozen source-built data-write code/target drift")
+          print("C1 OWNED PS5 SOURCE-BUILT DATA WRITE PROVENANCE PASS")
+          print("source_owned_write_elf_sha256=" + hashlib.sha256(raw).hexdigest())
+          print("source_owned_write_elf_size=" + str(len(raw)))
+          print(f"source_owned_write_entry_hex={code.hex()}")
+          print(f"source_owned_write_target=0x{marker:x}")
+          print("source_owned_original_marker_hex=" + initial.hex())
+          print("source_owned_imports=none")
+          print("source_owned_relative_relocations=8")
+          print("guest_execution=not_yet_attempted_in_build_step")
+          PY
+
+      - name: Execute owned PS5 ELF guest store and typed UD2 via mediated CPU
+        run: |
+          set -euo pipefail
+          script="tools/reference/ps5_process_entry_observer/execute_owned_ps5_elf_data_store.py"
+          python3 -m py_compile "$script"
+          original="$RUNNER_TEMP/astraea-owned-write-native-title/build/eboot.elf"
+          deps="$RUNNER_TEMP/astraea-owned-write-deps.txt"
+          python3 -m venv "$RUNNER_TEMP/astraea-owned-write-unicorn-venv"
+          printf '%s\n' 'unicorn==2.1.4 --hash=sha256:9d6e6dea140560de4ebd8446661f7ef84a357d428c14a3ef09dacd306ec8c239' \
+            > "$RUNNER_TEMP/astraea-owned-write-unicorn-lock.txt"
+          "$RUNNER_TEMP/astraea-owned-write-unicorn-venv/bin/python" -m pip install \
+            --only-binary=:all: --require-hashes \
+            -r "$RUNNER_TEMP/astraea-owned-write-unicorn-lock.txt"
+          engine="$RUNNER_TEMP/astraea-owned-write-unicorn-venv/bin/python"
+          "$engine" "$script" "$original" "$deps" |
+            tee "$RUNNER_TEMP/astraea-owned-guest-write-execution.txt"
+          for expected in \
+            "C1 SOURCE-OWNED PS5 ELF MEDIATED GUEST STORE PASS" \
+            "source_sha256=3a69a4a035a10656c1532b1b8825eb4e361d2f755ac356ddeb7a36932f5c8cd7" \
+            "source_guest_write_target=0xc0e0" \
+            "guest_store_width_bytes=8" \
+            "committed_guest_store_value=42" \
+            "typed_terminal_ud2=invalid_instruction" \
+            "relative_relocations=8_readback_verified" \
+            "full_mapped_guest_pages=post_execution_compared" \
+            "original_byte_range_write_authority=checked" \
+            "source_owned_write_denial_cases=7" \
+            "fresh_runs=2_identical" \
+            "source_owned_instruction_count_before_fault=2" \
+            "sony_imports=none" \
+            "native_outside_authored_execution=none" \
+            "production_guest_admission=unchanged"; do
+            grep -Fx "$expected" "$RUNNER_TEMP/astraea-owned-guest-write-execution.txt"
+          done
+          "$engine" - <<'PY'
+          import os
+          from pathlib import Path
+          import subprocess
+          import sys
+
+          root = Path(os.environ["RUNNER_TEMP"])
+          script = Path("tools/reference/ps5_process_entry_observer/execute_owned_ps5_elf_data_store.py")
+          title = root / "astraea-owned-write-native-title/build/eboot.elf"
+          manifest = root / "astraea-owned-write-deps.txt"
+
+          def refuses(path, deps, label):
+              result = subprocess.run(
+                  [sys.executable, str(script), str(path), str(deps)],
+                  capture_output=True, text=True, timeout=20)
+              if result.returncode == 0 or "C1 OWNED PS5 DATA STORE REFUSED" not in result.stderr:
+                  raise SystemExit(f"invalid {label} was admitted")
+          modified = bytearray(title.read_bytes())
+          modified[0] ^= 1
+          bad_title = root / "astraea-owned-write-tampered.elf"
+          bad_title.write_bytes(modified)
+          refuses(bad_title, manifest, "source ELF identity")
+          text = manifest.read_text()
+          row = "relocation[0].type=8"
+          if text.count(row) != 1:
+              raise SystemExit("unexpected source manifest shape")
+          bad_manifest = root / "astraea-owned-write-tampered-deps.txt"
+          bad_manifest.write_text(text.replace(row, "relocation[0].type=6", 1))
+          refuses(title, bad_manifest, "RELATIVE relocation type")
+          print("C1 SOURCE-OWNED GUEST STORE SOURCE/RELOCATION NEGATIVES PASS")
+          PY

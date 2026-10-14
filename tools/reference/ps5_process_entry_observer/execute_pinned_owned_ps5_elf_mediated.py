@@ -142,7 +142,7 @@ def load_manifest(path, regions):
     return relocations
 
 
-def map_guest(uc, elf, regions, pages, relocations):
+def map_guest(uc, elf, regions, pages, relocations, expected_code=CODE):
     from unicorn import UC_PROT_ALL, UC_PROT_READ, UC_PROT_WRITE, UC_PROT_EXEC
     for page in sorted(pages):
         uc.mem_map(page, PAGE, UC_PROT_ALL)
@@ -164,7 +164,7 @@ def map_guest(uc, elf, regions, pages, relocations):
                       (UC_PROT_WRITE if flags & 2 else 0) |
                       (UC_PROT_EXEC if flags & 1 else 0))
         uc.mem_protect(page, PAGE, protection)
-    require(bytes(uc.mem_read(ENTRY, len(CODE))) == CODE,
+    require(bytes(uc.mem_read(ENTRY, len(expected_code))) == expected_code,
             "source_entry_mutated_during_relocation")
     return expected
 

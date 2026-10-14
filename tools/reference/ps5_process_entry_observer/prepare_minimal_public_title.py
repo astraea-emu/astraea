@@ -29,6 +29,16 @@ TWO_STEP_ENTRY = ENTRY.replace(
 )
 assert TWO_STEP_ENTRY != ENTRY
 
+# Actual guest data-effect fixture: architectural MOV EAX immediate, then
+# one RIP-relative 64-bit store to an Astraea-owned mapped data symbol, UD2.
+# No imported provider, native admission or PS5 ABI is asserted.
+WRITE_ENTRY = ENTRY.replace(
+    '__asm__ volatile("ud2");',
+    '__asm__ volatile("movl $42, %eax\\n\\t'
+    'movq %rax, astraea_minimal_marker(%rip)\\n\\tud2");',
+)
+assert WRITE_ENTRY not in (ENTRY, TWO_STEP_ENTRY)
+
 MARKER = "/* Owned sample; no runtime imports. */\n" + (
     "__attribute__((used)) unsigned long astraea_minimal_marker = "
     "0x4153545241454101UL;\n"
@@ -57,14 +67,17 @@ def prepare(path: Path, entry_mode: str = "ud2") -> dict:
         raise ValueError("minimal source already present")
     source.mkdir()
     (source / "marker.c").write_text(MARKER, "utf-8")
-    if entry_mode not in ("ud2", "mov42-ud2"):
+    if entry_mode not in ("ud2", "mov42-ud2", "mov42-store-ud2"):
         raise ValueError("unsupported source-owned entry mode")
-    chosen_entry = ENTRY if entry_mode == "ud2" else TWO_STEP_ENTRY
+    chosen_entry = (ENTRY if entry_mode == "ud2" else
+                    TWO_STEP_ENTRY if entry_mode == "mov42-ud2" else
+                    WRITE_ENTRY)
     crt.write_text(chosen_entry, "utf-8")
     build.write_text(original.replace(OLD, NEW), "utf-8")
     return dict(source_commit=PIN, execution="none",
         policy=("synthetic_entry_first_ud2" if entry_mode == "ud2"
-                else "synthetic_entry_mov_eax_42_then_ud2"),
+                else "synthetic_entry_mov_eax_42_then_ud2" if entry_mode == "mov42-ud2"
+                else "synthetic_entry_mov42_store_marker_then_ud2"),
         entry_mode=entry_mode,
         minimal_crt_sha256=hashlib.sha256(chosen_entry.encode()).hexdigest(),
         minimal_marker_sha256=hashlib.sha256(MARKER.encode()).hexdigest())
@@ -72,7 +85,7 @@ def prepare(path: Path, entry_mode: str = "ud2") -> dict:
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--checkout", type=Path, required=True)
-    parser.add_argument("--entry-mode", choices=("ud2", "mov42-ud2"),
+    parser.add_argument("--entry-mode", choices=("ud2", "mov42-ud2", "mov42-store-ud2"),
                         default="ud2")
     args = parser.parse_args()
     print(json.dumps(prepare(args.checkout.resolve(), args.entry_mode),
