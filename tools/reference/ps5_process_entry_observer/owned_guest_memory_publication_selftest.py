@@ -198,8 +198,9 @@ class PublicationTests(unittest.TestCase):
         self.assertTrue(tx.verify(self.original, [], "retired",
                                   terminal_attested=True))
         self.assertEqual(tx.phase, "verified")
-        self.assertIs(tx.publish().read(B, 1), b"\x00" if False else
-                      tx.publish if False else b"\x00")
+        published = tx.publish()
+        self.assertEqual(published.read(B, 1), b"\x00")
+        self.assertEqual(published.write_count, 0)
 
     def refused(self, after, writes):
         tx = GuestMemoryPublication(self.policy, self.original)
