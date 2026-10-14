@@ -21,6 +21,7 @@ READ = 4
 WRITE = 2
 EXECUTE = 1
 MAX_REGIONS = 64
+MAX_POLICY_PAGES = 4096
 MAX_ACCESS_BYTES = 64
 MAX_INSTRUCTION_BYTES = 15
 
@@ -58,6 +59,7 @@ class GuestRegionPolicy:
             raise ValueError("invalid_guest_region_count")
         ordered = sorted(incoming, key=lambda r: (r.start, r.end))
         previous_end = -1
+        page_upper_bound = 0
         for region in ordered:
             if not isinstance(region, GuestRegion):
                 raise ValueError("invalid_guest_region_type")
@@ -68,6 +70,10 @@ class GuestRegionPolicy:
                 raise ValueError("invalid_guest_region_extent_or_permissions")
             if region.start < previous_end:
                 raise ValueError("overlapping_original_guest_regions")
+            page_upper_bound += ((region.end - 1) // PAGE_BYTES -
+                                 region.start // PAGE_BYTES + 1)
+            if page_upper_bound > MAX_POLICY_PAGES:
+                raise ValueError("source_guest_page_limit_exceeded")
             previous_end = region.end
         self._regions = tuple(ordered)
 
