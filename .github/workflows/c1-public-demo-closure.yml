@@ -10,6 +10,8 @@ on:
       - '.github/workflows/c1-public-demo-closure.yml'
       - 'src/app/**'
       - 'tools/reference/public_breakout_import_audit.py'
+      - 'tools/reference/first_title_c0_baseline.py'
+      - 'tools/reference/first_title_c0_baseline_selftest.py'
       - 'tools/reference/ps5_process_entry_observer/owned_ptrace_step_research.cpp'
       - 'src/loader/**'
       - 'include/astraea/loader/**'
@@ -1099,3 +1101,24 @@ jobs:
           rejected([original, wrong], "changed source-backed stop")
           print("C1 BREAKOUT IMPORT STOP SOURCE/GOT/BUDGET NEGATIVES PASS")
           PY
+
+      # Safe against using any proprietary game bytes in public CI. The
+      # fixture consists only of source-owned, mocked metadata reports.
+      - name: Verify local first-title C0 baseline is repeatable and redacted
+        run: |
+          set -euo pipefail
+          root="tools/reference"
+          python3 -m py_compile \
+            "$root/first_title_c0_baseline.py" \
+            "$root/first_title_c0_baseline_selftest.py"
+          python3 "$root/first_title_c0_baseline_selftest.py" \
+            | tee "$RUNNER_TEMP/astraea-c0-first-title-baseline.txt"
+          for expected in \
+            "C0 LOCAL FIRST-TITLE BASELINE SELFTEST PASS" \
+            "source_owned_preflight_cases=17" \
+            "local_game_bytes_uploaded=no" \
+            "raw_symbols_and_paths_emitted=no" \
+            "guest_instructions_executed=0"; do
+            grep -Fx "$expected" \
+              "$RUNNER_TEMP/astraea-c0-first-title-baseline.txt"
+          done
