@@ -81,7 +81,7 @@ def expected_stack(ref, steps):
         offset = address - ref["stack_base"]
         expected[offset:offset + len(bytes_written)] = bytes_written
         changes.append((address, bytes_written))
-    check(len(changes) == 9, "original Breakout stack-write count changed")
+    check(len(changes) == 10, "full entry-plus-callee stack-write count changed")
     return expected, changes
 
 
@@ -176,7 +176,7 @@ def run(elf_path, trace_path, budget):
     print("engine=unicorn_2.1.4_external_research_only")
     print("batch_invocations=one_per_case")
     print("total_source_backed_steps=13")
-    print("all_source_backed_guest_stores=9")
+    print("all_source_backed_guest_stores=10")
     print("first_import_call=unretired_at_0x23c")
     print("synthetic_context=unchanged")
     print("production_cpu_backend=not_selected")
