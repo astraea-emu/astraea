@@ -11,6 +11,8 @@ on:
       - 'docs/research/c1_sourceowned_two_instruction_entry_2026-10-12.md'
       - '.github/workflows/c1-observer-build.yml'
       - 'tools/reference/ps5_process_entry_observer/**'
+      - 'tools/reference/first_title_c0_baseline.py'
+      - 'tools/reference/first_title_c0_baseline_selftest.py'
       - 'CMakeLists.txt'
       - 'CMakePresets.json'
       - 'cmake/**'
@@ -1470,3 +1472,35 @@ jobs:
             "host_native_guest_execution=none"; do
             grep -Fx "$claim" "$RUNNER_TEMP/astraea-guest-memory-publication.txt"
           done
+
+      # The source-built public PS5 ELF is a REAL linked artifact, but is
+      # NOT a commercial title; do not mislabel it with a game PPSA ID.
+      # Exercise the same C0 report parser/cross-census logic end to end.
+      - name: Cross-check local C0 analyzer reports on pinned public PS5-format ELF
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          import os
+          import sys
+          root = Path(os.environ["RUNNER_TEMP"])
+          sys.path.insert(0, str(Path("tools/reference").resolve()))
+          from first_title_c0_baseline import normalize, stable_report
+          cli = root / "astraea-native-title-smoke/astraea"
+          source_owned = root / "ps5-native-app-boilerplate/build/eboot.elf"
+          if not source_owned.is_file() or not cli.is_file():
+              raise SystemExit("source-built C0 test inputs absent")
+          profile = stable_report(cli, ["profile"], source_owned, "profile")
+          deps = stable_report(cli, ["dependencies"], source_owned, "dependencies")
+          p, d = normalize(profile, deps)
+          if (p["load_segments"] == 0 or
+                  p["generic_needed"] == 0 or
+                  d["relocation_records"] == 0 or
+                  d["dynamic_symbol_records"] == 0):
+              raise SystemExit("actual source-built PS5 ELF census unexpectedly empty")
+          print("C0 PINNED SOURCE-BUILT PS5 ELF REPORT CROSSCHECK PASS")
+          print("local_source_elf_reports=two_runs_identical_each")
+          print("commercial_game_artifact_used=no")
+          print("guest_instructions_executed=0")
+          print("original_names_and_paths_emitted=no")
+          PY
