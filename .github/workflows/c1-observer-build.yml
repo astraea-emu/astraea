@@ -1179,4 +1179,72 @@ jobs:
           print("NO NATIVE BREAKOUT / COMMERCIAL GUEST EXECUTION")
           PY
 
+      # The independently source-generated, import-free PS5-format ELF is
+      # now observed in a disposable mediated CPU (never native host guest
+      # entry). The exact checked RELATIVE records come from Astraea's
+      # existing read-only dependency report. Production diagnose unchanged.
+      - name: Execute pinned source-owned PS5-format ELF to typed UD2 in mediated CPU
+        run: |
+          set -euo pipefail
+          script="tools/reference/ps5_process_entry_observer/execute_pinned_owned_ps5_elf_mediated.py"
+          python3 -m py_compile "$script"
+          original="$RUNNER_TEMP/astraea-two-instruction-native-title/build/eboot.elf"
+          cli="$RUNNER_TEMP/astraea-native-title-smoke/astraea"
+          dependencies="$RUNNER_TEMP/c1-owned-two-step-dependencies.txt"
+          "$cli" dependencies "$original" > "$dependencies"
+          python3 -m venv "$RUNNER_TEMP/astraea-owned-elf-unicorn-venv"
+          printf '%s\n' 'unicorn==2.1.4 --hash=sha256:9d6e6dea140560de4ebd8446661f7ef84a357d428c14a3ef09dacd306ec8c239' \
+            > "$RUNNER_TEMP/astraea-owned-elf-unicorn-lock.txt"
+          "$RUNNER_TEMP/astraea-owned-elf-unicorn-venv/bin/python" -m pip install \
+            --only-binary=:all: --require-hashes \
+            -r "$RUNNER_TEMP/astraea-owned-elf-unicorn-lock.txt"
+          engine="$RUNNER_TEMP/astraea-owned-elf-unicorn-venv/bin/python"
+          "$engine" "$script" "$original" "$dependencies" |
+            tee "$RUNNER_TEMP/astraea-owned-ps5-elf-terminal.txt"
+          for item in \
+            "C1 SOURCE-OWNED PS5-FORMAT MEDIATED TERMINAL PASS" \
+            "source_sha256=cdeab7a242aa88a90a01494ff85ac68f44b15e7a2e588498927e3aa6aae5a947" \
+            "source_owned_elf_type=0xfe10" \
+            "source_owned_first_retired_mov_eax_42=1" \
+            "source_owned_terminal_ud2=typed_invalid_instruction" \
+            "checked_relative_relocations=8" \
+            "repeated_fresh_runs=2_identical" \
+            "unresolved_sony_services=none_declared" \
+            "native_guest_execution=none" \
+            "external_engine=unicorn_2.1.4_research_only" \
+            "commercial_C1_process_abi=not_established"; do
+            grep -Fx "$item" "$RUNNER_TEMP/astraea-owned-ps5-elf-terminal.txt"
+          done
+          "$engine" - <<'PY'
+          import os
+          from pathlib import Path
+          import subprocess
+          import sys
 
+          root = Path(os.environ["RUNNER_TEMP"])
+          script = Path("tools/reference/ps5_process_entry_observer/execute_pinned_owned_ps5_elf_mediated.py")
+          title = root / "astraea-two-instruction-native-title/build/eboot.elf"
+          manifest = root / "c1-owned-two-step-dependencies.txt"
+
+          def refuses(candidate, dependency_report, reason):
+              run = subprocess.run([sys.executable, str(script),
+                                    str(candidate), str(dependency_report)],
+                                   text=True, capture_output=True, timeout=20)
+              if run.returncode == 0 or "MEDIATED REFUSED" not in run.stderr:
+                  raise SystemExit(f"{reason}: invalid evidence was admitted")
+
+          damaged = bytearray(title.read_bytes())
+          damaged[0] ^= 1
+          altered_title = root / "astraea-owned-two-step-drifted.elf"
+          altered_title.write_bytes(damaged)
+          refuses(altered_title, manifest, "changed original ELF bytes")
+          data = manifest.read_text()
+          needle = "relocation[0].type=8"
+          if data.count(needle) != 1:
+              raise SystemExit("source relocation manifest changed")
+          altered_manifest = root / "astraea-owned-two-step-drifted-deps.txt"
+          altered_manifest.write_text(data.replace(needle,
+                                                    "relocation[0].type=6", 1))
+          refuses(title, altered_manifest, "changed relative relocation")
+          print("C1 OWNED PS5-FORMAT MEDIATED SOURCE/RELOCATION NEGATIVES PASS")
+          PY
