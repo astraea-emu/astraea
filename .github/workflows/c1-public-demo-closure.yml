@@ -1030,3 +1030,72 @@ jobs:
           refused([corrupted_elf, reference], "mutated independent source")
           print("C1 BREAKOUT BOUNDED BATCH SOURCE/BUDGET/TRACE NEGATIVES PASS")
           PY
+
+      # Unlike the 13-count demonstration, this mediated execution has a
+      # larger bounded budget and halts on the FIRST real unresolved CALL
+      # via a source-checked pre-instruction hook. No import is dispatched.
+      - name: Require typed source-verified first Breakout import stop
+        run: |
+          set -euo pipefail
+          script="tools/reference/ps5_process_entry_observer/stop_breakout_unresolved_import.py"
+          python3 -m py_compile "$script"
+          original="$RUNNER_TEMP/sharpemu-demo-eboot.elf"
+          trace="$RUNNER_TEMP/c1-breakout-reference-trace.txt"
+          candidate="$RUNNER_TEMP/astraea-unicorn-c1-venv/bin/python"
+          "$candidate" "$script" "$original" "$trace" --budget 32 |
+            tee "$RUNNER_TEMP/c1-breakout-typed-import-stop.txt"
+          for line in \
+            "C1 MEDIATED BREAKOUT TYPED IMPORT STOP PASS" \
+            "original_sha256=05c414993d1cd9e7182bbf5647be1ffad72c6ed6b6f5399d01af27281fef48b8" \
+            "source_backed_preimport_retirements=13" \
+            "entry_plus_callee_guest_writes=10" \
+            "requested_instruction_budget=32" \
+            "stop_kind=unresolved_external_import_before_execution" \
+            "stop_guest_rip=0x23c" \
+            "stop_guest_got=0x68c8" \
+            "first_import_call_retired=0" \
+            "guest_cpu_context=unchanged_across_import_stop" \
+            "guest_stack=full_4096_bytes_checked" \
+            "sony_provider_binding=unverified" \
+            "native_outside_authored_execution=not_authorized"; do
+            grep -Fx "$line" "$RUNNER_TEMP/c1-breakout-typed-import-stop.txt"
+          done
+          "$candidate" - <<'PY'
+          import os
+          import subprocess
+          import sys
+          from pathlib import Path
+
+          root = Path(os.environ["RUNNER_TEMP"])
+          script = Path("tools/reference/ps5_process_entry_observer/stop_breakout_unresolved_import.py")
+          original = root / "sharpemu-demo-eboot.elf"
+          trace = root / "c1-breakout-reference-trace.txt"
+
+          def rejected(args, why):
+              result = subprocess.run(
+                  [sys.executable, str(script), *map(str, args)],
+                  capture_output=True, text=True, timeout=20)
+              if (result.returncode == 0 or
+                      "IMPORT STOP REFUSED" not in result.stderr):
+                  raise SystemExit(f"invalid {why} admitted to import stop")
+
+          rejected([original, trace, "--budget", "13"],
+                   "bounded execution without a 14th pre-call observation")
+          rejected([original, trace, "--budget", "65"], "unbounded budget")
+          rejected([original, trace, "--test-tamper-got"],
+                   "changed unresolved first GOT word")
+          modified = bytearray(original.read_bytes())
+          modified[0] ^= 1
+          altered = root / "c1-import-stop-mutated.elf"
+          altered.write_bytes(modified)
+          rejected([altered, trace], "source ELF drift")
+          wrong = root / "c1-import-stop-wrong-trace.txt"
+          original_text = trace.read_text()
+          if original_text.count("c1trace.stop_rip=0x23c") != 1:
+              raise SystemExit("unexpected stopped import trace shape")
+          wrong.write_text(original_text.replace(
+              "c1trace.stop_rip=0x23c",
+              "c1trace.stop_rip=0x240", 1))
+          rejected([original, wrong], "changed source-backed stop")
+          print("C1 BREAKOUT IMPORT STOP SOURCE/GOT/BUDGET NEGATIVES PASS")
+          PY
