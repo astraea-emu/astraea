@@ -1208,6 +1208,7 @@ jobs:
             "source_owned_first_retired_mov_eax_42=1" \
             "source_owned_terminal_ud2=typed_invalid_instruction" \
             "checked_relative_relocations=8" \
+            "mixed_page_policy=virtual_storage_union_exact_exec_no_data_access" \
             "repeated_fresh_runs=2_identical" \
             "unresolved_sony_services=none_declared" \
             "native_guest_execution=none" \
@@ -1215,6 +1216,19 @@ jobs:
             "commercial_C1_process_abi=not_established"; do
             grep -Fx "$item" "$RUNNER_TEMP/astraea-owned-ps5-elf-terminal.txt"
           done
+          python3 - <<'PY'
+          import os
+          from pathlib import Path
+          lines = (Path(os.environ["RUNNER_TEMP"]) /
+                   "astraea-owned-ps5-elf-terminal.txt").read_text().splitlines()
+          values = [s for s in lines if s.startswith("source_mixed_permission_pages=")]
+          if len(values) != 1:
+              raise SystemExit("missing unique measured source page collision")
+          count = int(values[0].split("=", 1)[1])
+          if not 1 <= count <= 32:
+              raise SystemExit("unexpected mixed source page collision count")
+          print("C1 MEDIATED PS5 MIXED-PAGE LIMITATION EXPLICIT PASS")
+          PY
           "$engine" - <<'PY'
           import os
           from pathlib import Path
