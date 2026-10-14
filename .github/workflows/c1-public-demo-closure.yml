@@ -949,3 +949,84 @@ jobs:
           done
           test "$(grep -c '^C1 MEDIATED CPU MODE PASS:' \
             "$RUNNER_TEMP/astraea-unicorn-owned-execution-modes.txt")" = 3
+
+      # The same original, hash-pinned outside-authored Breakout ELF is
+      # interpreted through one strictly 13-instruction mediated call,
+      # with/without an instruction-order guard. Never resume import #1.
+      - name: Verify authentic Breakout bounded mediated batch and tamper negatives
+        run: |
+          set -euo pipefail
+          script="tools/reference/ps5_process_entry_observer/compare_breakout_unicorn_batch.py"
+          python3 -m py_compile "$script"
+          original="$RUNNER_TEMP/sharpemu-demo-eboot.elf"
+          reference="$RUNNER_TEMP/c1-breakout-reference-trace.txt"
+          candidate="$RUNNER_TEMP/astraea-unicorn-c1-venv/bin/python"
+          "$candidate" "$script" "$original" "$reference" |
+            tee "$RUNNER_TEMP/astraea-breakout-batch-parity.txt"
+          for expected in \
+            "C1 ORIGINAL BREAKOUT BOUNDED MEDIATED BATCH PASS" \
+            "source_sha256=05c414993d1cd9e7182bbf5647be1ffad72c6ed6b6f5399d01af27281fef48b8" \
+            "engine=unicorn_2.1.4_external_research_only" \
+            "batch_invocations=one_per_case" \
+            "total_source_backed_steps=13" \
+            "all_source_backed_guest_stores=9" \
+            "first_import_call=unretired_at_0x23c" \
+            "synthetic_context=unchanged" \
+            "production_cpu_backend=not_selected" \
+            "sony_services=not_executed" \
+            "native_breakout_execution=not_authorized"; do
+            grep -Fx "$expected" "$RUNNER_TEMP/astraea-breakout-batch-parity.txt"
+          done
+          test "$(grep -c '^C1 BOUNDED BREAKOUT BATCH CASE PASS:' \
+            "$RUNNER_TEMP/astraea-breakout-batch-parity.txt")" = 2
+          grep -Fx "unhooked.source_backed_instructions=13" \
+            "$RUNNER_TEMP/astraea-breakout-batch-parity.txt"
+          grep -Fx "guarded.source_backed_instructions=13" \
+            "$RUNNER_TEMP/astraea-breakout-batch-parity.txt"
+          "$candidate" - <<'PY'
+          import os
+          import subprocess
+          import sys
+          from pathlib import Path
+
+          root = Path(os.environ["RUNNER_TEMP"])
+          script = Path("tools/reference/ps5_process_entry_observer/compare_breakout_unicorn_batch.py")
+          original = root / "sharpemu-demo-eboot.elf"
+          reference = root / "c1-breakout-reference-trace.txt"
+
+          def refused(arguments, label):
+              p = subprocess.run([sys.executable, str(script), *map(str, arguments)],
+                                 capture_output=True, text=True, timeout=20)
+              if p.returncode == 0 or "BATCH REFUSED" not in p.stderr:
+                  raise SystemExit(f"{label}: unreviewed batch was accepted")
+
+          refused([original, reference, "--instruction-budget", "12"],
+                  "truncated instruction count")
+          # Alter one final CPU value without breaking trace syntax, step
+          # order, original bytes, or required RIP/stop constraints.
+          lines = reference.read_text().splitlines()
+          matches = [i for i, line in enumerate(lines)
+                     if line.startswith("c1trace.step[12]=")]
+          if len(matches) != 1:
+              raise SystemExit("missing unique final trace step")
+          idx = matches[0]
+          prefix, payload = lines[idx].split("=", 1)
+          fields = payload.split("|")
+          if len(fields) != 6:
+              raise SystemExit("unreviewed reference trace shape")
+          registers = fields[5].split(",")
+          if len(registers) != 19:
+              raise SystemExit("unreviewed final register count")
+          registers[0] = f"{int(registers[0], 16) ^ 1:x}"
+          fields[5] = ",".join(registers)
+          lines[idx] = prefix + "=" + "|".join(fields)
+          corrupted_reference = root / "c1-batch-corrupted-last-cpu.txt"
+          corrupted_reference.write_text("\n".join(lines) + "\n")
+          refused([original, corrupted_reference], "altered final CPU")
+          altered = bytearray(original.read_bytes())
+          altered[0] ^= 1
+          corrupted_elf = root / "c1-batch-mutated-original.elf"
+          corrupted_elf.write_bytes(altered)
+          refused([corrupted_elf, reference], "mutated independent source")
+          print("C1 BREAKOUT BOUNDED BATCH SOURCE/BUDGET/TRACE NEGATIVES PASS")
+          PY
