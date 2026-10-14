@@ -95,7 +95,20 @@ class GuestByteRangePolicyTests(unittest.TestCase):
 
     def test_invalid_mapping_permissions_rejected(self):
         with self.assertRaisesRegex(ValueError, "invalid_guest_region"):
-            GuestRegionPolicy([GuestRegion(0x1000, 0x1010, 0)])
+            GuestRegionPolicy([GuestRegion(0x1000, 0x1010, 8)])
+
+    def test_original_zero_permission_mapping_denies_every_access(self):
+        policy = GuestRegionPolicy([
+            GuestRegion(0x1000, 0x1010, READ | EXECUTE),
+            GuestRegion(0x1010, 0x1020, 0, "source_pt_load_no_access"),
+        ])
+        for kind in ("read", "write", "execute"):
+            self.assertEqual(policy.check(kind, 0x1010, 1).reason,
+                             "permission_denied")
+        # It shares a host page with executable source text but the
+        # backing-page union is not guest execution/read/write authority.
+        self.assertEqual(policy.mixed_permission_pages(),
+                         frozenset({0x1000}))
 
     def test_immutable_sorted_original_extents(self):
         self.assertEqual(self.policy.regions[0].start, 0x1000)
@@ -139,4 +152,5 @@ if __name__ == "__main__":
     print("mixed_host_page_guest_RX_RW_separation=checked")
     print("cross_region_and_gap_access=checked")
     print("overflow_and_invalid_access=refused")
+    print("zero_permission_source_mapping=all_access_refused")
     print("no_native_guest_execution=confirmed")
