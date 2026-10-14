@@ -211,7 +211,11 @@ def execute_once(elf, regions, pages, relocations):
     try:
         # Running UD2 must fault. Never treat a fixed instruction count as
         # evidence of the actual terminal exception.
-        uc.emu_start(ENTRY, 0, timeout=0, count=2)
+        # The third permitted *budget slot* gives Unicorn room to attempt
+        # UD2 rather than stopping at the second code callback before the
+        # exception is delivered. An unexpected third instruction is
+        # independently rejected by on_code and the exact path assertion.
+        uc.emu_start(ENTRY, 0, timeout=0, count=3)
     except UcError as ex:
         require(ex.errno == UC_ERR_INSN_INVALID,
                 "wrong_guest_terminal_fault_kind")
