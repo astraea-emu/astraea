@@ -45,6 +45,7 @@ def load_elf(path):
             nph * 56 <= len(elf) - phoff, "source_built_elf_header_drift")
     regions = []
     mapped_pages = {}
+    mixed_pages = set()
     for ix in range(nph):
         kind, flags, offset, va, _physical, fsize, msize, align = (
             struct.unpack_from("<IIQQQQQQ", elf, phoff + 56 * ix))
@@ -66,8 +67,13 @@ def load_elf(path):
             require(page != STACK and len(mapped_pages) < MAX_PAGE_COUNT,
                     "source_guest_page_budget_or_stack_collision")
             if page in mapped_pages:
-                require(mapped_pages[page] == flags,
-                        "mixed_guest_page_permission_requires_broker")
+                if mapped_pages[page] != flags:
+                    mixed_pages.add(page)
+                # Unicorn permissions are page-granular. The union below
+                # is a *mediated storage representation*, not guest byte-
+                # range authorization. Enforce the original RX extent and
+                # forbid all data accesses in this two-opcode fixture.
+                mapped_pages[page] |= flags
             else:
                 mapped_pages[page] = flags
     require(regions and 0 in mapped_pages and
@@ -80,7 +86,8 @@ def load_elf(path):
     code_offset = executable["fileoff"] + ENTRY - executable["va"]
     require(elf[code_offset:code_offset + len(CODE)] == CODE,
             "original_two_instruction_bytes_drift")
-    return elf, regions, mapped_pages
+    require(len(mixed_pages) <= 32, "unbounded_mixed_permission_pages")
+    return elf, regions, mapped_pages, mixed_pages
 
 
 def load_manifest(path, regions):
@@ -165,7 +172,8 @@ def map_guest(uc, elf, regions, pages, relocations):
 def execute_once(elf, regions, pages, relocations):
     from unicorn import (Uc, UcError, UC_ARCH_X86, UC_MODE_64,
                          UC_PROT_READ, UC_PROT_WRITE, UC_HOOK_CODE,
-                         UC_HOOK_MEM_WRITE, UC_ERR_INSN_INVALID)
+                         UC_HOOK_MEM_READ, UC_HOOK_MEM_WRITE,
+                         UC_ERR_INSN_INVALID)
     from unicorn import x86_const as xr
 
     uc = Uc(UC_ARCH_X86, UC_MODE_64)
@@ -178,10 +186,14 @@ def execute_once(elf, regions, pages, relocations):
     uc.reg_write(xr.UC_X86_REG_EFLAGS, 2)
     observed = []
     attempted_writes = []
+    attempted_reads = []
 
     def on_code(_engine, address, size, _data):
         observed.append((address, size))
-        if len(observed) > 2 or observed[-1] not in (
+        source_exec = [r for r in regions
+                       if (r["flags"] & 1) and r["va"] <= address and
+                       0 < size <= 15 and address + size <= r["end"]]
+        if len(source_exec) != 1 or len(observed) > 2 or observed[-1] not in (
             (ENTRY, 5), (ENTRY + 5, 2)):
             uc.emu_stop()
 
@@ -189,7 +201,12 @@ def execute_once(elf, regions, pages, relocations):
         attempted_writes.append((address, width))
         uc.emu_stop()
 
+    def on_read(_engine, _access, address, width, _value, _data):
+        attempted_reads.append((address, width))
+        uc.emu_stop()
+
     uc.hook_add(UC_HOOK_CODE, on_code)
+    uc.hook_add(UC_HOOK_MEM_READ, on_read)
     uc.hook_add(UC_HOOK_MEM_WRITE, on_write)
     try:
         # Running UD2 must fault. Never treat a fixed instruction count as
@@ -203,7 +220,7 @@ def execute_once(elf, regions, pages, relocations):
 
     require(observed == [(ENTRY, 5), (ENTRY + 5, 2)],
             "unexpected_source_guest_instruction_path")
-    require(not attempted_writes and
+    require(not attempted_writes and not attempted_reads and
             uc.reg_read(xr.UC_X86_REG_RAX) == 42 and
             uc.reg_read(xr.UC_X86_REG_RIP) == ENTRY + 5 and
             uc.reg_read(xr.UC_X86_REG_RSP) == sp and
@@ -228,17 +245,20 @@ def main():
     parser.add_argument("title")
     parser.add_argument("dependencies")
     args = parser.parse_args()
-    elf, regions, pages = load_elf(args.title)
+    elf, regions, pages, mixed = load_elf(args.title)
     relocations = load_manifest(args.dependencies, regions)
     first = execute_once(elf, regions, pages, relocations)
     second = execute_once(elf, regions, pages, relocations)
     require(first == second, "nonrepeatable_terminal_guest_context")
+    require(mixed, "expected_source_mixed_page_collision_missing")
     print("C1 SOURCE-OWNED PS5-FORMAT MEDIATED TERMINAL PASS")
     print("source_sha256=" + EXPECTED_SHA)
     print("source_owned_elf_type=0xfe10")
     print("source_owned_first_retired_mov_eax_42=1")
     print("source_owned_terminal_ud2=typed_invalid_instruction")
     print("checked_relative_relocations=" + str(first[2]))
+    print("source_mixed_permission_pages=" + str(len(mixed)))
+    print("mixed_page_policy=virtual_storage_union_exact_exec_no_data_access")
     print("repeated_fresh_runs=2_identical")
     print("unresolved_sony_services=none_declared")
     print("native_guest_execution=none")
