@@ -274,7 +274,9 @@ def run_child():
     )
     require(outcome.returncode == 0 and
             0 < len(outcome.stdout) <= MAX_REPORT_BYTES,
-            "mediated_worker_nonzero_or_unbounded_report")
+            "mediated_worker_nonzero_or_unbounded_report:exit=" +
+            str(outcome.returncode) + ":stderr=" +
+            outcome.stderr.decode("utf-8", errors="replace")[-1000:])
     try:
         report = json.loads(outcome.stdout)
     except (UnicodeDecodeError, json.JSONDecodeError) as exc:
