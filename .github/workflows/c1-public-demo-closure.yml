@@ -969,7 +969,7 @@ jobs:
             "engine=unicorn_2.1.4_external_research_only" \
             "batch_invocations=one_per_case" \
             "total_source_backed_steps=13" \
-            "all_source_backed_guest_stores=9" \
+            "all_source_backed_guest_stores=10" \
             "first_import_call=unretired_at_0x23c" \
             "synthetic_context=unchanged" \
             "production_cpu_backend=not_selected" \
