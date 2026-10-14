@@ -44,6 +44,12 @@ The local tool:
 4. Optionally runs the **pre-entry** Linux retail `diagnose` twice and rejects any output claiming a native guest stage. No new execution path is enabled.
 5. Emits only a bounded JSON containing verified aggregate counters, source SHA/size, versioned schema, explicit `guest_executed_instructions=0` and a typed pre-entry boundary if requested. It intentionally discards decoded symbol names, original raw relocation rows, local paths and CLI error text.
 
+The repository's pinned observer workflow additionally builds an authentic
+**source-owned PS5-format ELF** from the reviewed public toolchain. Its C0
+`profile` and `dependencies` reports are passed through the same parser
+and repeated twice to check aggregate parity, without misrepresenting this
+source-built test input as Dreaming Sarah or any commercial game.
+
 There is currently **no genuine Dreaming Sarah C0 result**. On completion, compare the exact baseline to the similarly measured reserves; choose the smallest authentic dependency graph and reproducible first stop. If only PS4 artifacts or inaccessible/encrypted packages are available, record that constraint instead of substituting PS4 binaries or guessing a game profile.
 
 ## Decision gates before attempting a genuine first instruction
