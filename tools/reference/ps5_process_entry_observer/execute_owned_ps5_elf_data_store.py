@@ -107,6 +107,34 @@ def inspect(title):
     return elf, regions, pages, mixed, code, marker
 
 
+def checked_guest_write_authority(regions, address, width, value, marker):
+    if (address != marker or width != 8 or value != MARKER_FINAL or
+            not 0 <= address <= (1 << 64) - 8):
+        return False
+    return sum(bool(r["flags"] & 2 and r["va"] <= address and
+                    address + width <= r["end"]) for r in regions) == 1
+
+
+def verify_write_denials(regions, marker):
+    demand(checked_guest_write_authority(
+        regions, marker, 8, MARKER_FINAL, marker),
+        "authored_guest_store_was_not_authorized")
+    rejected = (
+        (ENTRY, 8, MARKER_FINAL),        # original code extent
+        (marker, 4, MARKER_FINAL),       # wrong width
+        (marker, 8, MARKER_FINAL + 1),   # altered payload
+        (marker - 8, 8, MARKER_FINAL),   # neighbouring guest data
+        (marker + 8, 8, MARKER_FINAL),   # neighbouring guest data
+        (marker, 0, MARKER_FINAL),       # invalid length
+        ((1 << 64) - 3, 8, MARKER_FINAL),  # address range overflow
+    )
+    demand(all(not checked_guest_write_authority(
+        regions, address, width, value, marker)
+        for address, width, value in rejected),
+        "unauthorized_guest_write_surface_was_admitted")
+    return len(rejected)
+
+
 def execute_once(elf, regions, pages, relocations, code, marker):
     from unicorn import (
         Uc, UcError, UC_ARCH_X86, UC_MODE_64, UC_HOOK_CODE,
@@ -164,10 +192,8 @@ def execute_once(elf, regions, pages, relocations, code, marker):
 
     def on_write(_engine, _access, address, width, value, _data):
         writes.append((address, width, value))
-        authorized = [r for r in regions if r["flags"] & 2 and
-                      r["va"] <= address and address + width <= r["end"]]
-        if not (len(authorized) == 1 and address == marker
-                and width == 8 and value == MARKER_FINAL):
+        if not checked_guest_write_authority(
+                regions, address, width, value, marker):
             denied.append("unapproved_guest_data_store")
             uc.emu_stop()
 
@@ -230,6 +256,7 @@ def main():
     args = parser.parse_args()
     elf, regions, pages, mixed, code, marker = inspect(args.elf)
     relocations = load_manifest(args.dependencies, regions)
+    denied_cases = verify_write_denials(regions, marker)
     first = execute_once(elf, regions, pages, relocations, code, marker)
     second = execute_once(elf, regions, pages, relocations, code, marker)
     demand(first == second, "nonrepeatable_guest_memory_or_terminal_state")
@@ -245,6 +272,7 @@ def main():
     print("full_mapped_guest_pages=post_execution_compared")
     print("mixed_virtual_source_pages=" + str(len(mixed)))
     print("original_byte_range_write_authority=checked")
+    print("source_owned_write_denial_cases=" + str(denied_cases))
     print("fresh_runs=2_identical")
     print("source_owned_instruction_count_before_fault=2")
     print("sony_imports=none")
