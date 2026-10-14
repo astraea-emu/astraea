@@ -1382,6 +1382,8 @@ jobs:
             "full_mapped_guest_pages=post_execution_compared" \
             "original_byte_range_write_authority=checked" \
             "reusable_original_RX_RW_policy=checked" \
+            "transactional_guest_page_publication=verified_detached" \
+            "partial_fault_publication=not_admitted" \
             "source_owned_write_denial_cases=7" \
             "fresh_runs=2_identical" \
             "source_owned_instruction_count_before_fault=2" \
@@ -1443,4 +1445,28 @@ jobs:
             "zero_permission_source_mapping=all_access_refused" \
             "no_native_guest_execution=confirmed"; do
             grep -Fx "$required" "$RUNNER_TEMP/astraea-owned-byte-policy.txt"
+          done
+
+      # Source-owned validation of the controller-side publication boundary:
+      # untrusted private engine pages remain unpublished on any mismatch.
+      # This is NOT a host syscall sandbox or instruction-time MMU.
+      - name: Qualify detached verified guest-memory publication boundary
+        run: |
+          set -euo pipefail
+          root="tools/reference/ps5_process_entry_observer"
+          python3 -m py_compile \
+            "$root/owned_guest_memory_publication.py" \
+            "$root/owned_guest_memory_publication_selftest.py" \
+            "$root/execute_owned_ps5_elf_data_store.py"
+          python3 "$root/owned_guest_memory_publication_selftest.py" |
+            tee "$RUNNER_TEMP/astraea-guest-memory-publication.txt"
+          for claim in \
+            "C1 GUEST MEMORY DETACHED PUBLICATION PASS" \
+            "source_owned_publication_cases=25" \
+            "full_image_effect_validation=required" \
+            "unauthorized_guest_effects=discarded" \
+            "partial_fault_publication=refused_pending_restart_state" \
+            "published_guest_pages=detached_immutable_copy" \
+            "host_native_guest_execution=none"; do
+            grep -Fx "$claim" "$RUNNER_TEMP/astraea-guest-memory-publication.txt"
           done
