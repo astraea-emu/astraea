@@ -865,6 +865,34 @@ jobs:
           test "$(grep -c '^C1 UNICORN EFFECT CASE PASS:' \
             "$RUNNER_TEMP/astraea-unicorn-effect-boundaries.txt")" = 4
 
+      # A source-owned multi-instruction x86-64 fixture runs in a separate
+      # Linux child via the existing pinned, research-only Unicorn wheel.
+      # Verify real kernel-denied host operations plus controller-side page
+      # and CPU validation; this is NOT complete hostile-code containment.
+      - name: Qualify Linux mediated child capabilities and report refusal
+        run: |
+          set -euo pipefail
+          script="tools/reference/ps5_process_entry_observer/owned_mediated_worker_confinement.py"
+          python3 -m py_compile "$script"
+          "$RUNNER_TEMP/astraea-unicorn-c1-venv/bin/python" "$script" |
+            tee "$RUNNER_TEMP/astraea-c1-mediated-child-capability.txt"
+          for claim in \
+            "C1 LINUX MEDIATED CHILD CAPABILITY GATE PASS" \
+            "source_owned_x86_instructions_before_ud2=6" \
+            "guest_data_writes=2_full_page_verified" \
+            "guest_data_reads=1_independently_checked" \
+            "fresh_worker_processes=2_identical" \
+            "kernel_denied_host_operations=open_socket_fork" \
+            "kernel_thread_exception=clone_thread_joined" \
+            "controller_rejected_report_mutations=8" \
+            "external_cpu=unicorn_2.1.4_research_only" \
+            "worker_seccomp_policy=partial_deny_not_full_sandbox" \
+            "worker_report_authenticity=not_proven_for_hostile_workers" \
+            "host_native_guest_entry=none" \
+            "commercial_game_instruction_execution=none"; do
+            grep -Fx "$claim" "$RUNNER_TEMP/astraea-c1-mediated-child-capability.txt"
+          done
+
       # The external interpreter stays in its hash-locked temporary Python
       # venv; only exact, independently executed owned fixtures are emitted.
       # A separate C++ process verifies and replays effects via Astraea's
