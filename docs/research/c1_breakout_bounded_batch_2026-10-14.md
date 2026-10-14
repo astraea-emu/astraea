@@ -31,7 +31,7 @@ with `count=13`** in each of two fresh research engine instances:
 
 For both cases, the complete final GPR/RFLAGS/FS/GS CPU context matches the
 checked Astraea reference (architecturally undefined AF masked only as
-needed), the observed nine guest stack-store addresses/widths/values match
+needed), the observed ten total entry-plus-callee guest stack-store addresses/widths/values match
 the reference, and the **entire final 4-KiB synthetic stack** matches
 the ordered-write replay. The real RELATIVE patch and original unresolved
 first GOT word remain identical. The bounded instruction count and terminal
