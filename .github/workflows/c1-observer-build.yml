@@ -1436,10 +1436,11 @@ jobs:
             tee "$RUNNER_TEMP/astraea-owned-byte-policy.txt"
           for required in \
             "C1 ORIGINAL GUEST BYTE-RANGE POLICY PASS" \
-            "source_owned_policy_cases=17" \
+            "source_owned_policy_cases=18" \
             "mixed_host_page_guest_RX_RW_separation=checked" \
             "cross_region_and_gap_access=checked" \
             "overflow_and_invalid_access=refused" \
+            "zero_permission_source_mapping=all_access_refused" \
             "no_native_guest_execution=confirmed"; do
             grep -Fx "$required" "$RUNNER_TEMP/astraea-owned-byte-policy.txt"
           done
