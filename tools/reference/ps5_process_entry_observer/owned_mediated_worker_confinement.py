@@ -23,6 +23,7 @@ import resource
 import socket
 import subprocess
 import sys
+import threading
 
 from owned_guest_byte_access_policy import (
     GuestRegion, GuestRegionPolicy, PAGE_BYTES, READ, WRITE,
@@ -50,8 +51,8 @@ MAX_REPORT_BYTES = 16384
 # No claim is made about other ABIs, ioctl, mapped-file effects or all
 # remaining allowed syscalls. All non-listed calls are still ALLOWED.
 DENIED_SYSCALLS = (
-    2, 41, 42, 43, 49, 50, 53, 56, 57, 58, 59, 62, 85, 87,
-    101, 165, 166, 257, 258, 263, 264, 288, 316, 322, 435, 437,
+    2, 41, 42, 43, 49, 50, 53, 57, 58, 59, 62, 85, 87,
+    101, 165, 166, 257, 258, 263, 264, 288, 316, 322, 437,
 )
 ARCH_X86_64 = 0xC000003E
 SECCOMP_RET_KILL_PROCESS = 0x80000000
@@ -91,6 +92,20 @@ def install_research_filter():
     for number in DENIED_SYSCALLS:
         insns += [(0x15, 0, 1, number),
                   (0x06, 0, 0, SECCOMP_RET_ERRNO | errno.EPERM)]
+    # glibc/QEMU may request clone3 for a pthread. Returning ENOSYS
+    # triggers its legacy clone fallback. Never allow clone3 directly.
+    insns += [
+        (0x15, 0, 1, 435),
+        (0x06, 0, 0, SECCOMP_RET_ERRNO | errno.ENOSYS),
+        # Legacy clone: admit CLONE_THREAD only. A fork-like clone
+        # without CLONE_THREAD is refused with EPERM. Offset 16 is
+        # seccomp_data.args[0] (low 32 bits of unsigned flags).
+        (0x15, 0, 4, 56),
+        (0x20, 0, 0, 16),
+        (0x45, 1, 0, 0x00010000),
+        (0x06, 0, 0, SECCOMP_RET_ERRNO | errno.EPERM),
+        (0x06, 0, 0, SECCOMP_RET_ALLOW),
+    ]
     insns.append((0x06, 0, 0, SECCOMP_RET_ALLOW))
     array = (SockFilter * len(insns))(
         *(SockFilter(*item) for item in insns))
@@ -169,6 +184,14 @@ def worker():
     # point, but does not isolate the Python heap or all Linux syscalls.
     install_research_filter()
     denials = denied_host_probes()
+    # QEMU/Unicorn legitimately requires host pthreads. Prove the
+    # distinction: CLONE_THREAD succeeds but fork-like clone fails.
+    completed = []
+    thread = threading.Thread(target=lambda: completed.append(True))
+    thread.start()
+    thread.join(timeout=2)
+    require(not thread.is_alive() and completed == [True],
+            "host_pthread_runtime_refused")
     caught = None
     try:
         engine.emu_start(CODE, 0, timeout=1_000_000, count=16)
@@ -195,6 +218,7 @@ def worker():
             "rflags": engine.reg_read(x.UC_X86_REG_EFLAGS),
         },
         "host_denials": denials,
+        "host_thread": "joined",
     }
     print(json.dumps(report, sort_keys=True, separators=(",", ":")))
 
@@ -203,7 +227,7 @@ def verify_report(report):
     require(type(report) is dict and set(report) == {
         "schema", "source_sha256", "engine", "terminal",
         "rip_sequence", "writes", "reads", "final_page",
-        "registers", "host_denials",
+        "registers", "host_denials", "host_thread",
     }, "worker_protocol_schema_refused")
     require(report["schema"] == 1 and
             report["source_sha256"] == CODE_SHA and
@@ -216,6 +240,8 @@ def verify_report(report):
     require(report["writes"] == [[TARGET, 8, FIRST],
                                 [TARGET + 8, 8, SECOND]],
             "worker_write_trace_refused")
+    require(report["host_thread"] == "joined",
+            "worker_host_thread_report_refused")
     require(report["host_denials"] == [
         "open:EPERM", "socket:EPERM", "fork:EPERM",
     ], "worker_host_denial_report_refused")
@@ -328,6 +354,7 @@ def main():
     print("guest_data_reads=1_independently_checked")
     print("fresh_worker_processes=2_identical")
     print("kernel_denied_host_operations=open_socket_fork")
+    print("kernel_thread_exception=clone_thread_joined")
     print("controller_rejected_report_mutations=" + str(negative_count))
     print("external_cpu=unicorn_2.1.4_research_only")
     print("worker_seccomp_policy=partial_deny_not_full_sandbox")
