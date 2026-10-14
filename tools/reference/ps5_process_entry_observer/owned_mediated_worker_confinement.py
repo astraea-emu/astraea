@@ -40,7 +40,7 @@ TARGET = DATA + 0x10
 OWNED_CODE = bytes.fromhex(
     "b8443322114889074883c00148894708488b1f4831c30f0b"
 )
-CODE_SHA = hashlib.sha256(OWNED_CODE).hexdigest()
+CODE_SHA = "0738dfe2932275848edbd09cab90021df44b686907923aac7e4e12a5f0f0175c"
 RIP_SEQUENCE = [CODE + n for n in (0, 5, 8, 12, 16, 19, 22)]
 FIRST = 0x11223344
 SECOND = FIRST + 1
@@ -310,6 +310,8 @@ def mutation_tests(report):
 def main():
     require(sys.platform == "linux" and platform.machine() == "x86_64",
             "linux_x86_64_only")
+    require(hashlib.sha256(OWNED_CODE).hexdigest() == CODE_SHA,
+            "frozen_source_instruction_identity_drift")
     if len(sys.argv) == 2 and sys.argv[1] == "--worker":
         worker()
         return
