@@ -21,13 +21,13 @@ import os
 import platform
 import resource
 import socket
-import subprocess
 import sys
 import threading
 
 from owned_guest_byte_access_policy import (
     GuestRegion, GuestRegionPolicy, PAGE_BYTES, READ, WRITE,
 )
+from owned_bounded_worker_io import capture_bounded
 from owned_guest_memory_publication import (
     GuestMemoryPublication, ProposedGuestWrite,
 )
@@ -291,16 +291,14 @@ def run_child():
         resource.setrlimit(resource.RLIMIT_FSIZE, (0, 0))
         resource.setrlimit(resource.RLIMIT_NOFILE, (32, 32))
 
-    outcome = subprocess.run(
+    outcome = capture_bounded(
         [sys.executable, "-B", os.path.abspath(__file__), "--worker"],
-        stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE, timeout=12, check=False,
-        close_fds=True, start_new_session=True, preexec_fn=limits,
+        timeout_seconds=12, stdout_limit=MAX_REPORT_BYTES,
+        stderr_limit=4096, preexec_fn=limits,
         env={"PYTHONHASHSEED": "0", "PYTHONDONTWRITEBYTECODE": "1"},
     )
-    require(outcome.returncode == 0 and
-            0 < len(outcome.stdout) <= MAX_REPORT_BYTES,
-            "mediated_worker_nonzero_or_unbounded_report:exit=" +
+    require(outcome.returncode == 0 and 0 < len(outcome.stdout),
+            "mediated_worker_nonzero_or_empty_report:exit=" +
             str(outcome.returncode) + ":stderr=" +
             outcome.stderr.decode("utf-8", errors="replace")[-1000:])
     try:
@@ -366,6 +364,6 @@ def main():
 if __name__ == "__main__":
     try:
         main()
-    except (ValueError, OSError, subprocess.TimeoutExpired) as exc:
+    except (ValueError, OSError) as exc:
         print("C1 MEDIATED WORKER REFUSED: " + str(exc), file=sys.stderr)
         sys.exit(1)
