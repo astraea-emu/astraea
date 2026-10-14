@@ -15,6 +15,9 @@ import sys
 
 from execute_pinned_owned_ps5_elf_mediated import load_manifest, map_guest
 from owned_guest_byte_access_policy import GuestRegionPolicy
+from owned_guest_memory_publication import (
+    GuestMemoryPublication, ProposedGuestWrite,
+)
 
 # Frozen from source-generated artifact on the exact pinned public toolchain.
 # Never replace these with a digest computed from the candidate being checked.
@@ -243,9 +246,28 @@ def execute_once(elf, regions, pages, relocations, code, marker, policy):
     for target, content in relocated.items():
         demand(bytes(uc.mem_read(target, 8)) == content,
                "prior_relocation_mutated")
+
+    # The external engine's mutable private pages are NOT published merely
+    # because Unicorn's pre-write hook reported an allowed access. Require
+    # the separately authenticated source instruction sequence, real typed
+    # terminal fault, and EXACT full private page image to match the ordered
+    # guest write proposal. Return only detached, immutable approved pages.
+    proposed = [ProposedGuestWrite(
+        marker, MARKER_FINAL.to_bytes(8, "little"))]
+    private_final = {page: bytes(uc.mem_read(page, PAGE)) for page in pages}
+    transaction = GuestMemoryPublication(policy, initial_pages)
+    demand(transaction.verify(
+        private_final, proposed, "typed_invalid_instruction",
+        terminal_attested=(caught == UC_ERR_INSN_INVALID)),
+        "reviewed_terminal_guest_publication_refused")
+    detached = transaction.publish()
+    demand(detached.write_count == 1 and
+           detached.read(marker, 8) == MARKER_FINAL.to_bytes(8, "little") and
+           detached.pages == tuple(sorted(private_final.items())),
+           "detached_guest_memory_publication_mismatch")
     return (tuple((name, uc.reg_read(reg)) for name, reg in registers.items()),
-            hashlib.sha256(bytes(uc.mem_read(marker, 8))).hexdigest(),
-            len(writes), len(relocated))
+            hashlib.sha256(detached.read(marker, 8)).hexdigest(),
+            detached.write_count, len(relocated), detached.pages)
 
 
 def main():
@@ -279,6 +301,8 @@ def main():
     print("mixed_virtual_source_pages=" + str(len(mixed)))
     print("original_byte_range_write_authority=checked")
     print("reusable_original_RX_RW_policy=checked")
+    print("transactional_guest_page_publication=verified_detached")
+    print("partial_fault_publication=not_admitted")
     print("source_owned_write_denial_cases=" + str(denied_cases))
     print("fresh_runs=2_identical")
     print("source_owned_instruction_count_before_fault=2")
