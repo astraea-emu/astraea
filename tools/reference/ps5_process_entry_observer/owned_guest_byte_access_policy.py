@@ -30,7 +30,7 @@ MAX_INSTRUCTION_BYTES = 15
 class GuestRegion:
     start: int
     end: int                       # exclusive; 2**64 is a valid terminal end
-    flags: int                     # original ELF R=4, W=2, X=1
+    flags: int                     # original ELF R=4, W=2, X=1; zero = mapped inaccessible
     name: str = "source"
 
 
@@ -64,7 +64,7 @@ class GuestRegionPolicy:
             if not isinstance(region, GuestRegion):
                 raise ValueError("invalid_guest_region_type")
             if (not 0 <= region.start < region.end <= U64_LIMIT or
-                    not 0 <= region.flags <= 7 or region.flags == 0 or
+                    not 0 <= region.flags <= 7 or
                     not isinstance(region.name, str) or
                     not region.name or len(region.name) > 64):
                 raise ValueError("invalid_guest_region_extent_or_permissions")
