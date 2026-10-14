@@ -1207,6 +1207,7 @@ jobs:
             "source_owned_elf_type=0xfe10" \
             "source_owned_first_retired_mov_eax_42=1" \
             "source_owned_terminal_ud2=typed_invalid_instruction" \
+            "ud2_hook_size=not_trusted_exact_source_bytes_checked" \
             "checked_relative_relocations=8" \
             "mixed_page_policy=virtual_storage_union_exact_exec_no_data_access" \
             "repeated_fresh_runs=2_identical" \
