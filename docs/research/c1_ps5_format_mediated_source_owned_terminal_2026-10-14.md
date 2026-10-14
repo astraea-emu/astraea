@@ -30,8 +30,18 @@ inside the *separate, pinned* Unicorn 2.1.4 research engine.
   uniquely writable and non-overlapping zero-symbol RELA `RELATIVE`
   relocations, and no unsupported named external symbols.
 - Source ELF load regions and file backing are bounded and checked.
-  Conflicting same-host-page virtual permissions are explicitly refused;
-  the research mapper must not widen a mixed page silently.
+  The exact pinned converter produces **mixed-permission 4-KiB pages**:
+  disjoint original virtual PT_LOAD byte extents share a host page even
+  though their requested permissions differ. The first CI run correctly
+  refused `mixed_guest_page_permission_requires_broker` rather than
+  silently declaring them safe.
+- For **this exact two-instruction source-owned workload only**, the
+  mediated engine maps the union of required backing page permissions,
+  records that a collision occurred, checks each executed instruction
+  belongs to its **original executable PT_LOAD byte extent**, and stops
+  on **any guest data read/write**. A fixed `MOV EAX,42; UD2` sequence
+  requires neither data loads nor stores. This is a restricted experiment,
+  **not guest byte-range permission mediation** for arbitrary machine code.
 
 ## Research execution
 
