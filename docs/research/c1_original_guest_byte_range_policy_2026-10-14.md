@@ -14,7 +14,7 @@ Earlier research permitted exactly one source-authored, fixed `MOV [RIP+disp32],
 
 `check(kind, address, width)` returns a typed decision for `read`, `write`, or `execute`, checking the entire original range before classifying it. It refuses zero/excessive widths (15-byte maximum instruction fetch, 64-byte maximum data access), address overflow, unmapped gaps, missing permissions and unknown operations. **Adjacent** original ranges can be traversed only when *every byte* grants the operation. Overlapping original mappings are rejected, as are overlarge mapping inventories; mixed host-page permissions are measured but never treated as a permission union for policy decisions.
 
-The pure source-owned test suite qualifies 17 cases, including virtual RX and RW byte ranges sharing a physical page, cross-region reads/writes, permission breaks, holes, invalid lengths, u64 overflow and exact-range rejects. The pinned full ELF guest-store verifier now uses the same policy when checking **each original instruction fetch and the one expected eight-byte write** to source guest `0xc0e0`, retaining its separate exact code/payload and end-to-end full-memory comparison.
+The pure source-owned test suite qualifies 18 cases, including virtual RX and RW byte ranges sharing a physical page, cross-region reads/writes, permission breaks, holes, invalid lengths, u64 overflow and exact-range rejects. The pinned full ELF guest-store verifier now uses the same policy when checking **each original instruction fetch and the one expected eight-byte write** to source guest `0xc0e0`, retaining its separate exact code/payload and end-to-end full-memory comparison.
 
 ## Hard security limit
 
@@ -25,3 +25,5 @@ The source-built ELF remains hash-locked to SHA-256 `3a69a4a035a10656c1532b1b882
 ## Next gate beyond this increment
 
 A general mediated execution adapter needs **enforceable** mapping protection for arbitrary guest effects, including implicit stack/vector/string writes, cross-region effects, partial instruction faults, and aliases. The controller must avoid exposing memory/state from a denied run. Qualify a complete read/write/fault workload against an independently justified write-commit ledger, then review host containment, third-party engine license and host portability before any production adoption. Breakout remains blocked at the authentic `sceSystemServiceHideSplashScreen` dependency (issue #378); native arbitrary guest admission remains blocked (#410).
+
+**Early CI finding:** The first PR head exposed a legitimate source ELF `PT_LOAD` extent with `p_flags=0`. Rejecting it during policy construction was incorrect: the guest range exists but must grant **no** R/W/X operations. The corrected policy preserves this extent and denies every attempted access. A new regression covers source RX and mapped-inaccessible extents sharing one backing page. This does not widen guest permissions.
