@@ -92,17 +92,17 @@ class GuestMemoryPublication:
         raise ValueError("guest_publication_refused:" + reason)
 
     def verify(self, private_pages, proposed_writes, terminal_kind,
-               *, terminal_attested=False, permit_partial_fault=False):
+               *, terminal_attested=False):
         if self._phase != "recording":
             self._refuse("transaction_not_recording")
-        if terminal_kind not in SUPPORTED_TERMINALS:
+        if type(terminal_kind) is not str or terminal_kind not in SUPPORTED_TERMINALS:
             self._refuse("unsupported_terminal_kind")
         if type(terminal_attested) is not bool or not terminal_attested:
             self._refuse("unverified_execution_terminal")
-        if terminal_kind == "fault_after_effects" and not permit_partial_fault:
+        # Exact restartable fault context and partial-commit provenance are
+        # not independently qualified for this first publication contract.
+        if terminal_kind == "fault_after_effects":
             self._refuse("unqualified_partial_fault")
-        if type(permit_partial_fault) is not bool:
-            self._refuse("invalid_partial_fault_authorization")
         if not isinstance(proposed_writes, (list, tuple)) or (
                 len(proposed_writes) > MAX_EVENTS):
             self._refuse("unbounded_effect_ledger")
@@ -144,7 +144,7 @@ class GuestMemoryPublication:
             write_count=len(proposed_writes),
         )
         self._phase = "verified"
-        return self._verified
+        return True
 
     def publish(self):
         if self._phase != "verified" or self._verified is None:
