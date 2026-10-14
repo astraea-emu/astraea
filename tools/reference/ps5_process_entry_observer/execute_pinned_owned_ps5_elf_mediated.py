@@ -220,7 +220,14 @@ def execute_once(elf, regions, pages, relocations):
         require(ex.errno == UC_ERR_INSN_INVALID,
                 "wrong_guest_terminal_fault_kind")
     else:
-        raise ValueError("guest_UD2_did_not_raise_invalid_instruction")
+        # Report precise bounded engine state rather than treating a silent
+        # pre-fault stop as a typed terminal exception or altering the goal.
+        raise ValueError(
+            "guest_UD2_did_not_raise_invalid_instruction"
+            f": observed={observed!r}"
+            f" reads={attempted_reads!r} writes={attempted_writes!r}"
+            f" rip=0x{uc.reg_read(xr.UC_X86_REG_RIP):x}"
+            f" rax={uc.reg_read(xr.UC_X86_REG_RAX)}")
 
     require(observed == [(ENTRY, 5), (ENTRY + 5, 2)],
             "unexpected_source_guest_instruction_path")
