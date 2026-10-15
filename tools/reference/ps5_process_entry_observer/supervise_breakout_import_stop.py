@@ -13,6 +13,9 @@ from pathlib import Path
 import platform
 import resource
 import sys
+import tempfile
+
+from owned_landlock_fs_research import SENTINEL
 
 import compare_breakout_unicorn as oracle
 from owned_bounded_worker_io import capture_bounded
@@ -41,6 +44,9 @@ EXPECTED = (
     "native_outside_authored_execution=not_authorized",
     "kernel_denied_host_operations=open_socket_fork",
     "worker_seccomp_policy=partial_deny_not_full_sandbox",
+    "landlock_abi_min=3",
+    "landlock_denied_host_fs=open_write_unlink_mkdir",
+    "landlock_scope=filesystem_mutation_only_not_hostile_sandbox",
 )
 
 
@@ -73,7 +79,7 @@ def limits():
     resource.setrlimit(resource.RLIMIT_NOFILE, (32, 32))
 
 
-def one_run(elf_path, trace_path, *, tamper_got=False):
+def one_run(elf_path, trace_path, canary, *, tamper_got=False):
     command = [
         sys.executable, "-B", str(WORKER), str(elf_path),
         str(trace_path), "--budget", str(BUDGET), "--restricted-worker",
@@ -84,7 +90,8 @@ def one_run(elf_path, trace_path, *, tamper_got=False):
         command, timeout_seconds=12,
         stdout_limit=OUTPUT_LIMIT, stderr_limit=ERROR_LIMIT,
         preexec_fn=limits,
-        env={"PYTHONHASHSEED": "0", "PYTHONDONTWRITEBYTECODE": "1"},
+        env={"PYTHONHASHSEED": "0", "PYTHONDONTWRITEBYTECODE": "1",
+             "ASTRAEA_C1_FS_CANARY": str(canary)},
     )
     demand(result.returncode == 0,
            "mediated_breakout_worker_nonzero:" + str(result.returncode) +
@@ -103,9 +110,18 @@ def run(elf_path, trace_path, *, tamper_got=False):
     demand(sys.platform == "linux" and platform.machine() == "x86_64",
            "linux_x86_64_only")
     preflight(elf_path, trace_path)
-    first = one_run(elf_path, trace_path, tamper_got=tamper_got)
-    second = one_run(elf_path, trace_path, tamper_got=tamper_got)
-    demand(first == second, "supervised_breakout_fresh_runs_diverged")
+    with tempfile.TemporaryDirectory(prefix="astraea-c1-fs-canary-") as scratch:
+        canary = Path(scratch) / "owned-marker"
+        canary.write_bytes(SENTINEL)
+        first = one_run(elf_path, trace_path, canary, tamper_got=tamper_got)
+        demand(canary.read_bytes() == SENTINEL and
+               not Path(str(canary) + ".newdir").exists(),
+               "landlock_worker_mutated_controller_canary")
+        second = one_run(elf_path, trace_path, canary, tamper_got=tamper_got)
+        demand(canary.read_bytes() == SENTINEL and
+               not Path(str(canary) + ".newdir").exists(),
+               "landlock_worker_mutated_controller_canary")
+        demand(first == second, "supervised_breakout_fresh_runs_diverged")
     print("C1 SUPERVISED ORIGINAL BREAKOUT PREIMPORT PASS")
     print("source_sha256=" + oracle.PINNED_SHA256)
     print("source_owned_trace_reference=checked")
@@ -116,6 +132,8 @@ def run(elf_path, trace_path, *, tamper_got=False):
     print("bounded_worker_stdout_bytes=4096_max")
     print("bounded_worker_stderr_bytes=4096_max")
     print("limited_kernel_host_denials=verified_in_worker")
+    print("landlock_fs_mutation_denials=checked_before_seccomp")
+    print("controller_owned_fs_canary=unchanged_after_two_runs")
     print("fresh_worker_processes=2_byte_identical")
     print("controller_report_contract=exact_source_owned_shape")
     print("hostile_worker_report_authenticity=not_established")
