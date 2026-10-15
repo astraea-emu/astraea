@@ -43,7 +43,8 @@ def stop_source_identity(uc, ref):
     return original
 
 
-def run(original, ref, steps, mnemonics, budget, tamper_got=False):
+def run(original, ref, steps, mnemonics, budget, tamper_got=False,
+        restricted_worker=False):
     from unicorn import UC_HOOK_CODE, UC_HOOK_MEM_WRITE, UcError
 
     check(MIN_BUDGET <= budget <= MAX_BUDGET,
@@ -104,6 +105,18 @@ def run(original, ref, steps, mnemonics, budget, tamper_got=False):
 
     uc.hook_add(UC_HOOK_MEM_WRITE, on_write)
     uc.hook_add(UC_HOOK_CODE, on_instruction)
+    if restricted_worker:
+        # Limit specific real host effects immediately before mediated
+        # execution. This does NOT authenticate a malicious worker, guard
+        # unlisted syscalls or permit source ELF to run host-natively.
+        from owned_mediated_worker_confinement import (
+            install_research_filter, denied_host_probes,
+        )
+        install_research_filter()
+        checked_denials = denied_host_probes()
+        check(checked_denials == [
+            "open:EPERM", "socket:EPERM", "fork:EPERM",
+        ], "kernel host-denial probe changed")
     try:
         uc.emu_start(ref["entry"], 0, timeout=0, count=budget)
     except UcError as exc:
@@ -161,6 +174,9 @@ def run(original, ref, steps, mnemonics, budget, tamper_got=False):
     print("guest_stack=full_4096_bytes_checked")
     print("sony_provider_binding=unverified")
     print("native_outside_authored_execution=not_authorized")
+    if restricted_worker:
+        print("kernel_denied_host_operations=open_socket_fork")
+        print("worker_seccomp_policy=partial_deny_not_full_sandbox")
 
 
 def main():
@@ -169,6 +185,8 @@ def main():
     parser.add_argument("astraea_trace")
     parser.add_argument("--budget", type=int, default=32)
     parser.add_argument("--test-tamper-got", action="store_true")
+    parser.add_argument("--restricted-worker", action="store_true",
+                        help="research-only limited host syscall denial")
     args = parser.parse_args()
     try:
         elf = Path(args.original_elf).read_bytes()
@@ -178,7 +196,8 @@ def main():
         check(ref["stop_rip"] == STOP_RIP and
               steps[RETIRED - 1][1] == STOP_RIP,
               "source-backed stopped import identity drift")
-        run(elf, ref, steps, mnemonics, args.budget, args.test_tamper_got)
+        run(elf, ref, steps, mnemonics, args.budget, args.test_tamper_got,
+            args.restricted_worker)
     except (ValueError, OSError, IndexError, KeyError, struct.error) as exc:
         print("C1 MEDIATED BREAKOUT IMPORT STOP REFUSED: " + str(exc),
               file=sys.stderr)
