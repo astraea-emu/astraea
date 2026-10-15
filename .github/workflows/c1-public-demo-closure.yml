@@ -1154,6 +1154,74 @@ jobs:
           print("C1 BREAKOUT IMPORT STOP SOURCE/GOT/BUDGET NEGATIVES PASS")
           PY
 
+      # Execute the unchanged, pinned independently authored Breakout ELF
+      # through the research mediated x86 backend INSIDE the bounded child
+      # supervisor. The first unresolved imported CALL remains unexecuted.
+      - name: Supervise pinned Breakout import stop behind bounded child gate
+        run: |
+          set -euo pipefail
+          script="tools/reference/ps5_process_entry_observer/supervise_breakout_import_stop.py"
+          python3 -m py_compile "$script" \
+            tools/reference/ps5_process_entry_observer/stop_breakout_unresolved_import.py
+          original="$RUNNER_TEMP/sharpemu-demo-eboot.elf"
+          trace="$RUNNER_TEMP/c1-breakout-reference-trace.txt"
+          candidate="$RUNNER_TEMP/astraea-unicorn-c1-venv/bin/python"
+          "$candidate" "$script" "$original" "$trace" |
+            tee "$RUNNER_TEMP/c1-supervised-original-breakout.txt"
+          for claim in \
+            "C1 SUPERVISED ORIGINAL BREAKOUT PREIMPORT PASS" \
+            "source_sha256=05c414993d1cd9e7182bbf5647be1ffad72c6ed6b6f5399d01af27281fef48b8" \
+            "source_owned_trace_reference=checked" \
+            "first_import_call_retired=0" \
+            "stop_guest_rip=0x23c" \
+            "stop_guest_got=0x68c8" \
+            "guest_write_effects=10_source_backed" \
+            "bounded_worker_stdout_bytes=4096_max" \
+            "bounded_worker_stderr_bytes=4096_max" \
+            "limited_kernel_host_denials=verified_in_worker" \
+            "fresh_worker_processes=2_byte_identical" \
+            "controller_report_contract=exact_source_owned_shape" \
+            "hostile_worker_report_authenticity=not_established" \
+            "external_unicorn=research_only" \
+            "native_breakout_entry=none" \
+            "sony_services_executed=0" \
+            "commercial_ps5_instructions_executed=0"; do
+            grep -Fx "$claim" "$RUNNER_TEMP/c1-supervised-original-breakout.txt"
+          done
+          "$candidate" - <<'PY'
+          import os
+          from pathlib import Path
+          import subprocess
+          import sys
+          root = Path(os.environ["RUNNER_TEMP"])
+          original = root / "sharpemu-demo-eboot.elf"
+          trace = root / "c1-breakout-reference-trace.txt"
+          script = Path("tools/reference/ps5_process_entry_observer/supervise_breakout_import_stop.py")
+
+          def refuse(args, why):
+              completed = subprocess.run(
+                  [sys.executable, str(script), *map(str, args)],
+                  capture_output=True, text=True, timeout=25, check=False)
+              if (completed.returncode == 0 or
+                      "C1 SUPERVISED BREAKOUT REFUSED" not in completed.stderr):
+                  raise SystemExit("supervisor admitted: " + why)
+
+          mutate = bytearray(original.read_bytes())
+          mutate[0] ^= 1
+          changed = root / "negative-supervised-breakout.elf"
+          changed.write_bytes(mutate)
+          refuse([changed, trace], "altered independently authored ELF")
+          altered_trace = root / "negative-supervised-breakout-trace.txt"
+          source = trace.read_text()
+          if source.count("c1trace.stop_rip=0x23c") != 1:
+              raise SystemExit("unexpected authentic trace format")
+          altered_trace.write_text(source.replace(
+              "c1trace.stop_rip=0x23c", "c1trace.stop_rip=0x240", 1))
+          refuse([original, altered_trace], "altered source-backed trace")
+          refuse([original, trace, "--test-tamper-got"], "altered unresolved GOT")
+          print("C1 SUPERVISED BREAKOUT SOURCE/TRACE/GOT NEGATIVES PASS")
+          PY
+
       # Safe against using any proprietary game bytes in public CI. The
       # fixture consists only of source-owned, mocked metadata reports.
       - name: Verify local first-title C0 baseline is repeatable and redacted
