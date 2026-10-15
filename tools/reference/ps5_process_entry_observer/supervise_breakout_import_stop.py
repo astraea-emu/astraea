@@ -61,7 +61,7 @@ def preflight(elf_path, trace_path):
     ref, steps, _mnemonics = oracle.parse_reference(trace)
     demand(ref["stop_rip"] == 0x23c and
            ref["unresolved_got"] == 0x68c8 and
-           steps[-1][1] == 0x23c,
+           steps[12][1] == 0x23c,
            "reviewed_breakout_import_stop_identity_drift")
 
 
