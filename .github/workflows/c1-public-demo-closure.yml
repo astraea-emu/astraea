@@ -1179,6 +1179,8 @@ jobs:
             "bounded_worker_stdout_bytes=4096_max" \
             "bounded_worker_stderr_bytes=4096_max" \
             "limited_kernel_host_denials=verified_in_worker" \
+            "landlock_fs_mutation_denials=checked_before_seccomp" \
+            "controller_owned_fs_canary=unchanged_after_two_runs" \
             "fresh_worker_processes=2_byte_identical" \
             "controller_report_contract=exact_source_owned_shape" \
             "hostile_worker_report_authenticity=not_established" \
@@ -1219,7 +1221,20 @@ jobs:
               "c1trace.stop_rip=0x23c", "c1trace.stop_rip=0x240", 1))
           refuse([original, altered_trace], "altered source-backed trace")
           refuse([original, trace, "--test-tamper-got"], "altered unresolved GOT")
+
+          # No source-owned canary authority means restricted-worker MUST
+          # refuse; never quietly degrade to seccomp-only execution.
+          child = Path("tools/reference/ps5_process_entry_observer/stop_breakout_unresolved_import.py")
+          direct = subprocess.run(
+              [sys.executable, str(child), str(original), str(trace),
+               "--budget", "32", "--restricted-worker"],
+              capture_output=True, text=True, timeout=20, check=False,
+              env={"PYTHONDONTWRITEBYTECODE": "1"})
+          if (direct.returncode == 0 or
+                  "landlock_owned_canary_required" not in direct.stderr):
+              raise SystemExit("restricted Breakout admitted without FS canary")
           print("C1 SUPERVISED BREAKOUT SOURCE/TRACE/GOT NEGATIVES PASS")
+          print("C1 LANDLOCK MISSING-CANARY REFUSAL PASS")
           PY
 
       # Safe against using any proprietary game bytes in public CI. The
