@@ -109,9 +109,12 @@ def run(original, ref, steps, mnemonics, budget, tamper_got=False,
         # Limit specific real host effects immediately before mediated
         # execution. This does NOT authenticate a malicious worker, guard
         # unlisted syscalls or permit source ELF to run host-natively.
+        from owned_landlock_fs_research import qualify_mutation_denials
         from owned_mediated_worker_confinement import (
             install_research_filter, denied_host_probes,
         )
+        canary = __import__("os").environ.get("ASTRAEA_C1_FS_CANARY", "")
+        landlock_abi = qualify_mutation_denials(canary)
         install_research_filter()
         checked_denials = denied_host_probes()
         check(checked_denials == [
@@ -177,6 +180,9 @@ def run(original, ref, steps, mnemonics, budget, tamper_got=False,
     if restricted_worker:
         print("kernel_denied_host_operations=open_socket_fork")
         print("worker_seccomp_policy=partial_deny_not_full_sandbox")
+        print("landlock_abi_min=3")
+        print("landlock_denied_host_fs=open_write_unlink_mkdir")
+        print("landlock_scope=filesystem_mutation_only_not_hostile_sandbox")
 
 
 def main():
