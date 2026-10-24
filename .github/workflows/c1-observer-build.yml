@@ -49,7 +49,10 @@ jobs:
         env:
           PINNED_BLACKBEAR: 2f672d1c2f508e26f82ce6e27cef289a0861413c
         run: |
-          git clone https://github.com/blackbearreloaded/ps5-native-app-boilerplate.git \
+          # The original upstream disappeared from public GitHub. This
+          # public archive has the *identical* pinned commit as main HEAD;
+          # never accept a changed commit/tree just because clone succeeds.
+          git clone https://github.com/StonedModder/ps5-native-app-boilerplate.git \
             "$RUNNER_TEMP/ps5-native-app-boilerplate"
           git -C "$RUNNER_TEMP/ps5-native-app-boilerplate" \
             checkout --detach "$PINNED_BLACKBEAR"
