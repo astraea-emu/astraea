@@ -189,6 +189,12 @@ def run(original, ref, steps, mnemonics, budget, tamper_got=False,
     print("guest_stack=full_4096_bytes_checked")
     print("sony_provider_binding=unverified")
     print("native_outside_authored_execution=not_authorized")
+    if restricted_worker:
+        print("kernel_denied_host_operations=open_socket_fork")
+        print("worker_seccomp_policy=partial_deny_not_full_sandbox")
+        print("landlock_abi_min=3")
+        print("landlock_denied_host_fs=open_write_unlink_mkdir")
+        print("landlock_scope=filesystem_mutation_only_not_hostile_sandbox")
     # The imported CALL has not retired. These register values come from the
     # explicitly synthetic first-entry context and require independent ABI
     # evidence before any PS5 service dispatch or guest resume.
@@ -196,12 +202,6 @@ def run(original, ref, steps, mnemonics, budget, tamper_got=False,
     if tamper_caller_report:
         caller_for_report["rdi"] ^= 1
     print(caller_state_claim(caller_for_report))
-    if restricted_worker:
-        print("kernel_denied_host_operations=open_socket_fork")
-        print("worker_seccomp_policy=partial_deny_not_full_sandbox")
-        print("landlock_abi_min=3")
-        print("landlock_denied_host_fs=open_write_unlink_mkdir")
-        print("landlock_scope=filesystem_mutation_only_not_hostile_sandbox")
 
 
 def main():
