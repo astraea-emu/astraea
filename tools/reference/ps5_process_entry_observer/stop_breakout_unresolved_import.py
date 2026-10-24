@@ -21,6 +21,18 @@ STOP_RIP = 0x23C
 FIRST_GOT = 0x68C8
 MIN_BUDGET = RETIRED + 1
 MAX_BUDGET = 64
+CALLER_STATE_REGISTERS = ("rdi", "rsi", "rdx", "rcx", "r8", "r9", "rsp")
+
+
+def caller_state_claim(context):
+    """Research-only observed caller state, not a verified Sony service ABI."""
+    check(all(name in context and isinstance(context[name], int) and
+              0 <= context[name] < (1 << 64)
+              for name in CALLER_STATE_REGISTERS),
+          "invalid pre-import caller register state")
+    return "stop_observed_caller_state_v1=" + ",".join(
+        f"{name}:0x{context[name]:016x}" for name in CALLER_STATE_REGISTERS)
+
 
 
 def check(condition, reason):
@@ -44,7 +56,7 @@ def stop_source_identity(uc, ref):
 
 
 def run(original, ref, steps, mnemonics, budget, tamper_got=False,
-        restricted_worker=False):
+        restricted_worker=False, tamper_caller_report=False):
     from unicorn import UC_HOOK_CODE, UC_HOOK_MEM_WRITE, UcError
 
     check(MIN_BUDGET <= budget <= MAX_BUDGET,
@@ -177,6 +189,13 @@ def run(original, ref, steps, mnemonics, budget, tamper_got=False,
     print("guest_stack=full_4096_bytes_checked")
     print("sony_provider_binding=unverified")
     print("native_outside_authored_execution=not_authorized")
+    # The imported CALL has not retired. These register values come from the
+    # explicitly synthetic first-entry context and require independent ABI
+    # evidence before any PS5 service dispatch or guest resume.
+    caller_for_report = dict(before_call)
+    if tamper_caller_report:
+        caller_for_report["rdi"] ^= 1
+    print(caller_state_claim(caller_for_report))
     if restricted_worker:
         print("kernel_denied_host_operations=open_socket_fork")
         print("worker_seccomp_policy=partial_deny_not_full_sandbox")
@@ -191,6 +210,7 @@ def main():
     parser.add_argument("astraea_trace")
     parser.add_argument("--budget", type=int, default=32)
     parser.add_argument("--test-tamper-got", action="store_true")
+    parser.add_argument("--test-tamper-caller-report", action="store_true")
     parser.add_argument("--restricted-worker", action="store_true",
                         help="research-only limited host syscall denial")
     args = parser.parse_args()
@@ -203,7 +223,7 @@ def main():
               steps[RETIRED - 1][1] == STOP_RIP,
               "source-backed stopped import identity drift")
         run(elf, ref, steps, mnemonics, args.budget, args.test_tamper_got,
-            args.restricted_worker)
+            args.restricted_worker, args.test_tamper_caller_report)
     except (ValueError, OSError, IndexError, KeyError, struct.error) as exc:
         print("C1 MEDIATED BREAKOUT IMPORT STOP REFUSED: " + str(exc),
               file=sys.stderr)
