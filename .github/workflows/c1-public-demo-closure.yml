@@ -376,11 +376,11 @@ jobs:
               "duplicated_symbol": (r"(?m)^symbol\[1\]\.name_hex=[0-9a-f]*$",
                                     "symbol[1].name_hex=" + "61" * 11 +
                                     "\nsymbol[1].name_hex=" + "61" * 11),
-              "first_import_changed_target": (
-                   r"(?m)^relocation\\[13\\]\\.target=0x68c8$",
+               "first_import_changed_target": (
+                   r"(?m)^relocation\[13\]\.target=0x68c8$",
                    "relocation[13].target=0x68c0"),
                "first_import_changed_symbol": (
-                   r"(?m)^relocation\\[13\\]\\.symbol_index=13$",
+                   r"(?m)^relocation\[13\]\.symbol_index=13$",
                    "relocation[13].symbol_index=12"),
                "unmapped_target": (r"(?m)^relocation\[1\]\.target=0x[0-9a-f]+$",
                                   "relocation[1].target=0xffffffffffffffff"),
