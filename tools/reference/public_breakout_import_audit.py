@@ -168,6 +168,33 @@ def verify_manifest(
     return dict(modules)
 
 
+def verify_first_import_demand(
+    authored: dict[str, tuple[str, str]], manifest: str
+) -> None:
+    """Freeze the first *observed* Breakout dependency, not Sony HLE behavior.
+
+    Its short NID and author-supplied source-level labels are distinct from a
+    PS5 module/library binding or authenticated Sony function semantics.
+    """
+    nid = "Vo5V8KAwCmk"
+    if authored.get(nid) != (
+        "libSceSystemService", "sceSystemServiceHideSplashScreen"
+    ):
+        raise AuditFailure("first_import_author_declaration_drift")
+    rows = manifest_records(manifest)
+    if decode_hex(rows["symbol"].get(13, {}).get("name_hex", "X")) != nid:
+        raise AuditFailure("first_import_symbol_identity_drift")
+    matches = [
+        (index, row) for index, row in rows["relocation"].items()
+        if row.get("target") == "0x68c8"
+    ]
+    if len(matches) != 1 or matches[0][0] != 13:
+        raise AuditFailure("first_import_got_not_unique")
+    _, row = matches[0]
+    if row.get("type") != "6" or row.get("symbol_index") != "13":
+        raise AuditFailure("first_import_relocation_symbol_drift")
+
+
 def checked_loads(elf: bytes) -> list[tuple[int, int, int]]:
     """Inspect file-backed PT_LOAD bounds without loading or executing it."""
     if hashlib.sha256(elf).hexdigest() != PINNED_BREAKOUT_ELF_SHA256:
@@ -263,6 +290,7 @@ def main() -> int:
         authored = parse_author_imports(source.decode("utf-8"))
         manifest_text = manifest.decode("utf-8")
         counts = verify_manifest(authored, manifest_text)
+        verify_first_import_demand(authored, manifest_text)
         loads = checked_loads(elf)
         relative_count, glob_dat_count = verify_relocation_write_extents(
             manifest_text, loads
@@ -294,6 +322,13 @@ def main() -> int:
     print("native_guest_entry=blocked_by_source_rwx_load")
     for module in sorted(counts):
         print(f"author_declared_{module}={counts[module]}")
+    print("first_observed_import_nid=Vo5V8KAwCmk")
+    print("first_observed_import_guest_got=0x68c8")
+    print("first_import_author_declared_library=libSceSystemService")
+    print("first_import_author_declared_function=sceSystemServiceHideSplashScreen")
+    print("first_import_platform_provider=unverified")
+    print("first_import_service_effects=unverified")
+    print("first_import_call_retired=0")
     print("sony_export_resolution=not_attempted")
     print("import_application=not_attempted")
     print("guest_instructions=0")
