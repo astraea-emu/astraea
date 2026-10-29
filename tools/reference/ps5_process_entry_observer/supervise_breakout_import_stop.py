@@ -50,6 +50,21 @@ EXPECTED = (
 )
 
 
+CALLER_STATE_REGISTERS = ("rdi", "rsi", "rdx", "rcx", "r8", "r9", "rsp")
+
+
+def expected_caller_state_claim(trace_path):
+    """Derive an expected claim from the independent thirteen-step trace."""
+    _ref, steps, _mnemonics = oracle.parse_reference(trace_path)
+    registers = dict(zip(oracle.FIELDS, steps[12][4]))
+    demand(all(name in registers and 0 <= registers[name] < (1 << 64)
+               for name in CALLER_STATE_REGISTERS),
+           "invalid_source_reference_caller_state")
+    return "stop_observed_caller_state_v1=" + ",".join(
+        f"{name}:0x{registers[name]:016x}"
+        for name in CALLER_STATE_REGISTERS)
+
+
 def demand(ok, why):
     if not ok:
         raise ValueError(why)
@@ -79,13 +94,16 @@ def limits():
     resource.setrlimit(resource.RLIMIT_NOFILE, (32, 32))
 
 
-def one_run(elf_path, trace_path, canary, *, tamper_got=False):
+def one_run(elf_path, trace_path, canary, *, tamper_got=False,
+            tamper_caller_report=False):
     command = [
         sys.executable, "-B", str(WORKER), str(elf_path),
         str(trace_path), "--budget", str(BUDGET), "--restricted-worker",
     ]
     if tamper_got:
         command.append("--test-tamper-got")
+    if tamper_caller_report:
+        command.append("--test-tamper-caller-report")
     result = capture_bounded(
         command, timeout_seconds=12,
         stdout_limit=OUTPUT_LIMIT, stderr_limit=ERROR_LIMIT,
@@ -101,23 +119,26 @@ def one_run(elf_path, trace_path, canary, *, tamper_got=False):
         lines = result.stdout.decode("ascii").splitlines()
     except UnicodeDecodeError as exc:
         raise ValueError("non_ascii_breakout_worker_report") from exc
-    demand(tuple(lines) == EXPECTED,
+    demand(tuple(lines) == EXPECTED + (expected_caller_state_claim(trace_path),),
            "unverified_or_forged_breakout_worker_report")
     return result.stdout
 
 
-def run(elf_path, trace_path, *, tamper_got=False):
+def run(elf_path, trace_path, *, tamper_got=False,
+        tamper_caller_report=False):
     demand(sys.platform == "linux" and platform.machine() == "x86_64",
            "linux_x86_64_only")
     preflight(elf_path, trace_path)
     with tempfile.TemporaryDirectory(prefix="astraea-c1-fs-canary-") as scratch:
         canary = Path(scratch) / "owned-marker"
         canary.write_bytes(SENTINEL)
-        first = one_run(elf_path, trace_path, canary, tamper_got=tamper_got)
+        first = one_run(elf_path, trace_path, canary, tamper_got=tamper_got,
+                        tamper_caller_report=tamper_caller_report)
         demand(canary.read_bytes() == SENTINEL and
                not Path(str(canary) + ".newdir").exists(),
                "landlock_worker_mutated_controller_canary")
-        second = one_run(elf_path, trace_path, canary, tamper_got=tamper_got)
+        second = one_run(elf_path, trace_path, canary, tamper_got=tamper_got,
+                         tamper_caller_report=tamper_caller_report)
         demand(canary.read_bytes() == SENTINEL and
                not Path(str(canary) + ".newdir").exists(),
                "landlock_worker_mutated_controller_canary")
@@ -136,6 +157,7 @@ def run(elf_path, trace_path, *, tamper_got=False):
     print("controller_owned_fs_canary=unchanged_after_two_runs")
     print("fresh_worker_processes=2_byte_identical")
     print("controller_report_contract=exact_source_owned_shape")
+    print("preimport_caller_state=matched_independent_13_step_reference")
     print("hostile_worker_report_authenticity=not_established")
     print("external_unicorn=research_only")
     print("native_breakout_entry=none")
@@ -148,10 +170,12 @@ def main():
     parser.add_argument("original_elf")
     parser.add_argument("astraea_trace")
     parser.add_argument("--test-tamper-got", action="store_true")
+    parser.add_argument("--test-tamper-caller-report", action="store_true")
     args = parser.parse_args()
     try:
         run(args.original_elf, args.astraea_trace,
-            tamper_got=args.test_tamper_got)
+            tamper_got=args.test_tamper_got,
+            tamper_caller_report=args.test_tamper_caller_report)
     except (ValueError, OSError, IndexError, KeyError) as exc:
         print("C1 SUPERVISED BREAKOUT REFUSED: " + str(exc),
               file=sys.stderr)

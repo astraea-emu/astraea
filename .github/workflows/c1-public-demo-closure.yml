@@ -1183,6 +1183,7 @@ jobs:
             "controller_owned_fs_canary=unchanged_after_two_runs" \
             "fresh_worker_processes=2_byte_identical" \
             "controller_report_contract=exact_source_owned_shape" \
+            "preimport_caller_state=matched_independent_13_step_reference" \
             "hostile_worker_report_authenticity=not_established" \
             "external_unicorn=research_only" \
             "native_breakout_entry=none" \
@@ -1221,6 +1222,8 @@ jobs:
               "c1trace.stop_rip=0x23c", "c1trace.stop_rip=0x240", 1))
           refuse([original, altered_trace], "altered source-backed trace")
           refuse([original, trace, "--test-tamper-got"], "altered unresolved GOT")
+          refuse([original, trace, "--test-tamper-caller-report"],
+                 "forged pre-import caller state")
 
           # No source-owned canary authority means restricted-worker MUST
           # refuse; never quietly degrade to seccomp-only execution.
@@ -1235,6 +1238,7 @@ jobs:
               raise SystemExit("restricted Breakout admitted without FS canary")
           print("C1 SUPERVISED BREAKOUT SOURCE/TRACE/GOT NEGATIVES PASS")
           print("C1 LANDLOCK MISSING-CANARY REFUSAL PASS")
+          print("C1 PREIMPORT FORGED CALLER STATE REFUSAL PASS")
           PY
 
       # Safe against using any proprietary game bytes in public CI. The
