@@ -327,6 +327,16 @@ jobs:
             | tee "$RUNNER_TEMP/independent-breakout-import-identity.txt"
           grep -Fx "source_to_elf_nid_matches=19" \
             "$RUNNER_TEMP/independent-breakout-import-identity.txt"
+          for claim in \
+            "first_observed_import_nid=Vo5V8KAwCmk" \
+            "first_observed_import_guest_got=0x68c8" \
+            "first_import_author_declared_library=libSceSystemService" \
+            "first_import_author_declared_function=sceSystemServiceHideSplashScreen" \
+            "first_import_platform_provider=unverified" \
+            "first_import_service_effects=unverified" \
+            "first_import_call_retired=0"; do
+            grep -Fx "$claim" "$RUNNER_TEMP/independent-breakout-import-identity.txt"
+          done
           grep -Fx "sony_export_resolution=not_attempted" \
             "$RUNNER_TEMP/independent-breakout-import-identity.txt"
           grep -Fx "mapped_writable_glob_dat_targets=19" \
@@ -366,7 +376,13 @@ jobs:
               "duplicated_symbol": (r"(?m)^symbol\[1\]\.name_hex=[0-9a-f]*$",
                                     "symbol[1].name_hex=" + "61" * 11 +
                                     "\nsymbol[1].name_hex=" + "61" * 11),
-              "unmapped_target": (r"(?m)^relocation\[1\]\.target=0x[0-9a-f]+$",
+              "first_import_changed_target": (
+                   r"(?m)^relocation\\[13\\]\\.target=0x68c8$",
+                   "relocation[13].target=0x68c0"),
+               "first_import_changed_symbol": (
+                   r"(?m)^relocation\\[13\\]\\.symbol_index=13$",
+                   "relocation[13].symbol_index=12"),
+               "unmapped_target": (r"(?m)^relocation\[1\]\.target=0x[0-9a-f]+$",
                                   "relocation[1].target=0xffffffffffffffff"),
           }
           # Force one eight-byte write to overlap a different import's
